@@ -1,0 +1,58 @@
+# Secrets
+cloudbet_config.json
+proxy_config.json
+pinnacle_config.json
+.env
+
+# State files (contain API keys, bet IDs)
+oraculo_auto_state.json
+oraculo_auto_state.json.bak*
+
+# Backups
+*.bak
+*.bak_*
+*.bak[0-9]*
+
+# Cache
+.oraculo_cache/
+__pycache__/
+.pytest_cache/
+
+# Logs
+logs/
+*.log
+
+# Data
+predictions_log.jsonl
+llm_postmatch_log.jsonl
+roi_by_type.json
+calibration.json
+manual_bets.json
+
+# Generated
+dashboard.html
+picks/
+
+# Models (binary)
+models/
+models_enhanced/
+
+# IDE
+.claude/
+.code-review-graph/
+.mcp.json
+.opencode.json
+.cursorrules
+.windsurfrules
+CLAUDE.md
+GEMINI.md
+AGENTS.md
+
+# Obsidian
+Samael/
+
+# Presentations
+*.pptx
+
+# Tests
+tests/

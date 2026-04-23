@@ -1,0 +1,3567 @@
+"""
+Oraculo Autonomous Runner
+=========================
+24/7 autonomous betting system for Cloudbet.
+Scans football + tennis markets, places bets, settles results, syncs Obsidian.
+
+Usage:
+    python oraculo_runner_auto.py              # Run 24/7 loop
+    python oraculo_runner_auto.py --once       # Single scan cycle
+    python oraculo_runner_auto.py --status     # Show state
+    python oraculo_runner_auto.py --results    # Check/settle bets
+    python oraculo_runner_auto.py --dry-run    # Scan without placing
+
+Author: Oraculo ML System
+Date: 2026-03-22
+"""
+
+import os, sys, json, time, logging, argparse, uuid
+from datetime import datetime, timedelta
+from itertools import combinations
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+STATE_FILE = os.path.join(SCRIPT_DIR, 'oraculo_auto_state.json')
+OBSIDIAN_DIR = os.path.join(SCRIPT_DIR, 'Samael')
+LOG_DIR = os.path.join(SCRIPT_DIR, 'logs')
+os.makedirs(LOG_DIR, exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+log = logging.getLogger('oraculo_auto')
+log.setLevel(logging.INFO)
+_fmt = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s', '%Y-%m-%d %H:%M:%S')
+_ch = logging.StreamHandler()
+_ch.setFormatter(_fmt)
+log.addHandler(_ch)
+try:
+    from logging.handlers import RotatingFileHandler
+    _fh = RotatingFileHandler(
+        os.path.join(LOG_DIR, 'oraculo_auto.log'),
+        maxBytes=5*1024*1024, backupCount=5, encoding='utf-8')
+    _fh.setFormatter(_fmt)
+    log.addHandler(_fh)
+except Exception:
+    pass
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+SCAN_INTERVAL = 3600        # 1 hour between market scans
+RESULT_INTERVAL = 1800      # 30 min between result checks
+MIN_EDGE = 0.05             # 5% minimum edge
+MIN_CONF = 0.60             # 60% minimum confidence
+MAX_DAILY_PCT = 0.60        # 60% of bankroll per day
+MAX_PER_BET = 0.05          # 5% per bet
+KELLY_FRAC = 0.25           # Quarter Kelly
+MIN_STAKE = 0.50            # Minimum bet $0.50
+CIRCUIT_BREAKER = 10.0      # Stop if bankroll < $10
+LOSS_STREAK_LIMIT = 5       # Reduce stake after 5 consecutive losses
+LOSS_STREAK_FACTOR = 0.50   # Reduce to 50%
+MAX_BETS_PER_SCAN = 8       # Max bets placed per scan cycle
+MAX_PER_MATCH = 1           # Max 1 bet per match (avoid correlated exposure)
+MAX_EXPOSURE_PER_MATCH = 0.10  # Max 10% of bankroll on a single match
+MAX_EXPOSURE_PER_EVENT = 0.05  # Max 5% of bankroll per event_id (cross-cycle)
+MAX_TOTAL_EXPOSURE = 0.80     # Max 80% of bankroll in pending bets total
+TENNIS_BUDGET_RESERVE = 0.30  # Reserve 30% of daily budget for tennis
+PARLAY_MIN_LEGS = 3         # Min legs for tennis parlay
+PARLAY_MAX_LEGS = 4         # Max legs for tennis parlay
+PARLAY_MIN_CONF = 0.65      # Min confidence per parlay leg (tennis)
+TENNIS_PARLAY_STAKE_PCT = 0.05  # 5% of bankroll for tennis parlay
+
+STEAM_ENABLED = False          # Disable steam move betting (getting RESTRICTED by Cloudbet)
+CB_BASE = 'https://sports-api.cloudbet.com'
+
+# Markets (V3: no BTTS)
+LEAGUE_MARKETS = {
+    'PL': ['over25', 'over15', 'under35', 'corners_o95'],
+    'PD': ['over25', 'over15', 'under35', 'corners_o95'],
+    'SA': ['over25', 'over15', 'under35', 'corners_o95'],
+    'BL1': ['over25', 'over15', 'under35'],
+    'FL1': ['over25', 'over15', 'under35'],
+    'ELC': ['over25', 'over15'],
+    'DED': ['over25', 'over15'],
+    'PPL': ['over25', 'over15'],
+    'MLS': ['over25', 'over15'],
+    'LMX': ['over25', 'over15'],
+    'ARG': ['over25', 'over15'],
+    'BRA': ['over25', 'over15'],
+    'BEL': ['over25'],
+    'SWE': ['over25'],
+    'NOR': ['over25'],
+    'SWZ': ['over25'],
+    'BL2': ['over25'],
+    'SB':  ['over25'],
+    'FL2': ['over25'],
+    'PER': ['over25'],
+    'ESP2': ['over25'],
+    'BRA2': ['over25'],
+    'COL':  ['over25'],
+    'CHL':  ['over25'],
+    'URU':  ['over25'],
+}
+
+CB_COMPS = {
+    'PL': 'soccer-england-premier-league',
+    'PD': 'soccer-spain-la-liga',
+    'SA': 'soccer-italy-serie-a',
+    'BL1': 'soccer-germany-bundesliga',
+    'FL1': 'soccer-france-ligue-1',
+    'DED': 'soccer-netherlands-eredivisie',
+    'PPL': 'soccer-portugal-primeira-liga',
+    'ELC': 'soccer-england-championship',
+    'MLS': 'soccer-usa-mls',
+    'LMX': 'soccer-mexico-liga-mx',
+    'ARG': 'soccer-argentina-primera-division',
+    'BRA': 'soccer-brazil-serie-a',
+    'ESP2': 'soccer-spain-segunda-division',
+    'BRA2': 'soccer-brazil-serie-b',
+    'COL': 'soccer-colombia-primera-a',
+    'CHL': 'soccer-chile-primera-division',
+    'URU': 'soccer-uruguay-primera-division',
+}
+
+CB_TENNIS = [
+    # ATP Slams + Masters (current Cloudbet keys)
+    'tennis-atp-australian-open-men-singles-qual',
+    'tennis-atp-french-open-men-singles',
+    'tennis-atp-wimbledon-men-s-singles',
+    'tennis-atp-us-open-men-singles',
+    'tennis-atp-atp-miami-usa-men-singles',
+    'tennis-atp-t8bd9-grand-slam',
+    'tennis-atp-monte-carlo-men-singles',
+    'tennis-atp-barcelona-spain-men-singles',
+    'tennis-atp-madrid-spain-men-singles',
+    'tennis-atp-rome-italy-men-singles',
+    # WTA
+    'tennis-wta-wta-miami-usa-women-singles',
+    'tennis-wta-t8bda-grand-slam',
+    'tennis-wta-madrid-spain-women-singles',
+    # Challenger (high-quality data)
+    'tennis-challenger-atp-challenger-sarasota-usa-men-singles',
+    'tennis-challenger-t7e82-atp-challenger-madrid-spain-men-singles',
+    'tennis-challenger-atp-challenger-campinas-brazil-men-singles',
+]
+
+CB_MARKETS_MAP = {
+    'over25': ('soccer.total_goals', [('over', 'total=2.5'), ('under', 'total=2.5')]),
+    'over15': ('soccer.total_goals', [('over', 'total=1.5')]),
+    'under35': ('soccer.total_goals', [('under', 'total=3.5')]),
+    'corners_o95': ('soccer.total_corners', [('over', 'total=9.5')]),
+    'asian_handicap': ('soccer.asian_handicap', []),
+    'btts_yes':  ('soccer.both_teams_to_score', [('yes', '')]),
+    'btts_no':   ('soccer.both_teams_to_score', [('no', '')]),
+    'ou15_1h':   ('soccer.total_goals_period_first_half', [('over', 'total=0.5'), ('under', 'total=0.5')]),
+    'corners_h': ('soccer.corner_match_odds', [('home', ''), ('away', ''), ('draw', '')]),
+}
+
+# ---------------------------------------------------------------------------
+# Cloudbet API (dual auth: v2=Bearer, v4=X-API-Key)
+# ---------------------------------------------------------------------------
+import requests
+
+class CloudbetAPI:
+    def __init__(self):
+        cfg_path = os.path.join(SCRIPT_DIR, 'cloudbet_config.json')
+        with open(cfg_path) as f:
+            cfg = json.load(f)
+        self.api_key = cfg['api_key']
+        self.currency = cfg.get('currency', 'USDC')
+        # v2 session (Bearer token) for odds
+        self.v2 = requests.Session()
+        self.v2.headers.update({
+            'Authorization': f'Bearer {self.api_key}',
+            'Accept': 'application/json',
+        })
+        # v4 session (X-API-Key) for bets
+        self.v4 = requests.Session()
+        self.v4.headers.update({
+            'X-API-Key': self.api_key,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+        })
+
+    def get_odds(self, comp_key):
+        """Fetch events+odds for a competition (v2 Bearer)."""
+        try:
+            r = self.v2.get(f'{CB_BASE}/pub/v2/odds/competitions/{comp_key}', timeout=15)
+            if r.status_code == 200:
+                return r.json().get('events', [])
+        except Exception as e:
+            log.debug('Odds fetch failed %s: %s', comp_key, e)
+        return []
+
+    def place_straight(self, event_id, market_url, price, stake):
+        """Place single bet (v4 X-API-Key). Returns response dict or None."""
+        ref_id = str(uuid.uuid4())
+        payload = {
+            'referenceId': ref_id,
+            'currency': self.currency,
+            'stake': str(round(stake, 2)),
+            'acceptPartialStake': True,
+            'priceChange': {'value': 'ANY'},
+            'selection': {
+                'eventId': str(event_id),
+                'marketUrl': market_url,
+                'price': str(price),
+            },
+        }
+        max_reoffers = 1
+        reoffers = 0
+        for attempt in range(3):
+            backoff = 2 ** (attempt + 1)  # 2s, 4s, 8s
+            try:
+                r = self.v4.post(f'{CB_BASE}/pub/v4/bets/place/straight',
+                                 json=payload, timeout=10)
+                if not r.text or not r.text.strip():
+                    log.warning('  Empty response (HTTP %d), attempt %d, backoff %ds',
+                                r.status_code, attempt + 1, backoff)
+                    time.sleep(backoff)
+                    continue
+                try:
+                    resp = r.json()
+                except ValueError:
+                    log.warning('  Non-JSON response (HTTP %d), backoff %ds',
+                                r.status_code, backoff)
+                    time.sleep(backoff)
+                    continue
+
+                if resp.get('status') == 'INTERNAL_SERVER_ERROR' or resp.get('error'):
+                    log.warning('  API error: %s, backoff %ds',
+                                resp.get('error', '?'), backoff)
+                    time.sleep(backoff)
+                    continue
+
+                st = resp.get('state', resp.get('status', ''))
+                if st in ('ACCEPTED', 'PENDING_ACCEPTANCE'):
+                    log.info('  Bet ACCEPTED: %s', resp.get('betId', '')[:12])
+                    return resp
+                reoffer = resp.get('selection', {}).get('reofferPrice')
+                if reoffer and reoffers < max_reoffers:
+                    reoffers += 1
+                    log.info('  Price reoffer to %s, accepting...', reoffer)
+                    payload['selection']['price'] = str(reoffer)
+                    payload['referenceId'] = str(uuid.uuid4())
+                    time.sleep(1.5)
+                    continue
+                err = resp.get('error', resp.get('message', st))
+                log.warning('  Bet rejected: %s | full_resp: %s', err, str(resp)[:800])
+                if resp.get('rejectionCode') == 'RESTRICTED' or resp.get('selection', {}).get('rejectionCode') == 'RESTRICTED':
+                    return {'RESTRICTED': True, 'event_id': str(event_id), 'market_url': market_url}
+                return None
+            except Exception as e:
+                log.error('  Bet placement error: %s', e)
+                time.sleep(backoff)
+        log.warning('  All 3 attempts exhausted for %s', market_url[:40])
+        return None
+
+    def place_parlay(self, selections, stake):
+        """Place multi-leg parlay (v4). selections=[{eventId, marketUrl, price}]."""
+        ref_id = str(uuid.uuid4())
+        payload = {
+            'referenceId': ref_id,
+            'currency': self.currency,
+            'stake': str(round(stake, 2)),
+            'acceptPartialStake': True,
+            'priceChange': {'value': 'ANY'},
+            'selections': [
+                {'eventId': str(s['eventId']), 'marketUrl': s['marketUrl'],
+                 'price': str(s['price'])}
+                for s in selections
+            ],
+        }
+        try:
+            r = self.v4.post(f'{CB_BASE}/pub/v4/bets/place/multiple',
+                             json=payload, timeout=10)
+            if not r.text or not r.text.strip():
+                log.warning('Parlay empty response (HTTP %d)', r.status_code)
+                return None
+            try:
+                resp = r.json()
+            except ValueError:
+                log.warning('Parlay non-JSON response: %s', r.text[:100])
+                return None
+            st = resp.get('state', resp.get('status', ''))
+            if st in ('ACCEPTED', 'PENDING_ACCEPTANCE'):
+                log.info('  Parlay ACCEPTED: %s', resp.get('betId', '')[:12])
+                return resp
+            # Handle reoffer
+            reoffer_sels = resp.get('selections', [])
+            has_reoffer = any(s.get('reofferPrice') for s in reoffer_sels)
+            if has_reoffer:
+                new_sels = []
+                for orig, reoff in zip(payload['selections'], reoffer_sels):
+                    rp = reoff.get('reofferPrice', orig['price'])
+                    new_sels.append({'eventId': orig['eventId'],
+                                     'marketUrl': orig['marketUrl'],
+                                     'price': str(rp)})
+                payload['selections'] = new_sels
+                payload['referenceId'] = str(uuid.uuid4())
+                log.info('  Parlay reoffer, retrying...')
+                time.sleep(1.5)
+                try:
+                    r2 = self.v4.post(f'{CB_BASE}/pub/v4/bets/place/multiple',
+                                      json=payload, timeout=10)
+                    resp2 = r2.json()
+                    st2 = resp2.get('state', resp2.get('status', ''))
+                    if st2 in ('ACCEPTED', 'PENDING_ACCEPTANCE'):
+                        log.info('  Parlay ACCEPTED on reoffer: %s', resp2.get('betId', '')[:12])
+                        return resp2
+                    log.warning('  Parlay rejected after reoffer: %s', resp2.get('error', st2))
+                except Exception as e2:
+                    log.error('  Parlay reoffer error: %s', e2)
+                return None
+            log.warning('Parlay rejected: %s', resp.get('error', st))
+        except Exception as e:
+            log.error('Parlay error: %s', e)
+        return None
+
+    def get_bets(self, settled_only=False, limit=50, days_back=30):
+        """Get bet history (v4 X-API-Key). Looks back `days_back` days."""
+        params = {'limit': limit}
+        if settled_only:
+            params['isSettled'] = 'true'
+        from_dt = (datetime.now(tz=None) - timedelta(days=days_back)).strftime('%Y-%m-%dT00:00:00Z')
+        params['from'] = from_dt
+        try:
+            r = self.v4.get(f'{CB_BASE}/pub/v4/bets', params=params, timeout=15)
+            if r.status_code == 200:
+                data = r.json() if r.text.strip() else {}
+                return data.get('items', [])
+            log.warning('Get bets HTTP %d: %s', r.status_code, r.text[:200] if r.text else '')
+        except Exception as e:
+            log.error('Get bets error: %s', e)
+        return []
+
+# ---------------------------------------------------------------------------
+# State management
+# ---------------------------------------------------------------------------
+def load_state():
+    default = {
+        'bankroll': 63.0, 'daily_staked': 0.0, 'daily_date': '',
+        'last_scan': '', 'last_result_check': '',
+        'active_bets': [], 'settled_today': [],
+        'daily_pnl': 0.0, 'total_pnl': 42.83,
+        'wins': 13, 'losses': 1, 'consecutive_losses': 0,
+        'bets_placed_today': 0,
+        'bankroll_by_currency': {'USDC': 39.98, 'USDT': 26.0},
+    }
+    try:
+        with open(STATE_FILE) as f:
+            state = json.load(f)
+        for k, v in default.items():
+            state.setdefault(k, v)
+        # Restore persisted strategy params
+        global MAX_TOTAL_EXPOSURE, MIN_EDGE, MIN_CONF
+        if 'persisted_max_exposure' in state:
+            MAX_TOTAL_EXPOSURE = round(float(state['persisted_max_exposure']), 2)
+        # Daily reset
+        today = datetime.now().strftime('%Y-%m-%d')
+        if state.get('daily_date') != today:
+            state['daily_staked'] = 0.0
+            state['daily_pnl'] = 0.0
+            state['settled_today'] = []
+            state['bets_placed_today'] = 0
+            state['daily_date'] = today
+            state['football_parlay_placed_today'] = False
+            state['mixed_parlay_placed_today'] = False
+            state['tennis_parlay_placed_today'] = False
+            _rejected_keys.clear()
+            state["restricted_event_ids"] = []  # Reset daily - stale events cause silent skips
+        return state
+    except Exception:
+        default['daily_date'] = datetime.now().strftime('%Y-%m-%d')
+        return default
+
+def save_state(state):
+    state['updated'] = datetime.now().isoformat()
+    with open(STATE_FILE, 'w') as f:
+        json.dump(state, f, indent=2, default=str)
+
+def reconcile_engine_state():
+    """Sync picks/engine_state.json pending bets into auto state.
+    The old bet_engine had its own state file — import any pending bets once."""
+    engine_path = os.path.join(SCRIPT_DIR, 'picks', 'engine_state.json')
+    marker_path = os.path.join(SCRIPT_DIR, 'picks', '.reconciled')
+    if os.path.exists(marker_path) or not os.path.exists(engine_path):
+        return
+    try:
+        with open(engine_path) as f:
+            eng = json.load(f)
+        pending = [b for b in eng.get('active_bets', []) if b.get('status') == 'PENDING']
+        if not pending:
+            # Mark reconciled
+            with open(marker_path, 'w') as f:
+                f.write(datetime.now().isoformat())
+            return
+        state = load_state()
+        existing_ids = {b.get('bet_id') for b in state.get('active_bets', [])}
+        imported = 0
+        for b in pending:
+            bid = b.get('betId', b.get('bet_id', ''))
+            if bid in existing_ids:
+                continue
+            if _save_bet(state, bid, b.get('match','?'), b.get('market',''), 'soccer',
+                         b.get('odds',0), b.get('stake',0), source='engine_import'):
+                imported += 1
+        if imported:
+            save_state(state)
+            log.info('Reconciled %d pending bets from engine_state.json', imported)
+        with open(marker_path, 'w') as f:
+            f.write(datetime.now().isoformat())
+    except Exception as e:
+        log.warning('Reconcile failed: %s', e)
+
+# ---------------------------------------------------------------------------
+# Kelly stake calculator
+# ---------------------------------------------------------------------------
+def _get_dynamic_kelly_fraction(base_frac=KELLY_FRAC, window=20):
+    """
+    Adjust Kelly fraction based on recent performance.
+    Uses last `window` settled bets from predictions_log.jsonl.
+
+    Recent ROI > +15%  -> increase Kelly to 0.35 (betting well)
+    Recent ROI  0-15%  -> keep base 0.25
+    Recent ROI -10-0%  -> reduce to 0.20 (be cautious)
+    Recent ROI < -10%  -> reduce to 0.15 (protect bankroll)
+    < 5 settled bets   -> use base (not enough data)
+    """
+    try:
+        if not os.path.exists(PREDICTIONS_FILE):
+            return base_frac
+        lines = open(PREDICTIONS_FILE).readlines()
+        settled = []
+        for ln in lines:
+            try:
+                e = json.loads(ln)
+                if e.get('result') in ('WIN', 'LOSS'):
+                    settled.append(e)
+            except Exception:
+                pass
+        recent = settled[-window:]
+        if len(recent) < 5:
+            return base_frac
+        total_staked = sum(float(b.get('stake', 0)) for b in recent)
+        total_pnl = sum(float(b.get('win_loss', 0)) for b in recent)
+        if total_staked <= 0:
+            return base_frac
+        recent_roi = total_pnl / total_staked
+        if recent_roi > 0.15:
+            frac = min(0.35, base_frac * 1.4)
+            log.info('  [Kelly] Recent ROI +%.1f%% -> Kelly %.2f (UP)', recent_roi*100, frac)
+        elif recent_roi > 0:
+            frac = base_frac
+        elif recent_roi > -0.10:
+            frac = max(0.20, base_frac * 0.80)
+            log.info('  [Kelly] Recent ROI %.1f%% -> Kelly %.2f (DOWN)', recent_roi*100, frac)
+        else:
+            frac = max(0.15, base_frac * 0.60)
+            log.info('  [Kelly] Recent ROI %.1f%% -> Kelly %.2f (PROTECT)', recent_roi*100, frac)
+        return round(frac, 3)
+    except Exception:
+        return base_frac
+
+
+
+def _auto_tune_strategy(state):
+    """
+    Auto-adjust strategy parameters based on recent performance.
+    Runs every cycle, reads predictions_log.jsonl for last N settled bets.
+    Adjusts: MIN_EDGE, MIN_CONF, MAX_PER_BET, MAX_TOTAL_EXPOSURE, MAX_BETS_PER_SCAN.
+    """
+    global MIN_EDGE, MIN_CONF, MAX_PER_BET, MAX_TOTAL_EXPOSURE, MAX_BETS_PER_SCAN
+    try:
+        if not os.path.exists(PREDICTIONS_FILE):
+            return
+        lines = open(PREDICTIONS_FILE).readlines()
+        settled = []
+        for ln in lines:
+            try:
+                e = json.loads(ln)
+                if e.get('result') in ('WIN', 'LOSS'):
+                    settled.append(e)
+            except Exception:
+                pass
+        if len(settled) < 10:
+            return  # Not enough data
+
+        recent = settled[-30:]  # Last 30 bets
+        wins = sum(1 for b in recent if b.get('result') == 'WIN')
+        losses = len(recent) - wins
+        win_rate = wins / len(recent)
+        total_staked = sum(float(b.get('stake', 0)) for b in recent)
+        total_pnl = sum(float(b.get('win_loss', 0)) for b in recent)
+        roi = total_pnl / total_staked if total_staked > 0 else 0
+
+        # Analyze edge accuracy: were high-edge bets actually winning more?
+        high_edge = [b for b in recent if float(b.get('edge', 0)) > 0.10]
+        low_edge = [b for b in recent if 0.05 <= float(b.get('edge', 0)) <= 0.10]
+        high_wr = sum(1 for b in high_edge if b.get('result') == 'WIN') / max(len(high_edge), 1)
+        low_wr = sum(1 for b in low_edge if b.get('result') == 'WIN') / max(len(low_edge), 1)
+
+        # Per-sport analysis
+        football = [b for b in recent if b.get('sport') == 'soccer']
+        tennis = [b for b in recent if b.get('sport') == 'tennis']
+        fb_wr = sum(1 for b in football if b.get('result') == 'WIN') / max(len(football), 1)
+        tn_wr = sum(1 for b in tennis if b.get('result') == 'WIN') / max(len(tennis), 1)
+
+        old_edge = MIN_EDGE
+        old_conf = MIN_CONF
+        old_exp = MAX_TOTAL_EXPOSURE
+
+        # --- AUTO-ADJUST RULES ---
+
+        # 1. MIN_EDGE: if low-edge bets lose too much, raise threshold
+        if low_wr < 0.45 and len(low_edge) >= 5:
+            MIN_EDGE = min(0.10, MIN_EDGE + 0.01)  # Raise edge bar
+        elif low_wr > 0.65 and len(low_edge) >= 5:
+            MIN_EDGE = max(0.03, MIN_EDGE - 0.01)  # Lower edge bar (capturing value)
+        else:
+            MIN_EDGE = 0.05  # Default
+
+        # 2. MIN_CONF: adjust based on overall win rate
+        if win_rate > 0.75:
+            MIN_CONF = max(0.55, MIN_CONF - 0.02)  # Can afford lower confidence
+        elif win_rate < 0.55:
+            MIN_CONF = min(0.70, MIN_CONF + 0.02)  # Be more selective
+        else:
+            MIN_CONF = 0.60  # Default
+
+        # 3. MAX_TOTAL_EXPOSURE: expand if winning, contract if losing
+        if roi > 0.15 and win_rate > 0.65:
+            MAX_TOTAL_EXPOSURE = min(1.50, MAX_TOTAL_EXPOSURE + 0.10)  # Let it ride
+        elif roi < -0.05:
+            MAX_TOTAL_EXPOSURE = max(0.50, MAX_TOTAL_EXPOSURE - 0.10)  # Pull back
+        else:
+            MAX_TOTAL_EXPOSURE = 0.80  # Default
+
+        # 4. MAX_PER_BET: scale with confidence
+        if roi > 0.10 and win_rate > 0.70:
+            MAX_PER_BET = min(0.08, 0.05 * 1.3)  # Increase sizing
+        elif roi < -0.10:
+            MAX_PER_BET = max(0.03, 0.05 * 0.70)  # Decrease sizing
+        else:
+            MAX_PER_BET = 0.05
+
+        # 5. MAX_BETS_PER_SCAN: more volume if profitable, less if not
+        if roi > 0.10:
+            MAX_BETS_PER_SCAN = 12
+        elif roi < -0.05:
+            MAX_BETS_PER_SCAN = 5
+        else:
+            MAX_BETS_PER_SCAN = 8
+
+        # Store tuning state for Obsidian/logging
+        state['_autotune'] = {
+            'win_rate': round(win_rate, 3),
+            'roi': round(roi, 3),
+            'high_edge_wr': round(high_wr, 3),
+            'low_edge_wr': round(low_wr, 3),
+            'fb_wr': round(fb_wr, 3),
+            'tn_wr': round(tn_wr, 3),
+            'sample_size': len(recent),
+            'min_edge': MIN_EDGE,
+            'min_conf': MIN_CONF,
+            'max_exposure': MAX_TOTAL_EXPOSURE,
+            'max_per_bet': MAX_PER_BET,
+            'max_bets_scan': MAX_BETS_PER_SCAN,
+        }
+
+        state['persisted_max_exposure'] = round(MAX_TOTAL_EXPOSURE, 2)
+        if MIN_EDGE != old_edge or MIN_CONF != old_conf or MAX_TOTAL_EXPOSURE != old_exp:
+            log.info('[AutoTune] WR=%.0f%% ROI=%+.1f%% -> edge=%.0f%% conf=%.0f%% exposure=%.0f%%',
+                     win_rate*100, roi*100, MIN_EDGE*100, MIN_CONF*100, MAX_TOTAL_EXPOSURE*100)
+
+        # Weekly backtest: optimize params from historical data
+        _bt_cache = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'backtest_results.json')
+        _run_bt = False
+        if os.path.exists(_bt_cache):
+            import time as _t
+            if _t.time() - os.path.getmtime(_bt_cache) > 604800:  # 7 days
+                _run_bt = True
+        else:
+            _run_bt = len(settled) >= 30
+
+        # Calibration report (also weekly)
+        try:
+            from oraculo_calibration import full_calibration_report
+            _cal = full_calibration_report()
+            if _cal:
+                state['_calibration'] = {
+                    'brier': _cal['overall']['brier_score'],
+                    'ece': _cal['overall']['ece'],
+                    'diagnosis': _cal.get('diagnosis', []),
+                }
+        except Exception:
+            pass
+
+        if _run_bt:
+            try:
+                from oraculo_backtest import Backtester
+                _bt = Backtester(initial_bankroll=11.37)
+                _bets = _bt.load_settled_bets()
+                if len(_bets) >= 20:
+                    _best = _bt.recommend_params(_bets)
+                    if _best:
+                        # Apply recommended params (blended 50% current + 50% backtest)
+                        MIN_EDGE = round((MIN_EDGE + _best.get('min_edge', MIN_EDGE)) / 2, 3)
+                        MIN_CONF = round((MIN_CONF + _best.get('min_conf', MIN_CONF)) / 2, 3)
+                        log.info('[Backtest] Recommended: edge=%.0f%% conf=%.0f%% kelly=%.2f',
+                                 _best.get('min_edge',0)*100, _best.get('min_conf',0)*100,
+                                 _best.get('kelly_frac',0.25))
+            except Exception as e:
+                log.debug('Backtest error: %s', e)
+
+    except Exception as e:
+        log.debug('AutoTune error: %s', e)
+
+def kelly_stake(bankroll, prob, odds, consecutive_losses=0):
+    """Dynamic Kelly with circuit breaker, loss streak, and recent ROI adaptation."""
+    if bankroll < CIRCUIT_BREAKER:
+        return 0
+    b = odds - 1
+    if b <= 0:
+        return 0
+    kelly = (b * prob - (1 - prob)) / b
+    dyn_frac = _get_dynamic_kelly_fraction()
+    kelly = max(0, kelly * dyn_frac)
+    kelly = min(kelly, MAX_PER_BET)
+    stake = bankroll * kelly
+    if consecutive_losses >= LOSS_STREAK_LIMIT:
+        stake *= LOSS_STREAK_FACTOR
+        log.info('  Loss streak %d: stake reduced to $%.2f', consecutive_losses, stake)
+    return max(round(stake, 2), 0) if stake >= MIN_STAKE else 0
+
+# ---------------------------------------------------------------------------
+# Football market scanner
+# ---------------------------------------------------------------------------
+def scan_football(api, state, dry_run=False):
+    _cal = _load_calibration()
+    """Scan Cloudbet soccer markets, find value bets."""
+    # Load enhanced data sources
+    _xg_data = None
+    try:
+        from oraculo_xg import load_xg_data, get_team_xg, xg_adjusted_prob, fetch_match_results, load_xg_data_v2
+        from oraculo_scrape_guard import guarded_fetch
+        # Primary: Firecrawl + Understat (real xG, no IP ban)
+        try:
+            from oraculo_xg_firecrawl import load_xg_firecrawl
+            _xg_data = load_xg_firecrawl()
+        except Exception as _e_fc:
+            log.warning('Firecrawl xG failed: %s', _e_fc)
+            _xg_data = None
+        else:
+            if _xg_data:
+                leagues = [k for k in _xg_data if not k.startswith('_')]
+                log.info('Firecrawl xG loaded: %d leagues (%s)', len(leagues), ', '.join(leagues))
+        if not _xg_data:
+            # Fallback: proxy-based FBref
+            try:
+                from oraculo_xg import load_xg_via_proxy
+                _xg_data = guarded_fetch('fbref_proxy', load_xg_via_proxy)
+            except Exception:
+                _xg_data = None
+        if not _xg_data:
+            _xg_data = guarded_fetch('xg_data', load_xg_data_v2)
+        if not _xg_data:
+            # Ultimate fallback: football-data.co.uk + goal-based pseudo-xG
+            from oraculo_xg import fetch_footballdata_results, build_xg_from_results
+            _fd_matches = guarded_fetch('footballdata', fetch_footballdata_results)
+            if _fd_matches:
+                _xg_data = build_xg_from_results(_fd_matches)
+                log.info('Using football-data.co.uk pseudo-xG (%d leagues)', len(_xg_data))
+        # Also fetch match results for Dixon-Coles training
+        try:
+            pass  # Results now fetched by load_xg_data_v2 via Understat
+        except Exception:
+            pass
+    except Exception as e:
+        log.debug('xG data unavailable: %s', e)
+
+    _dc_model = None
+    try:
+        from oraculo_dixon_coles import DixonColesModel
+        _dc_model = DixonColesModel()
+        if not _dc_model.load():
+            # Auto-train from xG cache (FBref match results)
+            _dc_matches = []
+            _xg_cache = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'xg_matches.json')
+            if os.path.exists(_xg_cache):
+                with open(_xg_cache) as f:
+                    _dc_matches = json.load(f)
+            if len(_dc_matches) >= 50:
+                _dc_model.train(_dc_matches)
+                _dc_model.save()
+                log.info('Dixon-Coles auto-trained from %d matches', len(_dc_matches))
+            else:
+                log.debug('Dixon-Coles: insufficient match data (%d < 50)', len(_dc_matches))
+                _dc_model = None
+    except Exception as e:
+        log.debug('Dixon-Coles unavailable: %s', e)
+
+    _injury_data = None
+    try:
+        from oraculo_injuries import load_injuries
+        _injury_data = load_injuries()
+    except Exception as e:
+        log.debug('Injury data unavailable: %s', e)
+
+    _gbm = None
+    try:
+        from oraculo_gbm import GBMEnsemble, build_features
+        _gbm = GBMEnsemble()
+        if not _gbm.load():
+            _gbm = GBMEnsemble()  # Will use weighted blend fallback
+    except Exception as e:
+        log.debug('GBM unavailable: %s', e)
+
+    # Load confirmed lineups from Sofascore
+    _lineup_events = None
+    try:
+        from oraculo_lineups import load_lineups_for_today, get_confirmed_lineup, lineup_adjustment
+        _lineup_events = load_lineups_for_today()
+        if _lineup_events:
+            log.info('Sofascore: %d events loaded for lineup matching', len(_lineup_events))
+    except Exception as e:
+        log.debug('Lineups unavailable: %s', e)
+
+    log.info('=== SCANNING FOOTBALL MARKETS ===')
+    picks = []
+
+    # Try to load ML model
+    mp = None
+    try:
+        from oraculo_market_predictor import MarketPredictor
+        mp = MarketPredictor('picks_global')
+        if not mp.load():
+            mp = None
+            log.warning('No trained model, using Poisson/Elo only')
+    except Exception as e:
+        log.warning('MarketPredictor unavailable: %s', e)
+
+    # Load math models
+    poisson, elo = None, None
+    try:
+        from oraculo_models_advanced import PoissonGoalModel, EloRating
+        import pickle
+        models_dir = os.path.join(SCRIPT_DIR, 'models')
+        poisson = PoissonGoalModel()
+        elo = EloRating()
+        pp = os.path.join(models_dir, 'poisson_state.pkl')
+        ep = os.path.join(models_dir, 'elo_state.pkl')
+        if os.path.exists(pp):
+            with open(pp, 'rb') as f:
+                poisson.__dict__.update(pickle.load(f))
+        if os.path.exists(ep):
+            with open(ep, 'rb') as f:
+                elo.__dict__.update(pickle.load(f))
+    except Exception as e:
+        log.warning('Math models unavailable: %s', e)
+
+    # Seed Poisson ratings from Firecrawl/Understat real xG
+    if _xg_data and poisson and poisson._fitted:
+        try:
+            from oraculo_models_advanced import _normalize_team as _nt
+            _all_xg = {}
+            for _fkey in ["PL", "SA", "BL1", "FL1", "PD"]:
+                _ld = _xg_data.get(_fkey, {})
+                if not _ld: continue
+                _xg_vals = [_t.get("xg", 0) / max(_t.get("mp", 1), 1) for _t in _ld.values()]
+                _lavg = sum(_xg_vals) / len(_xg_vals) if _xg_vals else 1.3
+                for _tn, _st in _ld.items():
+                    _mp = max(_st.get("mp", 1), 1)
+                    _all_xg[_tn] = (_st.get("xg", 0)/_mp, _st.get("xga", 0)/_mp, _lavg)
+            _known = list(poisson.attack.keys())
+            _upd = 0
+            for _tn, (_xg_pg, _xga_pg, _lavg) in _all_xg.items():
+                _nn = _nt(_tn, _known)
+                poisson.attack[_nn] = _xg_pg / max(_lavg, 0.5)
+                poisson.defense[_nn] = _xga_pg / max(_lavg, 0.5)
+                _upd += 1
+            log.info("Poisson seeded with real xG: %d teams", _upd)
+        except Exception as _ex:
+            log.warning("Poisson xG seeding failed: %s", _ex)
+
+    for league, comp_key in CB_COMPS.items():
+        events = api.get_odds(comp_key)
+        if not events:
+            continue
+        league_mkts = LEAGUE_MARKETS.get(league, ['over25'])
+        log.info('  %s: %d events, markets: %s', league, len(events), league_mkts)
+
+        # Filter: only events within 24h
+        cutoff_limit = (datetime.utcnow() + timedelta(hours=24)).isoformat() + 'Z'
+        for ev in events:
+            if not ev or not isinstance(ev, dict):
+                continue
+            # Skip events beyond 24h window
+            ev_cutoff = ev.get('cutoffTime', '')
+            if ev_cutoff and ev_cutoff > cutoff_limit:
+                continue
+            home = (ev.get('home') or {}).get('name', '')
+            away = (ev.get('away') or {}).get('name', '')
+            eid = str(ev.get('id', ''))
+            markets = ev.get('markets', {})
+            if not home or not away:
+                continue
+
+            for mkt_key in league_mkts:
+                # --- ASIAN HANDICAP ---
+                if mkt_key == 'asian_handicap' and poisson:
+                    try:
+                        lh, la = poisson.predict_lambda(home, away)
+                        model_margin = lh - la
+                        ah_data = markets.get('soccer.asian_handicap', {})
+                        for sub in ah_data.get('submarkets', {}).values():
+                            for sel in sub.get('selections', []):
+                                if sel.get('status') != 'SELECTION_ENABLED':
+                                    continue
+                                price = sel.get('price', 0)
+                                murl = sel.get('marketUrl', '')
+                                if price < 1.3 or not murl:
+                                    continue
+                                # Parse handicap line from params
+                                params = sel.get('params', '')
+                                try:
+                                    line = float(params.split('=')[-1]) if '=' in params else 0
+                                except Exception:
+                                    line = 0
+                                implied = 1.0 / price
+                                outcome = sel.get('outcome', '')
+                                # Poisson scoreline matrix for true AH probability
+                                try:
+                                    model_prob = poisson.prob_ah(home, away, line, outcome)
+                                except Exception:
+                                    if outcome == 'home':
+                                        model_prob = min(0.85, max(0.35, 0.5 + (model_margin + line) * 0.15))
+                                    else:
+                                        model_prob = min(0.85, max(0.35, 0.5 + (-model_margin - line) * 0.15))
+                                edge = model_prob - implied
+                                # GBM ensemble blend (if available)
+                                if _gbm is not None:
+                                    try:
+                                        _feats = build_features(
+                                            home, away, league,
+                                            dc_model=_dc_model, xg_data=_xg_data,
+                                            injury_data=_injury_data)
+                                        _gbm_pred = _gbm.predict(_feats)
+                                        _gbm_prob = _gbm_pred.get(side + '_win', model_prob) if side != 'draw' else _gbm_pred.get('draw', model_prob)
+                                        # Blend: 50% GBM + 30% original + 20% DC
+                                        model_prob = 0.5 * _gbm_prob + 0.3 * model_prob + 0.2 * (_dc_model.predict(home, away).get(side + '_win' if side != 'draw' else 'draw', model_prob) if _dc_model else model_prob)
+                                        edge = model_prob * odds_val - 1
+                                    except Exception:
+                                        pass
+                                if edge > MIN_EDGE and model_prob > MIN_CONF and edge < 0.45 and model_prob < 0.92:
+                                    picks.append({
+                                        'match': f'{home} vs {away}', 'league': league,
+                                        'event_id': eid, 'market_url': murl,
+                                        'price': price, 'label': f'AH {outcome} {line:+.1f}',
+                                        'model_prob': model_prob, 'edge': edge,
+                                        'sport': 'soccer',
+                                    })
+                    except Exception:
+                        pass
+                    continue
+
+                # --- OVER/UNDER, CORNERS ---
+                cb_info = CB_MARKETS_MAP.get(mkt_key)
+                if not cb_info:
+                    continue
+                cb_mkt_key, outcomes = cb_info
+
+                # Get model prediction
+                model_prob_over = None
+                if mp:
+                    try:
+                        preds = mp.predict_match(home, away)
+                        if preds and mkt_key in preds:
+                            model_prob_over = preds[mkt_key].get('prob_yes')
+                    except Exception:
+                        pass
+                # Fallback to Poisson for over25
+                if model_prob_over is None and mkt_key == 'over25' and poisson:
+                    try:
+                        p_mkts = poisson.predict_markets(home, away)
+                        model_prob_over = p_mkts.get('over25', 0.5)
+                    except Exception:
+                        pass
+                # BTTS: P(home>=1)*P(away>=1) — bookmakers less sharp here
+                if model_prob_over is None and mkt_key in ('btts_yes', 'btts_no') and poisson:
+                    try:
+                        from math import exp
+                        _lh, _la = poisson.predict_lambda(home, away)
+                        _p_btts = (1 - exp(-_lh)) * (1 - exp(-_la))
+                        model_prob_over = _p_btts if mkt_key == 'btts_yes' else (1 - _p_btts)
+                    except Exception:
+                        pass
+                if model_prob_over is None:
+                    continue
+
+                mkt_data = markets.get(cb_mkt_key, {})
+                for outcome, params_filter in outcomes:
+                    prob = model_prob_over if outcome == 'over' else (1 - model_prob_over)
+                    best_price, best_url = None, ''
+                    for sub in mkt_data.get('submarkets', {}).values():
+                        for sel in sub.get('selections', []):
+                            if sel.get('status') != 'SELECTION_ENABLED':
+                                continue
+                            if sel.get('outcome') != outcome:
+                                continue
+                            if params_filter and params_filter not in sel.get('params', ''):
+                                continue
+                            p = sel.get('price', 0)
+                            if p > 1.2 and (best_price is None or p > best_price):
+                                best_price = p
+                                best_url = sel.get('marketUrl', '')
+                    if not best_price:
+                        continue
+                    implied = 1.0 / best_price
+                    edge = prob - implied
+                    if edge > MIN_EDGE and prob > MIN_CONF and edge < 0.45 and prob < 0.92:
+                        picks.append({
+                            'match': f'{home} vs {away}', 'league': league,
+                            'event_id': eid, 'market_url': best_url,
+                            'price': best_price, 'label': f'{mkt_key} {outcome}',
+                            'model_prob': prob, 'edge': edge,
+                            'sport': 'soccer',
+                        })
+
+
+    # --- INTERNATIONAL / FIFA WC QUALIFIERS ---
+    intl_elo = None
+    try:
+        from oraculo_intl_elo import IntlElo
+        intl_elo = IntlElo()
+        intl_elo.load()
+    except Exception as e:
+        log.debug('IntlElo unavailable: %s', e)
+
+    if intl_elo:
+        INTL_COMPS = {
+            'FIFA_WC': 'soccer-international-world-cup',
+            'UEFA_NL': 'soccer-international-uefa-nations-league',
+            'COPA_AM': 'soccer-south-america-copa-america',
+
+            'CONMEBOL_WCQ': 'soccer-south-america-world-cup-qualification',
+            'UEFA_EURO': 'soccer-international-european-championship',
+            'CHAMPIONS': 'soccer-international-clubs-uefa-champions-league',
+            'EUROPA_L': 'soccer-international-clubs-uefa-europa-league',
+            'CONF_L': 'soccer-international-clubs-t6eeb-uefa-europa-conference-league',
+            'LIBERTADORES': 'soccer-international-clubs-copa-libertadores',
+            'SUDAMERICANA': 'soccer-international-clubs-copa-sudamericana',
+        }
+        INTL_MARKETS = ['ft_result', 'over25']
+        BLACKLIST_TEAMS = ['Ukraine']  # Skip teams with war/displacement context
+        cutoff_intl = (datetime.utcnow() + timedelta(hours=96)).isoformat() + 'Z'
+
+        for intl_league, comp_key in INTL_COMPS.items():
+            try:
+                events = api.get_odds(comp_key)
+            except Exception:
+                continue
+            if not events:
+                continue
+            log.info('  %s (intl): %d events', intl_league, len(events))
+            for ev in events:
+                if not ev or not isinstance(ev, dict):
+                    continue
+                ev_cutoff = ev.get('cutoffTime', '')
+                if ev_cutoff and ev_cutoff > cutoff_intl:
+                    continue
+                home = (ev.get('home') or {}).get('name', '')
+                away = (ev.get('away') or {}).get('name', '')
+                eid  = str(ev.get('id', ''))
+                if not home or not away:
+                    continue
+                if home in BLACKLIST_TEAMS or away in BLACKLIST_TEAMS:
+                    continue
+                markets = ev.get('markets', {})
+                neutral = ev.get('neutral', False)
+
+                # Get 1X2 odds
+                ft_mkt = markets.get('soccer.match_odds', {})
+                odds_1x2 = {}
+                for sub_val in ft_mkt.get('submarkets', {}).values():
+                    for s in sub_val.get('selections', []):
+                        out = s.get('outcome', '')
+                        price = float(s.get('price', 0) or 0)
+                        murl  = s.get('marketUrl', '')
+                        if out in ('home', 'draw', 'away') and price > 1.1:
+                            odds_1x2[out] = (price, murl)
+
+                # Get Over/Under 2.5 odds
+                ou_mkt = markets.get('soccer.total_goals', {})
+                odds_ou = {}
+                for sub_val in ou_mkt.get('submarkets', {}).values():
+                    for s in sub_val.get('selections', []):
+                        param = str(s.get('params', ''))
+                        out   = s.get('outcome', '')
+                        price = float(s.get('price', 0) or 0)
+                        murl  = s.get('marketUrl', '')
+                        if '2.5' in param and price > 1.1:
+                            odds_ou[out] = (price, murl)
+
+                # Compute model probabilities
+                try:
+                    ph, pd, pa = intl_elo.predict_match(home, away, neutral)
+                    p_o25 = intl_elo.prob_over(home, away, 2.5, neutral)
+                    p_u25 = 1 - p_o25
+                except Exception:
+                    continue
+
+                match_label = f'{home} vs {away}'
+
+                # 1X2 edges
+                for out_key, prob in [('home', ph), ('draw', pd), ('away', pa)]:
+                    if out_key in odds_1x2:
+                        price, murl = odds_1x2[out_key]
+                        edge = prob * price - 1
+                        if edge >= MIN_EDGE and prob >= MIN_CONF and edge < 0.45 and prob < 0.92:
+                            picks.append({
+                                'match': match_label, 'league': intl_league,
+                                'event_id': eid, 'market_url': murl,
+                                'price': price, 'label': out_key.title() + ' Win',
+                                'model_prob': prob, 'edge': edge,
+                                'sport': 'soccer', 'intl': True,
+                            })
+                            # A/B log: model_A = current
+                            try:
+                                from oraculo_backtest import ABTester
+                                ABTester().log_pick(picks[-1], 'model_A', True)
+                            except Exception:
+                                pass
+
+                # Over/Under edges
+                for ou_key, prob in [('over', p_o25), ('under', p_u25)]:
+                    if ou_key in odds_ou:
+                        price, murl = odds_ou[ou_key]
+                        edge = prob * price - 1
+                        if edge >= MIN_EDGE and prob >= MIN_CONF and edge < 0.45 and prob < 0.92:
+                            picks.append({
+                                'match': match_label, 'league': intl_league,
+                                'event_id': eid, 'market_url': murl,
+                                'price': price, 'label': f'{ou_key.title()} 2.5',
+                                'model_prob': prob, 'edge': edge,
+                                'sport': 'soccer', 'intl': True,
+                            })
+
+    # Record odds for monitoring
+    try:
+        from oraculo_odds_monitor import record_odds
+        _all_events = []
+        for _lk in list(CB_COMPS.keys()):
+            _evs = api.get_odds(CB_COMPS.get(_lk, ''))
+            if _evs:
+                _all_events.extend(_evs)
+        if _all_events:
+            _n_rec = record_odds(api, _all_events)
+            log.debug('Odds recorded: %d snapshots', _n_rec)
+    except Exception as e:
+        log.debug('Odds recording error: %s', e)
+
+    # ── STEAM MOVE SCAN (line movement signal) ──────────────────────────────
+    # Scan all recorded events for significant odds movement (>8% drop in 6h)
+    # A steam move = sharp money → bet the same direction, independent of model
+    try:
+        from oraculo_odds_monitor import detect_steam_moves
+        _steam_count = 0
+        _seen_steam = set()
+        for _ev in _all_events:
+            _eid = str(_ev.get('id', ''))
+            _home = (_ev.get('home') or {}).get('name', '')
+            _away = (_ev.get('away') or {}).get('name', '')
+            if not _eid or not _home:
+                continue
+            # Skip in-play events (cutoff passed = match already started)
+            _ev_cutoff = _ev.get('cutoffTime', '')
+            if _ev_cutoff:
+                try:
+                    from datetime import timezone as _tz
+                    _ct = datetime.fromisoformat(_ev_cutoff.replace('Z', '+00:00'))
+                    if _ct <= datetime.now(tz=_tz.utc):
+                        continue
+                except Exception:
+                    pass
+            _markets = _ev.get('markets', {})
+            for _mk_name, _mk_data in _markets.items():
+                for _sub in _mk_data.get('submarkets', {}).values():
+                    for _sel in _sub.get('selections', []):
+                        _murl = _sel.get('marketUrl', '')
+                        _outcome = _sel.get('outcome', '')
+                        _price = float(_sel.get('price', 0) or 0)
+                        if not _murl or _price < 1.15:
+                            continue
+                        _STEAM_OK = ('soccer.asian_handicap', 'soccer.total_goals',
+                                     'soccer.match_winner', 'soccer.both_teams_to_score',
+                                     'soccer.double_chance')
+                        if not any(_murl.startswith(m) for m in _STEAM_OK):
+                            continue
+                        _key = (_eid, _murl, _outcome)
+                        if _key in _seen_steam:
+                            continue
+                        _seen_steam.add(_key)
+                        _move = detect_steam_moves(_eid, _murl, threshold=0.08, window_hours=6)
+                        if _move and _move['direction'] == 'DROP':
+                            # Odds dropped = sharp money on this side → follow
+                            # Only bet if movement is meaningful (>8%) and current price OK
+                            _mag = _move['magnitude']
+                            _from = _move['from_price']
+                            _steam_edge = _mag * 0.5  # conservative: half the movement as edge estimate
+                            if _steam_edge < 0.04:
+                                continue
+                            # Find league
+                            _steam_league = 'UNK'
+                            for _lk, _ck in CB_COMPS.items():
+                                if _ck and _ev.get('competitionId', '') in _ck:
+                                    _steam_league = _lk
+                                    break
+                            if STEAM_ENABLED:
+                                picks.append({
+                                    'match': f'{_home} vs {_away}',
+                                    'league': _steam_league,
+                                    'event_id': _eid,
+                                    'market_url': _murl,
+                                    'price': _price,
+                                    'label': f'STEAM {_outcome} ({_mag:.0%} drop)',
+                                    'model_prob': min(0.9, (1/_price) + _steam_edge),
+                                    'edge': _steam_edge,
+                                    'sport': 'soccer',
+                                    'signal': 'steam',
+                                    'steam_from': _from,
+                                    'steam_to': _price,
+                                    'steam_mag': _mag,
+                                })
+                                _steam_count += 1
+                            log.info('STEAM: %s vs %s | %s %s | %.0f%% drop %.2f→%.2f',
+                                     _home, _away, _mk_name, _outcome,
+                                     _mag*100, _from, _price)
+        if _steam_count:
+            log.info('Steam moves detected: %d picks', _steam_count)
+    except Exception as _e:
+        log.debug('Steam scan error: %s', _e)
+
+    # Higher minimum edge for soccer (8%) to avoid marginal bets
+    _pre_filter = len(picks)
+    picks = [p for p in picks if p.get("edge", 0) >= 0.08]
+    if len(picks) < _pre_filter:
+        log.info("Football: filtered %d marginal picks (edge < 8%%)", _pre_filter - len(picks))
+    log.info('Football: %d value picks found (%d steam)', len(picks),
+             sum(1 for p in picks if p.get('signal') == 'steam'))
+    for _p in picks:
+        log.info('  [FB] %s | %s | edge=%.1f%% conf=%.0f%% @%.2f', _p.get('match','?')[:35], _p.get('label','?'), _p.get('edge',0)*100, _p.get('model_prob',0)*100, _p.get('price',0))
+    return picks
+
+# ---------------------------------------------------------------------------
+# Tennis market scanner
+# ---------------------------------------------------------------------------
+def scan_tennis(api, state, dry_run=False):
+    _cal = _load_calibration()
+    """Scan Cloudbet tennis markets, find value bets."""
+    log.info('=== SCANNING TENNIS MARKETS ===')
+    picks = []
+
+    # Surface map by competition key substring
+    COMP_SURFACE = {
+        'monte-carlo': 'clay', 'barcelona': 'clay', 'madrid': 'clay',
+        'rome': 'clay', 'roland-garros': 'clay', 'french-open': 'clay',
+        'hamburg': 'clay', 'munich': 'clay', 'budapest': 'clay',
+        'estoril': 'clay', 'marrakech': 'clay', 'casablanca': 'clay',
+        'wimbledon': 'grass', 'queens': 'grass', 'halle': 'grass',
+        'eastbourne': 'grass', 's-hertogenbosch': 'grass',
+        'australian-open': 'hard', 'us-open': 'hard', 'miami': 'hard',
+        'indian-wells': 'hard', 'canada': 'hard', 'cincinnati': 'hard',
+        'shanghai': 'hard', 'paris': 'hard', 'vienna': 'hard',
+        'sofia': 'hard', 'moscow': 'hard', 'linz': 'hard',
+        'challenger': 'hard',  # Most challengers are hard
+    }
+
+    # Load tennis Elo
+    tennis_elo = None
+    try:
+        from oraculo_tennis import TennisElo
+        tennis_elo = TennisElo()
+        # Load cached Elo state
+        elo_path_atp = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'tennis', 'elo_atp.pkl')
+        elo_path_wta = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'tennis', 'elo_wta.pkl')
+        cache_dir = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'tennis')
+        _elo_fresh = False
+        if os.path.exists(elo_path_atp):
+            import time as _t
+            _age = _t.time() - os.path.getmtime(elo_path_atp)
+            if _age < 86400:
+                tennis_elo.load_state(elo_path_atp)
+                _elo_fresh = True
+                log.info('Tennis ATP Elo loaded from cache (%d players)', len(tennis_elo.overall))
+        if not _elo_fresh:
+            for fname in sorted(os.listdir(cache_dir)) if os.path.isdir(cache_dir) else []:
+                if fname.startswith('atp_') and fname.endswith('.json'):
+                    with open(os.path.join(cache_dir, fname)) as f:
+                        matches = json.load(f)
+                    if isinstance(matches, list):
+                        tennis_elo.process_matches(matches)
+            tennis_elo.save_state(elo_path_atp)
+            log.info('Tennis ATP Elo trained & saved (%d players)', len(tennis_elo.overall))
+        # WTA Elo
+        wta_elo = TennisElo()
+        _wta_fresh = False
+        if os.path.exists(elo_path_wta):
+            import time as _t
+            _age = _t.time() - os.path.getmtime(elo_path_wta)
+            if _age < 86400:
+                wta_elo.load_state(elo_path_wta)
+                _wta_fresh = True
+                log.info('Tennis WTA Elo loaded from cache (%d players)', len(wta_elo.overall))
+        if not _wta_fresh:
+            for fname in sorted(os.listdir(cache_dir)) if os.path.isdir(cache_dir) else []:
+                if fname.startswith('wta_') and fname.endswith('.json'):
+                    with open(os.path.join(cache_dir, fname)) as f:
+                        matches = json.load(f)
+                    if isinstance(matches, list):
+                        wta_elo.process_matches(matches)
+            wta_elo.save_state(elo_path_wta)
+            log.info('Tennis WTA Elo trained & saved (%d players)', len(wta_elo.overall))
+        scan_tennis._wta_elo = wta_elo
+        scan_tennis._elo = tennis_elo
+        # Load advanced tennis features (fatigue, retirement, surface form)
+        try:
+            from oraculo_tennis_advanced import TennisAdvanced
+            _tn_adv_atp = TennisAdvanced(base_elo=tennis_elo)
+            _tn_adv_wta = TennisAdvanced(base_elo=wta_elo)
+            _cache_dir = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'tennis')
+            _tn_adv_atp.load_match_history(_cache_dir)
+            _tn_adv_wta.load_match_history(_cache_dir)
+            scan_tennis._adv_atp = _tn_adv_atp
+            scan_tennis._adv_wta = _tn_adv_wta
+        except Exception as e:
+            log.debug('TennisAdvanced unavailable: %s', e)
+    except Exception as e:
+        log.warning('Tennis Elo unavailable: %s', e)
+        return picks
+
+    if not tennis_elo or len(tennis_elo.overall) < 50:
+        log.warning('Tennis Elo has too few players, skipping')
+        return picks
+
+    # Auto-discover active tennis competitions
+    tennis_comps = list(CB_TENNIS)  # Start with known keys
+    try:
+        import requests as _rq
+        _cfg = json.load(open(os.path.join(SCRIPT_DIR, 'cloudbet_config.json')))
+        _ts = _rq.Session()
+        _ts.headers.update({'Authorization': 'Bearer ' + _cfg['api_key'], 'Accept': 'application/json'})
+        # Use working sports endpoint to discover all categories with live competitions
+        _r = _ts.get(CB_BASE + '/pub/v2/odds/sports/tennis', timeout=10,
+                     params={'markets': 'tennis.match_winner', 'limit': 50})
+        if _r.status_code == 200:
+            for _cat in _r.json().get('categories', []):
+                for comp in _cat.get('competitions', []):
+                    ck = comp.get('key', '')
+                    if (ck and ck not in tennis_comps
+                            and 'double' not in ck       # catches double + doubles
+                            and 'simulated' not in ck
+                            and 'srl' not in ck
+                            and 'itf' not in ck           # low-quality Elo data
+                            and 'international' not in ck  # UTR events
+                            and 'federation' not in ck    # team tennis
+                            and 'monte-carlo' not in ck): # RESTRICTED for sharp accounts
+                        tennis_comps.append(ck)
+    except Exception:
+        pass  # Fall back to hardcoded list
+
+    for comp_key in tennis_comps:
+        events = api.get_odds(comp_key)
+        if not events:
+            continue
+        log.info('  %s: %d events', comp_key, len(events))
+
+        # Filter: only events within 48h
+        cutoff_limit_tn = (datetime.utcnow() + timedelta(hours=96)).isoformat() + 'Z'
+        for ev in events:
+            if not ev or not isinstance(ev, dict):
+                continue
+            # Skip events beyond 48h window
+            ev_cutoff = ev.get('cutoffTime', '')
+            if ev_cutoff and ev_cutoff > cutoff_limit_tn:
+                continue
+            home = (ev.get('home') or {}).get('name', '')
+            away = (ev.get('away') or {}).get('name', '')
+            eid = str(ev.get('id', ''))
+            markets = ev.get('markets', {})
+            if not home or not away:
+                continue
+
+            # Get tennis prediction (enhanced with fatigue/surface/retirement)
+            try:
+                _is_wta = 'wta' in comp_key.lower()
+                _adv = getattr(scan_tennis, '_adv_wta' if _is_wta else '_adv_atp', None)
+                # Detect surface from competition key
+                _surf = 'hard'
+                for _sk, _sv in COMP_SURFACE.items():
+                    if _sk in comp_key.lower():
+                        _surf = _sv
+                        break
+                if _adv:
+                    _epred = _adv.predict_enhanced(home, away, surface=_surf)
+                    prob_home = _epred['prob_a']
+                else:
+                    _use_elo = getattr(scan_tennis, '_wta_elo', tennis_elo) if _is_wta else tennis_elo
+                    pred = _use_elo.predict(home, away, surface=_surf)
+                    prob_home = pred if isinstance(pred, float) else pred.get('prob_a', 0.5)
+            except Exception:
+                continue
+
+            # Scan winner market (try both market keys)
+            winner_data = markets.get('tennis.match_odds', markets.get('tennis.winner', {}))
+            for sub in winner_data.get('submarkets', {}).values():
+                for sel in sub.get('selections', []):
+                    if sel.get('status') != 'SELECTION_ENABLED':
+                        continue
+                    price = sel.get('price', 0)
+                    murl = sel.get('marketUrl', '')
+                    outcome = sel.get('outcome', '')
+                    if price < 1.1 or not murl:
+                        continue
+                    prob = prob_home if outcome == 'home' else (1 - prob_home)
+                    player = home if outcome == 'home' else away
+                    implied = 1.0 / price
+                    edge = prob - implied
+                    # Require minimum Elo match history for confidence
+                    player_matches = tennis_elo._match_count.get(player, 0)
+                    opp = away if player == home else home; opponent_matches = tennis_elo._match_count.get(opp, 0)
+                    if player_matches < 20 or opponent_matches < 20:
+                        log.debug('  [SKIP] Insufficient Elo data: %s (%d) vs %s (%d)',
+                                  player, player_matches, opp, opponent_matches)
+                        continue
+                    # Line shopping: verify edge is real, not just model noise
+                    # Fair odds = 1/prob. Cloudbet margin ~6%. Real edge should beat that.
+                    fair_odds = 1.0 / prob if prob > 0 else 99
+                    margin_over_fair = (price - fair_odds) / fair_odds if fair_odds > 0 else 0
+                    if margin_over_fair < 0.03:
+                        # Odds barely above fair value - likely no real edge after bookmaker margin
+                        continue
+                    if edge > MIN_EDGE and prob > MIN_CONF and edge < 0.45 and prob < 0.92:
+                        picks.append({
+                            'match': f'{home} vs {away}', 'league': comp_key,
+                            'event_id': eid, 'market_url': murl,
+                            'price': price, 'label': f'Winner: {player}',
+                            'model_prob': prob, 'edge': edge,
+                            'sport': 'tennis', 'player': player,
+                        })
+
+    # Scan set handicap markets (total sets over/under)
+    _adv = getattr(scan_tennis, '_adv_atp', None)
+    if _adv:
+        for comp_key in tennis_comps:
+            events = api.get_odds(comp_key)
+            if not events:
+                continue
+            _is_wta = 'wta' in comp_key.lower()
+            _use_adv = getattr(scan_tennis, '_adv_wta' if _is_wta else '_adv_atp', _adv)
+            cutoff_sets = (datetime.utcnow() + timedelta(hours=96)).isoformat() + 'Z'
+            for ev in events:
+                if not ev or not isinstance(ev, dict):
+                    continue
+                ev_cutoff = ev.get('cutoffTime', '')
+                if ev_cutoff and ev_cutoff > cutoff_sets:
+                    continue
+                home = (ev.get('home') or {}).get('name', '')
+                away = (ev.get('away') or {}).get('name', '')
+                eid = str(ev.get('id', ''))
+                if not home or not away:
+                    continue
+                markets = ev.get('markets', {})
+                # Check for total sets market
+                sets_mkt = markets.get('tennis.total_sets', {})
+                for sv in sets_mkt.get('submarkets', {}).values():
+                    for sel in sv.get('selections', []):
+                        price = float(sel.get('price', 0) or 0)
+                        murl = sel.get('marketUrl', '')
+                        outcome = sel.get('outcome', '')
+                        params = str(sel.get('params', ''))
+                        if price < 1.1 or not murl:
+                            continue
+                        if '2.5' in params:
+                            try:
+                                set_pred = _use_adv.predict_sets(home, away, 'hard', 3)
+                                if outcome == 'over':
+                                    prob = set_pred.get('over_25_sets', 0.5)
+                                elif outcome == 'under':
+                                    prob = set_pred.get('under_25_sets', 0.5)
+                                else:
+                                    continue
+                                edge = prob * price - 1
+                                if edge > MIN_EDGE and prob > 0.55 and edge < 0.45 and prob < 0.92:
+                                    picks.append({
+                                        'match': f'{home} vs {away}',
+                                        'league': comp_key,
+                                        'event_id': eid,
+                                        'market_url': murl,
+                                        'price': price,
+                                        'label': f'Sets {outcome.title()} 2.5',
+                                        'model_prob': prob,
+                                        'edge': edge,
+                                        'sport': 'tennis',
+                                    })
+                            except Exception:
+                                pass
+
+    log.info('Tennis: %d value picks found', len(picks))
+    for _tp in picks:
+        log.info('  [TN] %s | %s | edge=%.1f%% conf=%.0f%% @%.2f',
+                 _tp.get('match','?')[:35], _tp.get('label','?'),
+                 _tp.get('edge',0)*100, _tp.get('model_prob',0)*100, _tp.get('price',0))
+
+    # --- NBA SCANNING ---
+    # NBA game markets only active during season (Oct-Apr). Check if game markets exist.
+    _nba_game_markets_active = False
+    try:
+        _cfg_key = json.load(open(os.path.join(SCRIPT_DIR, 'cloudbet_config.json'))).get('api_key', '')
+        _rnba = requests.get(CB_BASE + '/pub/v2/odds/sports/basketball',
+                             headers={'X-API-Key': _cfg_key}, params={'markets': 'basketball.moneyline', 'limit': 2}, timeout=5)
+        if _rnba.status_code == 200:
+            for _ncat in _rnba.json().get('categories', []):
+                for _ncomp in _ncat.get('competitions', []):
+                    if 'nba' in _ncomp.get('key','').lower():
+                        _nba_game_markets_active = True
+    except Exception:
+        pass
+    try:
+        from oraculo_nba import train_nba_elo, scan_nba
+        _nba_elo = train_nba_elo()
+        # NBA disabled: basketball.moneyline restricted on this account, no other game markets
+        if False and _nba_game_markets_active and _nba_elo and len(_nba_elo.ratings) >= 20:
+            _nba_picks = scan_nba(api, state, _nba_elo)
+            if _nba_picks:
+                picks.extend(_nba_picks)
+    except Exception as e:
+        log.debug('NBA scan error: %s', e)
+    return picks
+
+# ---------------------------------------------------------------------------
+# Build tennis parlays from individual picks
+# ---------------------------------------------------------------------------
+def build_parlays(tennis_picks):
+    """Generate parlay combos from high-confidence tennis picks."""
+    parlays = []
+    strong = [p for p in tennis_picks if p['model_prob'] >= PARLAY_MIN_CONF]
+    if len(strong) < PARLAY_MIN_LEGS:
+        return parlays
+
+    for n_legs in range(PARLAY_MIN_LEGS, min(PARLAY_MAX_LEGS + 1, len(strong) + 1)):
+        for combo in combinations(strong, n_legs):
+            combined_odds = 1.0
+            combined_prob = 1.0
+            sels = []
+            for p in combo:
+                combined_odds *= p['price']
+                combined_prob *= p['model_prob']
+                sels.append({
+                    'eventId': p['event_id'], 'marketUrl': p['market_url'],
+                    'price': p['price'], 'player': p.get('player', '') or p.get('match', '').split(' vs ')[0],
+                })
+            implied = 1.0 / combined_odds
+            edge = combined_prob - implied
+            if edge > 0.05 and combined_prob > 0.30:
+                parlays.append({
+                    'selections': sels,
+                    'combined_odds': round(combined_odds, 2),
+                    'combined_prob': combined_prob,
+                    'edge': edge,
+                    'n_legs': n_legs,
+                    'label': ' + '.join(s['player'] for s in sels),
+                })
+
+    parlays.sort(key=lambda x: x['edge'], reverse=True)
+    return parlays[:3]  # Top 3 parlays max
+
+# ---------------------------------------------------------------------------
+# Daily football parlay (best confidence picks)
+# ---------------------------------------------------------------------------
+FOOTBALL_PARLAY_MIN_CONF = 0.70   # Min 70% confidence per leg
+FOOTBALL_PARLAY_LEGS = 3          # 3-leg parlay
+FOOTBALL_PARLAY_STAKE_PCT = 0.03  # 3% of bankroll
+
+def build_daily_football_parlay(football_picks, state):
+    """Build one daily parlay from highest-confidence football picks.
+    Only runs once per day (tracked in state)."""
+    if state.get('football_parlay_placed_today'):
+        return None
+
+    # Filter: high confidence, different matches, sorted by confidence
+    strong = [p for p in football_picks if p['model_prob'] >= FOOTBALL_PARLAY_MIN_CONF]
+    # Deduplicate by match (keep highest confidence per match)
+    seen_matches = {}
+    for p in sorted(strong, key=lambda x: x['model_prob'], reverse=True):
+        key = p['match']
+        if key not in seen_matches:
+            seen_matches[key] = p
+    unique = list(seen_matches.values())
+
+    if len(unique) < FOOTBALL_PARLAY_LEGS:
+        return None
+
+    # Take top N by confidence
+    top = unique[:FOOTBALL_PARLAY_LEGS]
+    combined_odds = 1.0
+    combined_prob = 1.0
+    sels = []
+    for p in top:
+        combined_odds *= p['price']
+        combined_prob *= p['model_prob']
+        sels.append({
+            'eventId': p['event_id'], 'marketUrl': p['market_url'],
+            'price': p['price'], 'match': p['match'], 'label': p['label'],
+        })
+
+    implied = 1.0 / combined_odds
+    edge = combined_prob - implied
+    if edge < 0.03:
+        return None
+
+    stake = state['bankroll'] * FOOTBALL_PARLAY_STAKE_PCT
+    if stake < MIN_STAKE:
+        return None
+
+    parlay = {
+        'selections': sels,
+        'combined_odds': round(combined_odds, 2),
+        'combined_prob': combined_prob,
+        'edge': edge,
+        'n_legs': FOOTBALL_PARLAY_LEGS,
+        'stake': round(stake, 2),
+        'label': ' + '.join(s['label'] for s in sels),
+        'matches': ' | '.join(s['match'][:25] for s in sels),
+        'sport': 'soccer',
+    }
+    log.info('DAILY FOOTBALL PARLAY: %d legs @%.2f (prob %.1f%%, edge +%.1f%%)',
+             FOOTBALL_PARLAY_LEGS, combined_odds, combined_prob * 100, edge * 100)
+    for s in sels:
+        log.info('  Leg: %s | %s @%.3f', s['match'][:35], s['label'], s['price'])
+    return parlay
+
+# ---------------------------------------------------------------------------
+# Daily mixed parlay (2 football + 2 tennis)
+# ---------------------------------------------------------------------------
+MIXED_PARLAY_STAKE_PCT = 0.05   # 5% of bankroll
+
+def build_mixed_parlay(football_picks, tennis_picks, state):
+    """Build daily mixed parlay: 2 best football + 2 best tennis."""
+    if state.get('mixed_parlay_placed_today'):
+        return None
+
+    # Top 2 football by confidence (different matches)
+    fb_seen = {}
+    for p in sorted(football_picks, key=lambda x: x['model_prob'], reverse=True):
+        if p['match'] not in fb_seen and p['model_prob'] >= 0.65:
+            fb_seen[p['match']] = p
+        if len(fb_seen) >= 2:
+            break
+    fb_top = list(fb_seen.values())
+
+    # Top 2 tennis by confidence (different matches)
+    tn_seen = {}
+    for p in sorted(tennis_picks, key=lambda x: x['model_prob'], reverse=True):
+        if p['match'] not in tn_seen and p['model_prob'] >= 0.65:
+            tn_seen[p['match']] = p
+        if len(tn_seen) >= 2:
+            break
+    tn_top = list(tn_seen.values())
+
+    if len(fb_top) < 2 or len(tn_top) < 2:
+        return None
+
+    legs = fb_top + tn_top
+    combined_odds = 1.0
+    combined_prob = 1.0
+    sels = []
+    for p in legs:
+        combined_odds *= p['price']
+        combined_prob *= p['model_prob']
+        sels.append({
+            'eventId': p['event_id'], 'marketUrl': p['market_url'],
+            'price': p['price'], 'match': p['match'], 'label': p['label'],
+            'player': p.get('player', '') or p.get('match', '').split(' vs ')[0],
+        })
+
+    implied = 1.0 / combined_odds
+    edge = combined_prob - implied
+    if edge < 0.02:
+        return None
+
+    stake = state['bankroll'] * MIXED_PARLAY_STAKE_PCT
+    if stake < MIN_STAKE:
+        return None
+
+    parlay = {
+        'selections': sels,
+        'combined_odds': round(combined_odds, 2),
+        'combined_prob': combined_prob,
+        'edge': edge,
+        'n_legs': 4,
+        'stake': round(stake, 2),
+        'label': ' + '.join(s.get('label', s.get('match', '?'))[:20] for s in sels),
+        'matches': ' | '.join(s['match'][:25] for s in sels),
+        'sport': 'mixed',
+    }
+    log.info('DAILY MIXED PARLAY: 4 legs (2fb+2tn) @%.2f (prob %.1f%%, edge +%.1f%%)',
+             combined_odds, combined_prob * 100, edge * 100)
+    for s in sels:
+        log.info('  Leg: %s | %s @%.3f', s['match'][:35], s['label'], s['price'])
+    return parlay
+
+# Track rejected event+market combos to avoid resubmitting within same session
+_rejected_keys = set()
+
+
+# ---------------------------------------------------------------------------
+# Currency alternation: use USDT for even-numbered bets, USDC for odd
+# ---------------------------------------------------------------------------
+def _choose_currency(state):
+    bbc = state.get("bankroll_by_currency", {})
+    usdt_bal = bbc.get("USDT", 0)
+    if usdt_bal < 5.0:
+        return "USDC"
+    n = state.get("bets_placed_today", 0)
+    return "USDT" if n % 2 == 0 else "USDC"
+
+
+# ---------------------------------------------------------------------------
+# Place bets
+# ---------------------------------------------------------------------------
+def place_bets(api, state, picks, parlays, dry_run=False):
+    """Place straight bets + parlays, respecting limits."""
+    bankroll = state['bankroll']
+    if bankroll < CIRCUIT_BREAKER:
+        log.warning('CIRCUIT BREAKER: bankroll $%.2f < $%.2f, NOT placing bets',
+                     bankroll, CIRCUIT_BREAKER)
+        return 0
+
+    # Hard cap: total pending exposure across ALL days
+    total_pending = sum(b.get('stake', 0) for b in state.get('active_bets', []))
+    max_exposure = bankroll * MAX_TOTAL_EXPOSURE
+    if total_pending >= max_exposure:
+        log.info('EXPOSURE CAP: $%.2f pending >= $%.2f max (%.0f%% of bankroll)',
+                 total_pending, max_exposure, MAX_TOTAL_EXPOSURE * 100)
+        return 0
+
+    max_today = bankroll * MAX_DAILY_PCT
+    # Respect football ceiling if set (to reserve budget for tennis)
+    ceiling = state.get('_football_ceiling')
+    if ceiling is not None:
+        effective_max = min(max_today, ceiling)
+    else:
+        effective_max = max_today
+    remaining = effective_max - state['daily_staked']
+    exposure_headroom = max_exposure - total_pending
+    remaining = min(remaining, exposure_headroom)
+    if remaining < MIN_STAKE:
+        log.info('Limit reached (daily=$%.2f/$%.2f, exposure=$%.2f/$%.2f)',
+                 state['daily_staked'], effective_max, total_pending, max_exposure)
+        return 0
+
+    # Build dedup sets: per match+label AND per match (exposure tracking)
+    active_keys = set()
+    active_matches = {}  # match_name -> total staked
+    active_events = {}   # event_id -> total staked (cross-cycle)
+    for ab in state.get('active_bets', []):
+        ak = f"{ab.get('match','')}|{ab.get('label','')}"
+        active_keys.add(ak)
+        mn = ab.get('match', '')
+        if mn and 'PARLAY' not in mn and '(legacy)' not in mn:
+            active_matches[mn] = active_matches.get(mn, 0) + ab.get('stake', 0)
+        eid = ab.get('event_id', '')
+        if eid:
+            active_events[eid] = active_events.get(eid, 0) + ab.get('stake', 0)
+
+    # Sort by edge
+    picks.sort(key=lambda p: p['edge'], reverse=True)
+    placed = 0
+    match_bets_this_cycle = {}  # match -> count placed this cycle
+
+    # --- Straight bets ---
+    # Reserve 10% of budget for parlays
+    parlay_reserve = remaining * 0.10 if parlays else 0
+    straight_remaining = remaining - parlay_reserve
+    consecutive_fails = 0
+
+
+    for p in picks[:MAX_BETS_PER_SCAN]:
+        if straight_remaining < MIN_STAKE:
+            break
+        # Skip previously rejected combos
+        dedup_key = f"{p['event_id']}|{p.get('market_url', '')}|{p['label']}"
+        if dedup_key in _rejected_keys:
+            continue
+        # Skip events and markets restricted by Cloudbet for this account
+        _murl_pick = p.get('market_url', '')
+        _restricted_pfx = state.get('restricted_market_prefixes', [])
+        _restricted_evs = state.get('restricted_event_ids', [])
+        if any(_murl_pick.startswith(_pfx) for _pfx in _restricted_pfx):
+            log.debug('  [SKIP] Restricted market prefix: %s', _murl_pick[:40])
+            continue
+        if p.get('event_id') and str(p.get('event_id')) in _restricted_evs:
+            log.debug('  [SKIP] Restricted event: %s', p.get('event_id'))
+            continue
+        # Skip if already have active bet on same match+label
+        active_key = f"{p['match']}|{p['label']}"
+        if active_key in active_keys:
+            log.info('  [SKIP] Already active: %s | %s', p['match'][:35], p['label'])
+            continue
+        # Skip if already hit max bets for this match (1 per match)
+        match_name = p['match']
+        if match_bets_this_cycle.get(match_name, 0) >= MAX_PER_MATCH:
+            log.info('  [SKIP] Max %d bet(s) per match: %s', MAX_PER_MATCH, match_name[:35])
+            continue
+        # Skip if event exposure exceeds limit (cross-cycle, by event_id)
+        _ev_id = p.get('event_id', '')
+        if _ev_id:
+            _ev_exp = active_events.get(_ev_id, 0)
+            _ev_max = bankroll * MAX_EXPOSURE_PER_EVENT
+            if _ev_exp >= _ev_max:
+                log.info('  [SKIP] Event %s exposure $%.2f >= max $%.2f', _ev_id, _ev_exp, _ev_max)
+                continue
+
+        # Skip if match exposure exceeds limit
+        match_exposure = active_matches.get(match_name, 0)
+        max_match_exposure = bankroll * MAX_EXPOSURE_PER_MATCH
+        if match_exposure >= max_match_exposure:
+            log.info('  [SKIP] Match exposure $%.2f >= max $%.2f: %s',
+                     match_exposure, max_match_exposure, match_name[:35])
+            continue
+        # Portfolio Kelly: correlation-aware sizing
+        try:
+            from oraculo_portfolio import PortfolioKelly
+            _pk = PortfolioKelly(bankroll, MAX_TOTAL_EXPOSURE, MAX_EXPOSURE_PER_MATCH, KELLY_FRAC)
+            _pk_result = _pk.optimize([p], state.get('active_bets', []))
+            stake = _pk_result[0][1] if _pk_result else 0
+        except Exception:
+            stake = kelly_stake(bankroll, p['model_prob'], p['price'],
+                               state.get('consecutive_losses', 0))
+        if stake <= 0:
+            continue
+        # Avoid $2-5 dead zone (historically 29% WR, negative P&L)
+        if MIN_STAKE < stake < 5.0:
+            if p.get("edge", 0) > 0.15:  # High confidence -> go bigger
+                stake = 5.0
+            else:
+                stake = MIN_STAKE  # Low confidence -> go minimum
+        # LLM said REDUCE: cut stake by 50%
+        if p.get('_llm_reduce'):
+            stake = round(stake * 0.5, 2)
+            log.info('  LLM REDUCE: stake halved to $%.2f', stake)
+        stake = min(stake, straight_remaining)
+
+        if dry_run:
+            log.info('  [DRY] %s | %s @%.3f | $%.2f | edge +%.1f%%',
+                     p['match'][:35], p['label'], p['price'], stake, p['edge'] * 100)
+            placed += 1
+            continue
+
+        _bet_currency = _choose_currency(state)
+        _orig_currency = api.currency
+        api.currency = _bet_currency
+        log.info('  Placing: %s | %s @%.3f | $%.2f %s', p['match'][:35], p['label'], p['price'], stake, _bet_currency)
+        resp = api.place_straight(p['event_id'], p['market_url'], p['price'], stake)
+        api.currency = _orig_currency
+        if isinstance(resp, dict) and resp.get('RESTRICTED'):
+            _ev_id2 = resp.get('event_id', '')
+            _blocked_evs2 = state.setdefault('restricted_event_ids', [])
+            if _ev_id2 and _ev_id2 not in _blocked_evs2:
+                _blocked_evs2.append(_ev_id2)
+                if len(_blocked_evs2) > 20:
+                    state["restricted_event_ids"] = _blocked_evs2[-20:]
+                log.warning('  [BLOCKED] Event %s restricted by Cloudbet', _ev_id2)
+            _rejected_keys.add(dedup_key)
+            continue
+        if resp and isinstance(resp, dict) and resp.get('betId'):
+            placed += 1
+            consecutive_fails = 0
+            state['daily_staked'] += stake
+            state['bets_placed_today'] += 1
+            straight_remaining -= stake
+            bet_id = resp.get('betId', '')
+            _save_bet(state, bet_id, p['match'], p['label'], p.get('sport','soccer'),
+                      p['price'], stake, edge=p['edge'],
+                      event_id=p.get('event_id',''), market_url=p.get('market_url',''),
+                      cutoff_time=p.get('cutoff_time',''), currency=_bet_currency)
+            log.info('  [OK] Bet placed: %s | ID: %s', p['label'], bet_id[:12])
+            match_bets_this_cycle[p['match']] = match_bets_this_cycle.get(p['match'], 0) + 1
+            active_matches[p['match']] = active_matches.get(p['match'], 0) + stake
+            if p.get('event_id',''):
+                active_events[p['event_id']] = active_events.get(p['event_id'], 0) + stake
+            # save_state called by _save_bet
+            # Track prediction for backtest
+            _log_prediction(p['match'], p['label'], p['model_prob'], p['edge'],
+                           p['price'], stake, bet_id, p.get('sport', 'soccer'),
+                           signal=p.get('signal', 'model'),
+                           league=p.get('league', ''),
+                           event_id=p.get('event_id', ''))
+        else:
+            _rejected_keys.add(dedup_key)
+            consecutive_fails += 1
+            log.warning('  [FAIL] %s (%d consecutive)', p['label'], consecutive_fails)
+            if consecutive_fails >= 3:
+                log.error('  ABORT: %d consecutive failures, API likely rate-limited', consecutive_fails)
+                break
+        time.sleep(2.0)  # Respect Cloudbet rate limit (2 req/s max)
+
+    # Restore remaining: unused straight budget + parlay reserve
+    remaining = straight_remaining + parlay_reserve
+    # --- Parlays ---
+    for par in parlays:
+        if remaining < MIN_STAKE:
+            break
+        # Fixed stake by parlay type
+        sport = par.get('sport', 'tennis')
+        if sport == 'mixed':
+            stake = bankroll * MIXED_PARLAY_STAKE_PCT     # 3%
+        elif sport == 'soccer':
+            stake = bankroll * FOOTBALL_PARLAY_STAKE_PCT  # 3%
+        else:
+            stake = bankroll * TENNIS_PARLAY_STAKE_PCT    # 5%
+        stake = round(stake, 2)
+        if stake < MIN_STAKE:
+            continue
+        stake = min(stake, remaining)
+
+        if dry_run:
+            log.info('  [DRY] PARLAY %d-leg: %s @%.2f | $%.2f | edge +%.1f%%',
+                     par['n_legs'], par['label'], par['combined_odds'], stake, par['edge'] * 100)
+            placed += 1
+            continue
+
+        _bet_currency = _choose_currency(state)
+        _orig_currency = api.currency
+        api.currency = _bet_currency
+        log.info('  Placing PARLAY: %s @%.2f | $%.2f %s', par['label'], par['combined_odds'], stake, _bet_currency)
+        resp = api.place_parlay(par['selections'], stake)
+        api.currency = _orig_currency
+        if resp and isinstance(resp, dict) and resp.get('betId'):
+            placed += 1
+            consecutive_fails = 0
+            state['daily_staked'] += stake
+            state['bets_placed_today'] += 1
+            remaining -= stake
+            bet_id = resp.get('betId', '')
+            _save_bet(state, bet_id, 'PARLAY: '+par['label'], str(par['n_legs'])+'-leg parlay',
+                      'tennis', par['combined_odds'], stake, edge=par['edge'],
+                      currency=_bet_currency)
+            log.info('  [OK] Parlay placed: %s', bet_id[:12])
+        time.sleep(2.0)  # Respect rate limit
+
+    log.info('Placed %d bets, staked today: $%.2f / $%.2f',
+             placed, state['daily_staked'], max_today)
+    return placed
+
+# ---------------------------------------------------------------------------
+# Check results via API
+# ---------------------------------------------------------------------------
+def check_results(api, state):
+    """Poll Cloudbet for settled bets, update P&L."""
+    log.info('=== CHECKING RESULTS ===')
+    # Auto-populate cutoff_time for bets that don't have it yet (one-time backfill)
+    _need_ct = [b for b in state.get('active_bets', []) if not b.get('cutoff_time') and b.get('event_id')]
+    if _need_ct:
+        import requests as _rq2
+        _s2 = _rq2.Session()
+        _cfg2 = json.load(open(os.path.join(SCRIPT_DIR, 'cloudbet_config.json')))
+        _s2.headers.update({'X-API-Key': _cfg2.get('api_key',''), 'Accept': 'application/json'})
+        _seen_eids = {}
+        for _b2 in _need_ct:
+            eid2 = str(_b2.get('event_id',''))
+            if eid2 in _seen_eids:
+                _b2['cutoff_time'] = _seen_eids[eid2]
+                continue
+            try:
+                _er = _s2.get(CB_BASE + '/pub/v2/odds/events/' + eid2, timeout=6)
+                if _er.status_code == 200:
+                    _ct = _er.json().get('cutoffTime', '')[:10]
+                    _b2['cutoff_time'] = _ct
+                    _seen_eids[eid2] = _ct
+            except Exception:
+                pass
+        log.debug('Backfilled cutoff_time for %d bets', len(_need_ct))
+    # Warn about stale pending bets (>7 days old)
+    from datetime import timedelta
+    _today = datetime.now().isoformat()[:10]
+    for _ab in state.get('active_bets', []):
+        # Use event cutoff_time if available (more accurate than placed_at)
+        _event_date = str(_ab.get('cutoff_time', _ab.get('placed_at', _ab.get('placed', ''))))[:10]
+        _placed_date = str(_ab.get('placed_at', _ab.get('placed', '')))[:10]
+        # Only warn if BOTH: placed >7 days ago AND event date is in the future (genuinely pending)
+        _placed_threshold = (datetime.now() - timedelta(days=7)).isoformat()[:10]
+        if _placed_date and _placed_date < _placed_threshold and _event_date >= _today:
+            log.info('PENDING (pre-event, placed %s, plays %s): %s | %s | $%.2f', 
+                     _placed_date, _event_date, _ab.get('match','?')[:30], _ab.get('label','?')[:20], _ab.get('stake',0))
+        elif _placed_date and _placed_date < _placed_threshold and (not _event_date or _event_date < _today):
+            log.warning('STALE BET - event may have passed: %s | %s | $%.2f | event=%s', 
+                        _ab.get('match','?')[:30], _ab.get('label','?')[:20], _ab.get('stake',0), _event_date)
+    # In-play monitoring: check active bets for cash-out signals
+    try:
+        from oraculo_inplay import check_cashout_opportunities
+        _ip_alerts = check_cashout_opportunities(api, state)
+        if _ip_alerts:
+            log.info('[InPlay] %d active bets in danger', len(_ip_alerts))
+    except Exception:
+        pass
+    bets = api.get_bets(limit=200, days_back=120)
+    if not bets:
+        log.info('No bets found from API')
+        return 0
+
+    settled = 0
+    known_ids = {b.get('bet_id') for b in state.get('active_bets', [])}
+    # Persistent set of all-time processed bet IDs (avoids double-counting across days)
+    processed_ids = set(state.get('all_processed_ids', []))
+
+    for b in bets:
+        if not b.get('isSettled'):
+            continue
+        bet_id = b.get('betId', '')
+        result = b.get('result', '')
+        wl = float(b.get('winLoss', 0))
+        stake = float(b.get('stake', 0))
+
+        # Already processed? Check persistent set + today's settlements
+        if bet_id in processed_ids:
+            continue
+        if any(s.get('bet_id') == bet_id for s in state.get('settled_today', [])):
+            continue
+
+        # Find in active bets
+        matched_active = None
+        for ab in state['active_bets']:
+            if ab.get('bet_id') == bet_id:
+                matched_active = ab
+                break
+
+        if result == 'WIN':
+            state['bankroll'] += wl
+            state['total_pnl'] += wl
+            state['daily_pnl'] += wl
+            state['wins'] = state.get('wins', 0) + 1
+            state['consecutive_losses'] = 0
+            # Per-currency tracking
+            _curr = matched_active.get('currency', 'USDC') if matched_active else 'USDC'
+            _bbc = state.setdefault('bankroll_by_currency', {'USDC': 39.98, 'USDT': 26.0})
+            _bbc[_curr] = _bbc.get(_curr, 0) + wl
+            log.info('  WIN: $%+.2f | %s', wl,
+                     matched_active.get('match', bet_id[:12]) if matched_active else bet_id[:12])
+        elif result == 'LOSS':
+            state['bankroll'] -= stake
+            state['total_pnl'] -= stake
+            state['daily_pnl'] -= stake
+            state['losses'] = state.get('losses', 0) + 1
+            state['consecutive_losses'] = state.get('consecutive_losses', 0) + 1
+            # Per-currency tracking
+            _curr = matched_active.get('currency', 'USDC') if matched_active else 'USDC'
+            _bbc = state.setdefault('bankroll_by_currency', {'USDC': 39.98, 'USDT': 26.0})
+            _bbc[_curr] = _bbc.get(_curr, 0) - stake
+            log.info('  LOSS: $-%.2f | %s', stake,
+                     matched_active.get('match', bet_id[:12]) if matched_active else bet_id[:12])
+        elif result in ('VOID', 'PUSH', 'HALF_WIN', 'HALF_LOSS', 'PARTIAL'):
+            log.info('  %s: %s', result, bet_id[:12])
+            # Partial handling
+            if wl != 0:
+                state['bankroll'] += wl
+                state['total_pnl'] += wl
+                state['daily_pnl'] += wl
+                _curr = matched_active.get('currency', 'USDC') if matched_active else 'USDC'
+                _bbc = state.setdefault('bankroll_by_currency', {'USDC': 39.98, 'USDT': 26.0})
+                _bbc[_curr] = round(_bbc.get(_curr, 0) + wl, 5)
+
+        state['settled_today'].append({
+            'bet_id': bet_id, 'result': result, 'winLoss': wl,
+            'stake': stake, 'settled': datetime.now().isoformat(),
+            'match': matched_active.get('match', '') if matched_active else '',
+        })
+        _log_settlement(bet_id, result, wl)
+        # Learn tennis results for Elo update
+        if matched_active and matched_active.get('sport') == 'tennis':
+            _learn_tennis_result(
+                matched_active.get('match', ''),
+                result,
+                matched_active.get('label', ''))
+        # LLM post-match analysis (async, non-blocking)
+        if matched_active:
+            _llm_postmatch_learn(matched_active, result, wl)
+        # Remove from active
+        state['active_bets'] = [ab for ab in state['active_bets'] if ab.get('bet_id') != bet_id]
+        processed_ids.add(bet_id)
+        settled += 1
+
+    # Persist processed IDs (keep last 200 to avoid unbounded growth)
+    all_ids = list(processed_ids)
+    state['all_processed_ids'] = all_ids[-200:] if len(all_ids) > 200 else all_ids
+
+    if settled:
+        log.info('Settled %d bets | P&L today: $%+.2f | Bankroll: $%.2f',
+                 settled, state['daily_pnl'], state['bankroll'])
+    else:
+        log.info('No new settlements')
+
+    state['last_result_check'] = datetime.now().isoformat()
+    # Full recalculation of ROI stats after settlements
+    if settled:
+        _recalculate_roi_by_type()
+        _recalibrate_model()
+    return settled
+
+# ---------------------------------------------------------------------------
+# Bankroll reconciliation
+# ---------------------------------------------------------------------------
+def reconcile_bankroll(api, state):
+    """Reconcile local bankroll with Cloudbet actual balance."""
+    try:
+        bets = api.get_bets(limit=200, days_back=120)
+        if not bets:
+            return
+        # Sum all pending stakes
+        pending_stake = sum(float(b.get('stake', 0)) for b in bets if not b.get('isSettled'))
+        # Sum all settled P&L
+        settled_pnl = sum(float(b.get('winLoss', 0)) for b in bets if b.get('isSettled'))
+        settled_stakes = sum(float(b.get('stake', 0)) for b in bets
+                            if b.get('isSettled') and b.get('result') == 'LOSS')
+
+        # Log discrepancy if any
+        local_bankroll = state['bankroll']
+        local_active = sum(b.get('stake', 0) for b in state.get('active_bets', []))
+        if abs(local_active - pending_stake) > 1.0:
+            log.warning('RECONCILE: local active=$%.2f vs API pending=$%.2f (diff=$%.2f)',
+                        local_active, pending_stake, local_active - pending_stake)
+        # Store for dashboard
+        state['_reconcile'] = {
+            'api_pending_stake': round(pending_stake, 2),
+            'api_settled_pnl': round(settled_pnl, 2),
+            'local_bankroll': round(local_bankroll, 2),
+            'local_active_stake': round(local_active, 2),
+            'checked': datetime.now().isoformat(),
+        }
+
+        # --- Ghost bet pruning: remove local bets that API no longer knows about ---
+        api_bet_ids = {b.get('betId', '') for b in bets}
+        now = datetime.now()
+        pruned = []
+        kept = []
+        for ab in state.get('active_bets', []):
+            placed_str = ab.get('placed', '') or ab.get('placed_at', '')
+            try:
+                placed_dt = datetime.fromisoformat(placed_str.replace('Z', '+00:00').split('+')[0])
+            except (ValueError, TypeError):
+                placed_dt = now  # keep if we can't parse date
+            age_days = (now - placed_dt.replace(tzinfo=None)).days
+            bet_id = ab.get('bet_id', '')
+            # If bet is >5 days old and NOT in API response (neither pending nor settled), prune it
+            if age_days > 5 and bet_id not in api_bet_ids:
+                pruned.append(ab)
+            else:
+                kept.append(ab)
+        if pruned:
+            state['active_bets'] = kept
+            for p in pruned:
+                log.warning('PRUNE ghost bet: %s | %s | age=%dd | stake=$%.2f',
+                            p.get('bet_id', '')[:12], p.get('match', ''),
+                            (now - datetime.fromisoformat(p.get('placed', now.isoformat()))).days,
+                            p.get('stake', 0))
+            _pruned_ids = [p.get('bet_id', '') for p in pruned if p.get('bet_id')]
+            _pids2 = list(set(state.get('all_processed_ids', []) + _pruned_ids))
+            state['all_processed_ids'] = _pids2[-200:]
+            log.info('Pruned %d ghost bets (total stake=$%.2f)',
+                     len(pruned), sum(p.get('stake', 0) for p in pruned))
+        # --- Auto-void bets stuck PENDING in API >20 days ---
+        api_pending_by_id = {b.get('betId',''): b for b in bets if not b.get('isSettled')}
+        voided = []
+        kept2 = []
+        for ab in state.get('active_bets', []):
+            placed_str = ab.get('placed', '') or ab.get('placed_at', '')
+            try:
+                placed_dt = datetime.fromisoformat(placed_str.replace('Z', '+00:00').split('+')[0])
+                age_days = (now - placed_dt.replace(tzinfo=None)).days
+            except Exception:
+                age_days = 0
+            bet_id = ab.get('bet_id', '')
+            api_bet = api_pending_by_id.get(bet_id)
+            if api_bet and age_days > 20:
+                voided.append(ab)
+                log.warning('AUTO-VOID stuck bet: %s | %s | age=%dd | stake=$%.2f',
+                            bet_id[:12], ab.get('match', '')[:30], age_days, ab.get('stake', 0))
+            else:
+                kept2.append(ab)
+        if voided:
+            state['active_bets'] = kept2
+            _voided_ids = [v.get('bet_id', '') for v in voided if v.get('bet_id')]
+            _pids = list(set(state.get('all_processed_ids', []) + _voided_ids))
+            state['all_processed_ids'] = _pids[-200:]
+            log.info('Auto-voided %d stuck bets (total stake=$%.2f) — treated as VOID, no P&L change',
+                     len(voided), sum(v.get('stake', 0) for v in voided))
+        # --- Detect bets in API but missing locally ---
+        local_bet_ids = {ab.get('bet_id', '') for ab in state.get('active_bets', [])}
+        for b in bets:
+            if b.get('isSettled'):
+                continue
+            bid = b.get('betId', '')
+            if bid and bid not in local_bet_ids:
+                sel = b.get('selection', {})
+                _match = sel.get('eventName', sel.get('eventId', ''))
+                if _save_bet(state, bid, _match, sel.get('marketUrl',''), 'soccer',
+                             float(b.get('price',0)), float(b.get('stake',0)),
+                             source='api_sync_reconcile'):
+                    log.info('RECONCILE: added missing bet %s (stake=$%.2f)', bid[:12], float(b.get('stake',0)))
+    except Exception as e:
+        log.debug('Reconcile bankroll failed: %s', e)
+
+
+
+
+def _llm_postmatch_learn(bet_info, result, win_loss):
+    """
+    Ask LLM to analyze why a bet won or lost.
+    Saves insights to llm_postmatch_log.jsonl.
+    Non-blocking: runs in background thread.
+    """
+    import threading
+    def _analyze():
+        try:
+            from oraculo_llm import OLLAMA_URL, OLLAMA_MODEL, OLLAMA_TIMEOUT
+            import requests as _rq, re as _re
+            match = bet_info.get('match', '?')
+            label = bet_info.get('label', '?')
+            odds = bet_info.get('odds', 0)
+            stake = bet_info.get('stake', 0)
+            edge = bet_info.get('edge', 0)
+            model_prob = bet_info.get('model_prob', 0)
+            sport = bet_info.get('sport', 'unknown')
+            outcome = 'WON' if result == 'WIN' else 'LOST'
+            implied = (1/odds) if odds > 0 else 0
+            prompt = (
+                "You are a sports betting analyst. Analyze why this bet " + outcome + ".\n"
+                "Be concise (2-3 sentences). Focus on what the model got right or missed.\n\n"
+                "BET: " + match + "\nSELECTION: " + label + "\nSPORT: " + sport + "\n"
+                "MODEL PROB: " + str(round(model_prob*100, 1)) + "% | "
+                "IMPLIED: " + str(round(implied*100, 1)) + "% | "
+                "EDGE: " + str(round(edge*100, 1)) + "%\n"
+                "ODDS: " + str(odds) + " | STAKE: $" + str(stake) +
+                " | OUTCOME: " + outcome + " (P&L: $" + str(round(win_loss, 2)) + ")\n\n"
+                "Format: LESSON: <your analysis>"
+            )
+            r = _rq.post(OLLAMA_URL, json={
+                'model': OLLAMA_MODEL,
+                'prompt': prompt,
+                'stream': False,
+                'options': {'num_predict': 120, 'temperature': 0.3}
+            }, timeout=OLLAMA_TIMEOUT)
+            if r.status_code != 200:
+                return
+            text = r.json().get('response', '').strip()
+            m = _re.search(r'LESSON:\s*(.+)', text, _re.IGNORECASE | _re.DOTALL)
+            lesson = m.group(1).strip() if m else text[:200]
+            entry = {
+                'ts': datetime.now().isoformat(),
+                'match': match, 'label': label, 'sport': sport,
+                'odds': odds, 'model_prob': model_prob, 'edge': edge,
+                'stake': stake, 'outcome': outcome, 'pnl': win_loss,
+                'lesson': lesson,
+            }
+            log_file = os.path.join(SCRIPT_DIR, 'llm_postmatch_log.jsonl')
+            with open(log_file, 'a') as f:
+                f.write(json.dumps(entry) + '\n')
+            log.info('[LLM Learn] %s %s -> %s', outcome, match[:35], lesson[:80])
+            if outcome == 'LOST' and abs(win_loss) >= 3.0:
+                send_telegram(
+                    'LLM Post-Match\n'
+                    'PERDIDA: ' + match + '\n'
+                    'Leccion: ' + lesson[:200]
+                )
+        except Exception as e:
+            log.debug('LLM postmatch failed: %s', e)
+    threading.Thread(target=_analyze, daemon=True).start()
+
+def _learn_tennis_result(match_name, result, label):
+    """Feed settled tennis result back into Elo cache."""
+    try:
+        if "Winner" not in label:
+            return
+        if " vs " not in match_name:
+            return
+        parts = match_name.split(" vs ")
+        if len(parts) != 2:
+            return
+        player_a = parts[0].strip()
+        player_b = parts[1].strip()
+
+        picked = label.replace("Winner: ", "").replace("Winner:", "").strip()
+
+        if result == "WIN":
+            winner = picked
+            loser = player_b if picked in player_a or player_a in picked else player_a
+        elif result == "LOSS":
+            loser = picked
+            winner = player_b if picked in player_a or player_a in picked else player_a
+        else:
+            return
+
+        results_file = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'tennis', 'recent_results.json')
+        os.makedirs(os.path.dirname(results_file), exist_ok=True)
+        results = []
+        if os.path.exists(results_file):
+            try:
+                results = json.load(open(results_file))
+            except Exception:
+                results = []
+
+        today = datetime.now().strftime('%Y-%m-%d')
+        key = winner + '|' + loser + '|' + today
+        existing_keys = set(r['winner'] + '|' + r['loser'] + '|' + r['date'] for r in results)
+        if key in existing_keys:
+            return
+
+        results.append({
+            'winner': winner, 'loser': loser,
+            'date': today, 'surface': 'hard',
+            'source': 'cloudbet_settled',
+        })
+        with open(results_file, 'w') as f:
+            json.dump(results, f, indent=2)
+        log.info('Tennis Elo learned: %s beat %s', winner, loser)
+    except Exception as e:
+        log.debug('Tennis learn failed: %s', e)
+
+# ---------------------------------------------------------------------------
+# Telegram alerts
+# ---------------------------------------------------------------------------
+TELEGRAM_BOT_TOKEN = '8238423049:AAF0KtHgp2oej4HRIQ-RqhD34xZWlH_OI1o'
+TELEGRAM_CHAT_ID = '1521532947'
+TELEGRAM_ENABLED = True
+
+def send_telegram(msg):
+    """Send alert via Telegram. Fire-and-forget."""
+    if not TELEGRAM_ENABLED:
+        return
+    try:
+        import requests as _req
+        url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
+        _req.post(url, json={'chat_id': TELEGRAM_CHAT_ID, 'text': msg,
+                             'parse_mode': 'Markdown'}, timeout=5)
+    except Exception:
+        pass
+
+def check_alerts(state):
+    """Send Telegram alerts for important events."""
+    # Alert on loss streak
+    streak = state.get('consecutive_losses', 0)
+    if streak >= 3 and not state.get('_alerted_streak'):
+        send_telegram(f'⚠️ *Oraculo Alert*: {streak} consecutive losses! '
+                      f'Bankroll: ${state["bankroll"]:.2f}')
+        state['_alerted_streak'] = True
+    elif streak < 3:
+        state.pop('_alerted_streak', None)
+
+    # Alert on circuit breaker (trigger + recovery)
+    cb_now = state['bankroll'] < CIRCUIT_BREAKER
+    cb_was = state.get('_cb_active', False)
+    if cb_now and not cb_was:
+        send_telegram(f'CIRCUIT BREAKER: Bankroll ${state["bankroll"]:.2f} < ${CIRCUIT_BREAKER:.2f}. Betting STOPPED.')
+        state['_cb_active'] = True
+    elif not cb_now and cb_was:
+        send_telegram(f'RECOVERED: Bankroll ${state["bankroll"]:.2f} >= ${CIRCUIT_BREAKER:.2f}. Betting RESUMED.')
+        state['_cb_active'] = False
+
+    # Alert on big win
+    daily_pnl = state.get('daily_pnl', 0)
+    if daily_pnl > 10 and not state.get('_alerted_big_win'):
+        send_telegram(f'🎉 *Oraculo*: Gran dia! P&L: ${daily_pnl:+.2f} | '
+                      f'Bankroll: ${state["bankroll"]:.2f}')
+        state['_alerted_big_win'] = True
+
+    # Daily summary at first cycle after midnight reset
+    if state.get('daily_date') != datetime.now().strftime('%Y-%m-%d'):
+        yesterday_pnl = state.get('daily_pnl', 0)
+        if abs(yesterday_pnl) > 0.01:
+            wins = state.get('wins', 0)
+            losses = state.get('losses', 0)
+            send_telegram(f'📊 *Oraculo Daily Summary*\n'
+                          f'P&L ayer: ${yesterday_pnl:+.2f}\n'
+                          f'Bankroll: ${state["bankroll"]:.2f}\n'
+                          f'Record: {wins}W/{losses}L\n'
+                          f'Active: {len(state.get("active_bets", []))} bets')
+
+# ---------------------------------------------------------------------------
+# Prediction tracking (for backtest validation)
+# ---------------------------------------------------------------------------
+
+
+def _capture_closing_odds(api, state):
+    """Capture closing odds for active bets near kickoff (within 2h).
+    Stores closing_odds on the bet entry for CLV calculation later."""
+    try:
+        now = datetime.utcnow()
+        for bet in state.get('active_bets', []):
+            if bet.get('closing_odds'):
+                continue  # Already captured
+            eid = bet.get('event_id', '')
+            if not eid:
+                continue
+            # Only capture if we have the placed odds
+            placed_odds = bet.get('odds', 0)
+            if placed_odds <= 1:
+                continue
+            # Try to get current odds from API
+            try:
+                events = api.get_odds_by_event(eid) if hasattr(api, 'get_odds_by_event') else None
+                if not events:
+                    # Fallback: query via v2
+                    r = api.v2.get(f'{CB_BASE}/pub/v2/odds/events/{eid}', timeout=10)
+                    if r.status_code != 200:
+                        continue
+                    ev = r.json()
+                else:
+                    ev = events
+                # Find matching market
+                market_url = bet.get('market_url', bet.get('market', ''))
+                if not market_url:
+                    continue
+                # Parse market from selection
+                markets = ev.get('markets', {})
+                for mk_name, mk_data in markets.items():
+                    for sv in mk_data.get('submarkets', {}).values():
+                        for sel in sv.get('selections', []):
+                            if sel.get('marketUrl', '') == market_url:
+                                current_price = float(sel.get('price', 0))
+                                if current_price > 1.0:
+                                    bet['closing_odds'] = current_price
+                                    bet['clv'] = round((placed_odds / current_price) - 1, 4)
+                                    break
+            except Exception:
+                continue
+    except Exception as e:
+        log.debug('CLV capture error: %s', e)
+
+
+def _compute_clv_stats(state):
+    """Compute aggregate CLV statistics from settled bets."""
+    try:
+        if not os.path.exists(PREDICTIONS_FILE):
+            return None
+        lines = open(PREDICTIONS_FILE).readlines()
+        clv_data = []
+        for ln in lines:
+            try:
+                e = json.loads(ln)
+                if e.get('result') and e.get('closing_odds') and e.get('odds'):
+                    placed = float(e['odds'])
+                    closing = float(e['closing_odds'])
+                    clv = (placed / closing) - 1
+                    clv_data.append(clv)
+            except Exception:
+                pass
+        if len(clv_data) < 5:
+            return None
+        avg_clv = sum(clv_data) / len(clv_data)
+        positive = sum(1 for c in clv_data if c > 0)
+        return {
+            'avg_clv': round(avg_clv, 4),
+            'clv_positive_pct': round(positive / len(clv_data), 3),
+            'sample': len(clv_data),
+        }
+    except Exception:
+        return None
+
+PREDICTIONS_FILE = os.path.join(SCRIPT_DIR, 'predictions_log.jsonl')
+
+def _classify_market_type(label, sport):
+    """Classify bet into market category for ROI tracking."""
+    label_low = label.lower()
+    if sport == 'tennis':
+        return 'tennis'
+    if 'over' in label_low or 'under' in label_low:
+        return 'over_under'
+    if 'asian' in label_low or 'handicap' in label_low or 'ah' in label_low:
+        return 'asian_handicap'
+    if 'btts' in label_low or 'both teams' in label_low:
+        return 'btts'
+    return 'result_1x2'
+
+def _log_prediction(match, label, model_prob, edge, odds, stake, bet_id, sport, signal='model', league='', event_id='', conf=None):
+    """Append prediction to JSONL file for backtest analysis."""
+    try:
+        entry = {
+            'ts': datetime.now().isoformat(),
+            'match': match, 'label': label,
+            'model_prob': round(model_prob, 4),
+            'edge': round(edge, 4),
+            'odds': odds, 'stake': stake,
+            'bet_id': bet_id, 'sport': sport,
+            'league': league, 'event_id': event_id,
+            'conf': round(conf, 4) if conf is not None else round(model_prob, 4),
+            'market_type': _classify_market_type(label, sport),
+            'signal': signal,
+            'result': None,  # filled later by _log_settlement
+        }
+        with open(PREDICTIONS_FILE, 'a') as f:
+            f.write(json.dumps(entry) + '\n')
+    except Exception:
+        pass
+
+
+def _save_bet(state, bet_id, match, label, sport, odds, stake, edge=0,
+              event_id='', market_url='', cutoff_time='', source='model',
+              currency='USDC', **extra):
+    """Single authoritative function for saving a placed bet to active_bets.
+
+    Returns True if saved, False if rejected (empty bet_id or duplicate).
+    Guards:
+    - bet_id must be non-empty string
+    - bet_id must not already exist in active_bets
+    - Updates daily_staked and bets_placed_today
+    - Atomically saves state to disk
+    """
+    if not bet_id or not isinstance(bet_id, str):
+        log.warning('[_save_bet] Rejected: empty or invalid bet_id (match=%s label=%s)', match[:30], label[:20])
+        return False
+
+    existing = {b.get('bet_id') for b in state.get('active_bets', [])}
+    if bet_id in existing:
+        log.debug('[_save_bet] Skipped duplicate bet_id %s', bet_id[:12])
+        return False
+
+    entry = {
+        'bet_id': bet_id,
+        'match': match,
+        'label': label,
+        'sport': sport,
+        'odds': odds,
+        'stake': stake,
+        'edge': edge,
+        'placed': datetime.now().isoformat(),
+        'event_id': event_id,
+        'market_url': market_url,
+        'cutoff_time': cutoff_time,
+        'source': source,
+        'currency': currency,
+    }
+    entry.update(extra)
+    state['active_bets'].append(entry)
+    save_state(state)
+    log.info('[_save_bet] Saved bet %s | %s | $%.2f', bet_id[:12], label[:25], stake)
+    return True
+
+def _log_settlement(bet_id, result, win_loss):
+    """Update prediction log with result. Also update ROI-by-type tracking."""
+    try:
+        if not os.path.exists(PREDICTIONS_FILE):
+            return
+        lines = open(PREDICTIONS_FILE).readlines()
+        updated = False
+        new_lines = []
+        settled_entry = None
+        for line in lines:
+            entry = json.loads(line.strip())
+            if entry.get('bet_id') == bet_id and entry.get('result') is None:
+                entry['result'] = result
+                entry['win_loss'] = win_loss
+                entry['settled_ts'] = datetime.now().isoformat()
+                updated = True
+                settled_entry = entry
+            new_lines.append(json.dumps(entry) + '\n')
+        if updated:
+            with open(PREDICTIONS_FILE, 'w') as f:
+                f.writelines(new_lines)
+        if settled_entry:
+            _update_roi_by_type(settled_entry)
+    except Exception:
+        pass
+
+def _recalculate_roi_by_type():
+    """Full recalculation of ROI by market type from predictions log."""
+    try:
+        pred_path = os.path.join(SCRIPT_DIR, "predictions_log.jsonl")
+        if not os.path.exists(pred_path):
+            return
+        preds = []
+        with open(pred_path) as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        preds.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        by_type = {}
+        for p in preds:
+            mt = p.get("market_type", "unknown")
+            if mt not in by_type:
+                by_type[mt] = {"bets": 0, "wins": 0, "losses": 0, "staked": 0.0, "profit": 0.0}
+            by_type[mt]["bets"] += 1
+            by_type[mt]["staked"] += p.get("stake", 0)
+            r = p.get("result")
+            if r == "WIN":
+                by_type[mt]["wins"] += 1
+                by_type[mt]["profit"] += p.get("stake", 0) * (p.get("odds", p.get("price", 1)) - 1)
+            elif r == "LOSS":
+                by_type[mt]["losses"] += 1
+                by_type[mt]["profit"] -= p.get("stake", 0)
+            # Also track by signal
+            sig = p.get("signal", "model")
+            sig_key = "signal_" + sig
+            if sig_key not in by_type:
+                by_type[sig_key] = {"bets": 0, "wins": 0, "losses": 0, "staked": 0.0, "profit": 0.0}
+            by_type[sig_key]["bets"] += 1
+            by_type[sig_key]["staked"] += p.get("stake", 0)
+            if r == "WIN":
+                by_type[sig_key]["wins"] += 1
+                by_type[sig_key]["profit"] += p.get("stake", 0) * (p.get("odds", p.get("price", 1)) - 1)
+            elif r == "LOSS":
+                by_type[sig_key]["losses"] += 1
+                by_type[sig_key]["profit"] -= p.get("stake", 0)
+        for mt, d in by_type.items():
+            d["staked"] = round(d["staked"], 2)
+            d["profit"] = round(d["profit"], 2)
+            d["roi_pct"] = round(d["profit"] / d["staked"] * 100, 2) if d["staked"] else 0
+        by_type["_updated"] = datetime.now().isoformat()
+        roi_file = os.path.join(SCRIPT_DIR, "roi_by_type.json")
+        with open(roi_file, "w") as f:
+            json.dump(by_type, f, indent=2)
+        log.info("ROI by type recalculated: %d market types", len([k for k in by_type if not k.startswith("_")]))
+    except Exception as e:
+        log.debug("ROI recalculation failed: %s", e)
+
+
+def _recalibrate_model():
+    """Compute calibration factors from actual results vs predicted probs."""
+    try:
+        pred_path = os.path.join(SCRIPT_DIR, "predictions_log.jsonl")
+        if not os.path.exists(pred_path):
+            return
+        preds = []
+        with open(pred_path) as f:
+            for line in f:
+                if line.strip():
+                    try:
+                        preds.append(json.loads(line))
+                    except Exception:
+                        continue
+        by_type = {}
+        for p in preds:
+            r = p.get("result")
+            if r not in ("WIN", "LOSS"):
+                continue
+            mt = p.get("market_type", "unknown")
+            if mt not in by_type:
+                by_type[mt] = {"wins": 0, "total": 0, "sum_prob": 0.0}
+            by_type[mt]["total"] += 1
+            by_type[mt]["sum_prob"] += p.get("model_prob", 0.5)
+            if r == "WIN":
+                by_type[mt]["wins"] += 1
+        cal = {}
+        for mt, d in by_type.items():
+            if d["total"] < 10:
+                continue
+            actual_wr = d["wins"] / d["total"]
+            avg_prob = d["sum_prob"] / d["total"]
+            if avg_prob > 0:
+                cal[mt] = round(actual_wr / avg_prob, 4)
+        cal["_updated"] = datetime.now().isoformat()
+        cal_path = os.path.join(SCRIPT_DIR, "calibration.json")
+        with open(cal_path, "w") as f:
+            json.dump(cal, f, indent=2)
+        log.info("Calibration updated: %s", {k: v for k, v in cal.items() if k != "_updated"})
+    except Exception as e:
+        log.debug("Calibration failed: %s", e)
+
+
+def _load_calibration():
+    """Load calibration factors. Returns dict of market_type -> factor."""
+    try:
+        cal_path = os.path.join(SCRIPT_DIR, "calibration.json")
+        if os.path.exists(cal_path):
+            with open(cal_path) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+def _update_roi_by_type(entry):
+    """Update rolling ROI statistics per market type."""
+    try:
+        roi_file = os.path.join(SCRIPT_DIR, 'roi_by_type.json')
+        roi = {}
+        if os.path.exists(roi_file):
+            roi = json.load(open(roi_file))
+        mtype = entry.get('market_type', 'unknown')
+        stake = float(entry.get('stake', 0))
+        wl = float(entry.get('win_loss', 0))
+        won = entry.get('result') == 'WIN'
+        if mtype not in roi:
+            roi[mtype] = {'bets': 0, 'wins': 0, 'losses': 0,
+                          'staked': 0.0, 'profit': 0.0, 'roi_pct': 0.0}
+        roi[mtype]['bets'] += 1
+        roi[mtype]['staked'] = round(roi[mtype]['staked'] + stake, 2)
+        roi[mtype]['profit'] = round(roi[mtype]['profit'] + wl, 2)
+        if won:
+            roi[mtype]['wins'] += 1
+        else:
+            roi[mtype]['losses'] += 1
+        if roi[mtype]['staked'] > 0:
+            roi[mtype]['roi_pct'] = round(roi[mtype]['profit'] / roi[mtype]['staked'] * 100, 2)
+        # Also track by signal type (steam vs model)
+        sig = entry.get('signal', 'model')
+        sig_key = 'signal_' + sig
+        if sig_key not in roi:
+            roi[sig_key] = {'bets': 0, 'wins': 0, 'losses': 0, 'staked': 0.0, 'profit': 0.0, 'roi_pct': 0.0}
+        roi[sig_key]['bets'] += 1
+        roi[sig_key]['staked'] = round(roi[sig_key]['staked'] + stake, 2)
+        roi[sig_key]['profit'] = round(roi[sig_key]['profit'] + wl, 2)
+        if won:
+            roi[sig_key]['wins'] += 1
+        else:
+            roi[sig_key]['losses'] += 1
+        if roi[sig_key]['staked'] > 0:
+            roi[sig_key]['roi_pct'] = round(roi[sig_key]['profit'] / roi[sig_key]['staked'] * 100, 2)
+        roi['_updated'] = datetime.now().isoformat()
+        with open(roi_file, 'w') as f:
+            json.dump(roi, f, indent=2)
+        log.info('ROI by type: %s -> %.1f%% ROI (%d bets)',
+                 mtype, roi[mtype]['roi_pct'], roi[mtype]['bets'])
+    except Exception as e:
+        log.debug('ROI update failed: %s', e)
+
+def get_roi_summary():
+    """Return formatted ROI summary by market type."""
+    try:
+        roi_file = os.path.join(SCRIPT_DIR, 'roi_by_type.json')
+        if not os.path.exists(roi_file):
+            return "No ROI data yet."
+        roi = json.load(open(roi_file))
+        lines = ["ROI por tipo de apuesta:"]
+        order = ['tennis', 'over_under', 'result_1x2', 'btts']
+        for mtype in order + [k for k in roi if k not in order and not k.startswith('_')]:
+            if mtype not in roi or mtype.startswith('_'):
+                continue
+            d = roi[mtype]
+            wr = d['wins'] / d['bets'] * 100 if d['bets'] > 0 else 0
+            emoji = 'UP' if d['roi_pct'] > 0 else 'DOWN'
+            lines.append(f"[{emoji}] {mtype}: {d['bets']} bets | WR {wr:.0f}% | ROI {d['roi_pct']:+.1f}%")
+        return '\n'.join(lines)
+    except Exception:
+        return "Error reading ROI data."
+
+# ---------------------------------------------------------------------------
+# Obsidian sync
+# ---------------------------------------------------------------------------
+def sync_obsidian(state):
+    """Update Obsidian betting log."""
+    try:
+        os.makedirs(OBSIDIAN_DIR, exist_ok=True)
+        today = datetime.now().strftime('%Y-%m-%d')
+        path = os.path.join(OBSIDIAN_DIR, f'Oraculo Betting - {today}.md')
+
+        settled_list = state.get('settled_today', [])
+        active_list = state.get('active_bets', [])
+        wins = state.get('wins', 0)
+        losses = state.get('losses', 0)
+        total = wins + losses
+        wr = (wins / total * 100) if total > 0 else 0
+
+        lines = [
+            f'# Oraculo Betting Log - {today}\n',
+            f'> Actualizado: {datetime.now():%Y-%m-%d %H:%M} (auto-runner)\n',
+            f'## Bankroll',
+            f'- **Balance**: ${state["bankroll"]:.2f} USDC',
+            f'- **Profit total**: ${state["total_pnl"]:+.2f}',
+            f'- **Hoy**: ${state["daily_pnl"]:+.2f} ({state["bets_placed_today"]} bets)',
+            f'- **Record**: {wins}W / {losses}L ({wr:.1f}%)',
+            f'- **Pendientes**: {len(active_list)}',
+            '',
+        ]
+
+        if settled_list:
+            lines.append('## Resueltas hoy\n')
+            lines.append('| Match | Result | P&L |')
+            lines.append('|-------|--------|-----|')
+            for s in settled_list:
+                lines.append(f'| {s.get("match", "?")[:40]} | {s["result"]} | ${s["winLoss"]:+.2f} |')
+            lines.append('')
+
+        if active_list:
+            lines.append('## Pendientes\n')
+            lines.append('| Match | Market | Odds | Stake |')
+            lines.append('|-------|--------|------|-------|')
+            for a in active_list:
+                lines.append(f'| {a.get("match", "?")[:35]} | {a.get("label", "")} | {a["odds"]:.3f} | ${a["stake"]:.2f} |')
+            lines.append('')
+
+        lines.append('---')
+        lines.append('**Auto-sync por oraculo_runner_auto.py**')
+
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(lines))
+        log.info('Obsidian synced: %s', path)
+    except Exception as e:
+        log.error('Obsidian sync failed: %s', e)
+
+# ---------------------------------------------------------------------------
+# Main scan cycle
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# HTML Dashboard
+# ---------------------------------------------------------------------------
+DASHBOARD_FILE = os.path.join(SCRIPT_DIR, 'dashboard.html')
+
+def generate_dashboard(state):
+    """Generate a simple HTML dashboard."""
+    try:
+        wins = state.get('wins', 0)
+        losses = state.get('losses', 0)
+        total = wins + losses
+        wr = (wins / total * 100) if total > 0 else 0
+        active = state.get('active_bets', [])
+        settled = state.get('settled_today', [])
+        reconcile = state.get('_reconcile', {})
+
+        active_rows = ""
+        for b in sorted(active, key=lambda x: x.get('placed', ''), reverse=True):
+            edge_pct = b.get('edge', 0) * 100
+            active_rows += f"""<tr>
+                <td>{b.get('match','?')[:40]}</td>
+                <td>{b.get('label','?')}</td>
+                <td>{b.get('odds',0):.2f}</td>
+                <td>${b.get('stake',0):.2f}</td>
+                <td>{edge_pct:.1f}%</td>
+                <td>{b.get('placed','?')[:16]}</td>
+            </tr>"""
+
+        settled_rows = ""
+        for s in settled:
+            wl = s.get('winLoss', 0)
+            cls = 'win' if s.get('result') == 'WIN' else 'loss'
+            settled_rows += f"""<tr class="{cls}">
+                <td>{s.get('match','?')[:40]}</td>
+                <td>{s.get('result','?')}</td>
+                <td>${wl:+.2f}</td>
+                <td>{s.get('settled','?')[:16]}</td>
+            </tr>"""
+
+        # Load prediction log stats
+        pred_stats = ""
+        pred_file = os.path.join(SCRIPT_DIR, 'predictions_log.jsonl')
+        if os.path.exists(pred_file):
+            lines = open(pred_file).readlines()
+            total_pred = len(lines)
+            settled_pred = sum(1 for l in lines if '"result":' in l and '"result": null' not in l)
+            pred_stats = f"Predictions logged: {total_pred} ({settled_pred} settled)"
+
+        html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Oraculo Dashboard</title>
+<meta http-equiv="refresh" content="120">
+<style>
+  body {{ font-family: -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0; margin: 20px; }}
+  h1 {{ color: #00d4ff; }} h2 {{ color: #7b68ee; border-bottom: 1px solid #333; padding-bottom: 5px; }}
+  .kpi {{ display: flex; gap: 20px; flex-wrap: wrap; margin: 20px 0; }}
+  .kpi-box {{ background: #16213e; border-radius: 10px; padding: 15px 25px; min-width: 150px; }}
+  .kpi-box .label {{ font-size: 0.8em; color: #888; }} .kpi-box .value {{ font-size: 1.8em; font-weight: bold; }}
+  .pos {{ color: #00ff88; }} .neg {{ color: #ff4444; }}
+  table {{ width: 100%; border-collapse: collapse; margin: 10px 0; }}
+  th {{ background: #16213e; padding: 8px; text-align: left; }} td {{ padding: 6px 8px; border-bottom: 1px solid #222; }}
+  tr.win td {{ background: rgba(0,255,136,0.05); }} tr.loss td {{ background: rgba(255,68,68,0.05); }}
+  .footer {{ margin-top: 30px; color: #555; font-size: 0.8em; }}
+</style></head><body>
+<h1>Oraculo V2 Dashboard</h1>
+<div class="kpi">
+  <div class="kpi-box"><div class="label">Bankroll</div><div class="value">${state['bankroll']:.2f}</div></div>
+  <div class="kpi-box"><div class="label">Total P&L</div><div class="value {'pos' if state.get('total_pnl',0)>=0 else 'neg'}">${state.get('total_pnl',0):+.2f}</div></div>
+  <div class="kpi-box"><div class="label">Today P&L</div><div class="value {'pos' if state.get('daily_pnl',0)>=0 else 'neg'}">${state.get('daily_pnl',0):+.2f}</div></div>
+  <div class="kpi-box"><div class="label">Record</div><div class="value">{wins}W / {losses}L</div></div>
+  <div class="kpi-box"><div class="label">Win Rate</div><div class="value">{wr:.1f}%</div></div>
+  <div class="kpi-box"><div class="label">Active Bets</div><div class="value">{len(active)}</div></div>
+  <div class="kpi-box"><div class="label">Loss Streak</div><div class="value">{state.get('consecutive_losses',0)}</div></div>
+</div>
+
+<h2>Active Bets ({len(active)})</h2>
+<table><tr><th>Match</th><th>Label</th><th>Odds</th><th>Stake</th><th>Edge</th><th>Placed</th></tr>
+{active_rows}</table>
+
+<h2>Settled Today ({len(settled)})</h2>
+<table><tr><th>Match</th><th>Result</th><th>P&L</th><th>Settled</th></tr>
+{settled_rows}</table>
+
+<div class="footer">
+  Last scan: {state.get('last_scan', 'never')[:19]}<br>
+  Last check: {state.get('last_result_check', 'never')[:19]}<br>
+  {pred_stats}<br>
+  Reconcile: {json.dumps(reconcile) if reconcile else 'N/A'}<br>
+  Auto-refresh every 2 minutes
+</div>
+</body></html>"""
+
+        with open(DASHBOARD_FILE, 'w') as f:
+            f.write(html)
+    except Exception as e:
+        log.debug('Dashboard generation failed: %s', e)
+
+
+# ---------------------------------------------------------------------------
+# Manual bet queue (user-requested bets)
+# ---------------------------------------------------------------------------
+MANUAL_BETS_FILE = os.path.join(SCRIPT_DIR, 'manual_bets.json')
+
+def process_manual_bets(api, state):
+    """Process user-requested manual bets from manual_bets.json.
+
+    File format:
+    {
+      "bets": [
+        {"match": "Player A vs Player B", "pick": "Player A", "sport": "tennis",
+         "stake": 5.0, "competition": "tennis-atp-atp-miami-usa-men-singles"},
+        {"match": "Team A vs Team B", "pick": "over", "market": "over25",
+         "sport": "soccer", "stake": 3.0, "competition": "soccer-england-premier-league"}
+      ]
+    }
+
+    After processing, bets are moved to "processed" list with result.
+    """
+    if not os.path.exists(MANUAL_BETS_FILE):
+        return 0
+
+    try:
+        data = json.load(open(MANUAL_BETS_FILE))
+    except Exception as e:
+        log.warning('Manual bets file invalid: %s', e)
+        return 0
+
+    pending = data.get('bets', [])
+    if not pending:
+        return 0
+
+    if state['bankroll'] < CIRCUIT_BREAKER:
+        log.warning('Manual bets skipped: circuit breaker active')
+        return 0
+
+    processed = data.get('processed', [])
+    placed = 0
+    remaining = []
+
+    for bet in pending:
+        match_name = bet.get('match', '')
+        pick = bet.get('pick', '')
+        sport = bet.get('sport', 'tennis')
+        stake = float(bet.get('stake', 0))
+        comp = bet.get('competition', '')
+
+        if not match_name or not pick or stake <= 0:
+            log.warning('Manual bet invalid: %s', bet)
+            processed.append({**bet, 'status': 'INVALID', 'ts': datetime.now().isoformat()})
+            continue
+
+        currency = bet.get('currency', 'USDT')  # Manual bets default to USDT
+        # Warn if manual bet pushes exposure too high
+        total_active = sum(b.get('stake', 0) for b in state.get('active_bets', []))
+        if total_active + stake > state['bankroll'] * 2.0:
+            log.warning('  Manual bet WARNING: total exposure $%.2f would exceed 2x bankroll $%.2f',
+                        total_active + stake, state['bankroll'])
+        log.info('=== MANUAL BET: %s | %s | $%.2f %s ===', match_name, pick, stake, currency)
+
+        # Find the event on Cloudbet
+        event_id = None
+        market_url = None
+        price = None
+
+        if sport == 'tennis':
+            # Search tennis competitions
+            comps_to_check = [comp] if comp else CB_TENNIS
+            for ck in comps_to_check:
+                events = api.get_odds(ck)
+                for ev in events:
+                    home = (ev.get('home') or {}).get('name', '')
+                    away = (ev.get('away') or {}).get('name', '')
+                    # Match by player names
+                    if (pick.lower() in home.lower() or pick.lower() in away.lower()):
+                        eid = str(ev.get('id', ''))
+                        markets = ev.get('markets', {})
+                        winner_mkt = markets.get('tennis.winner', {})
+                        for sk, sub in winner_mkt.get('submarkets', {}).items():
+                            for sel in sub.get('selections', []):
+                                if sel.get('status') != 'SELECTION_ENABLED':
+                                    continue
+                                outcome = sel.get('outcome', '')
+                                sel_price = sel.get('price', 0)
+                                # Match: if pick is home and outcome is home, or pick in name
+                                if ((pick.lower() in home.lower() and outcome == 'home') or
+                                    (pick.lower() in away.lower() and outcome == 'away')):
+                                    event_id = eid
+                                    market_url = sel.get('marketUrl', '')
+                                    price = sel_price
+                                    break
+                        if event_id:
+                            break
+                if event_id:
+                    break
+
+        elif sport == 'soccer':
+            market_key = bet.get('market', 'asian_handicap')
+            comps_to_check = [comp] if comp else list(CB_COMPS.values())
+            for ck in comps_to_check:
+                events = api.get_odds(ck)
+                for ev in events:
+                    home = (ev.get('home') or {}).get('name', '')
+                    away = (ev.get('away') or {}).get('name', '')
+                    if match_name.lower() in (home + ' vs ' + away).lower():
+                        eid = str(ev.get('id', ''))
+                        markets = ev.get('markets', {})
+                        # Find the right market
+                        from oraculo_bet_engine import CB_MARKETS
+                        if market_key in CB_MARKETS:
+                            mkt_base, options = CB_MARKETS[market_key]
+                            mkt_data = markets.get(mkt_base, {})
+                            for sk, sub in mkt_data.get('submarkets', {}).items():
+                                for sel in sub.get('selections', []):
+                                    if sel.get('status') != 'SELECTION_ENABLED':
+                                        continue
+                                    outcome = sel.get('outcome', '')
+                                    if pick.lower() in outcome.lower():
+                                        event_id = eid
+                                        market_url = sel.get('marketUrl', '')
+                                        price = sel.get('price', 0)
+                                        break
+                                if event_id:
+                                    break
+                        if event_id:
+                            break
+                if event_id:
+                    break
+
+        if not event_id or not market_url or not price:
+            log.warning('  Manual bet: event not found on Cloudbet')
+            remaining.append(bet)  # Keep for retry next cycle
+            continue
+
+        log.info('  Found: event=%s market=%s price=%.3f', event_id, market_url, price)
+        # Use bet-specific currency (USDT for friend, USDC for own)
+        orig_currency = api.currency
+        api.currency = currency
+        resp = api.place_straight(event_id, market_url, price, stake)
+        api.currency = orig_currency
+
+        if resp:
+            bet_id = resp.get('betId', '')
+            _save_bet(state, bet_id, match_name,
+                      'Winner: '+pick if sport=='tennis' else pick,
+                      sport, price, stake, source='manual', currency=currency,
+                      owner=bet.get('owner','friend'))
+            state['daily_staked'] += stake
+            log.info('  [OK] Manual bet placed: %s | ID: %s', pick, bet_id[:12])
+            send_telegram('Manual bet placed: {} | {} @{:.2f} | ${:.2f}'.format(
+                match_name, pick, price, stake))
+            processed.append({**bet, 'status': 'PLACED', 'bet_id': bet_id,
+                            'price': price, 'ts': datetime.now().isoformat()})
+            placed += 1
+        else:
+            log.warning('  [FAIL] Manual bet rejected by Cloudbet')
+            processed.append({**bet, 'status': 'REJECTED', 'ts': datetime.now().isoformat()})
+
+        time.sleep(2.0)
+
+    # Save updated file
+    data['bets'] = remaining
+    data['processed'] = processed[-50:]  # Keep last 50
+    with open(MANUAL_BETS_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+
+    # Process manual parlays
+    for parlay in data.get('parlays', []):
+        picks_list = parlay.get('picks', [])
+        stake = float(parlay.get('stake', 0))
+        if len(picks_list) < 2 or stake <= 0:
+            continue
+
+        log.info('=== MANUAL PARLAY: %d legs | $%.2f ===', len(picks_list), stake)
+        selections = []
+        all_found = True
+
+        for pick_info in picks_list:
+            pick_name = pick_info.get('pick', '')
+            comp = pick_info.get('competition', '')
+            found = False
+            comps_to_check = [comp] if comp else CB_TENNIS
+            for ck in comps_to_check:
+                events = api.get_odds(ck)
+                for ev in events:
+                    home = (ev.get('home') or {}).get('name', '')
+                    away = (ev.get('away') or {}).get('name', '')
+                    if pick_name.lower() in home.lower() or pick_name.lower() in away.lower():
+                        eid = str(ev.get('id', ''))
+                        markets = ev.get('markets', {})
+                        winner_mkt = markets.get('tennis.winner', {})
+                        for sk, sub in winner_mkt.get('submarkets', {}).items():
+                            for sel in sub.get('selections', []):
+                                if sel.get('status') != 'SELECTION_ENABLED':
+                                    continue
+                                outcome = sel.get('outcome', '')
+                                if ((pick_name.lower() in home.lower() and outcome == 'home') or
+                                    (pick_name.lower() in away.lower() and outcome == 'away')):
+                                    selections.append({
+                                        'eventId': eid,
+                                        'marketUrl': sel.get('marketUrl', ''),
+                                        'price': sel.get('price', 0),
+                                    })
+                                    log.info('  Leg: %s @%.2f', pick_name, sel.get('price', 0))
+                                    found = True
+                                    break
+                            if found:
+                                break
+                    if found:
+                        break
+                if found:
+                    break
+            if not found:
+                log.warning('  Parlay leg not found: %s', pick_name)
+                all_found = False
+                break
+
+        if all_found and len(selections) == len(picks_list):
+            parlay_currency = parlay.get('currency', 'USDT')
+            orig_currency = api.currency
+            api.currency = parlay_currency
+            resp = api.place_parlay(selections, stake)
+            api.currency = orig_currency
+            if resp:
+                bet_id = resp.get('betId', '')
+                label = ' + '.join(p['pick'] for p in picks_list)
+                _save_bet(state, bet_id, 'PARLAY: '+label, str(len(picks_list))+'-leg parlay',
+                          'tennis', 0, stake, source='manual', currency=parlay_currency,
+                          owner=parlay.get('owner','friend'))
+                state['daily_staked'] += stake
+                log.info('  [OK] Manual parlay placed: %s', bet_id[:12])
+                send_telegram('Manual parlay placed: {} @${:.2f}'.format(label, stake))
+                placed += 1
+            else:
+                log.warning('  [FAIL] Manual parlay rejected')
+            time.sleep(2.0)
+
+    # Clear processed parlays
+    data['parlays'] = []
+
+    if placed:
+        save_state(state)
+    return placed
+
+
+# ---------------------------------------------------------------------------
+# Interactive Telegram Bot (polling)
+# ---------------------------------------------------------------------------
+import threading
+
+def _telegram_bot_loop():
+    """Poll Telegram for commands: /status, /picks, /apostar"""
+    import requests as _req
+    last_update_id = 0
+    bot_url = 'https://api.telegram.org/bot' + TELEGRAM_BOT_TOKEN
+
+    while True:
+        try:
+            r = _req.get(bot_url + '/getUpdates',
+                        params={'offset': last_update_id + 1, 'timeout': 30}, timeout=35)
+            if r.status_code != 200:
+                time.sleep(5)
+                continue
+            updates = r.json().get('result', [])
+            for upd in updates:
+                last_update_id = upd['update_id']
+                msg = upd.get('message', {})
+                text = msg.get('text', '').strip()
+                chat_id = msg.get('chat', {}).get('id')
+                if not text or not chat_id:
+                    continue
+                if str(chat_id) != TELEGRAM_CHAT_ID:
+                    continue
+
+                try:
+                    reply = _handle_telegram_command(text)
+                    if reply:
+                        _req.post(bot_url + '/sendMessage',
+                                 json={'chat_id': TELEGRAM_CHAT_ID, 'text': reply,
+                                       'parse_mode': 'Markdown'}, timeout=5)
+                except Exception as e:
+                    log.debug('Telegram command error: %s', e)
+
+        except Exception:
+            time.sleep(10)
+
+def _handle_telegram_command(text):
+    """Handle a Telegram command and return reply text."""
+    cmd = text.lower().split()
+    if not cmd:
+        return None
+
+    if cmd[0] in ('/status', '/estado'):
+        state = load_state()
+        wins = state.get('wins', 0)
+        losses = state.get('losses', 0)
+        total = wins + losses
+        wr = (wins / total * 100) if total > 0 else 0
+        active = len(state.get('active_bets', []))
+        return ('*Oraculo Status*\n'
+                'Bankroll: ${:.2f}\n'
+                'P&L: ${:+.2f}\n'
+                'Record: {}W/{}L ({:.0f}%)\n'
+                'Active: {} bets\n'
+                'Last scan: {}'.format(
+                    state['bankroll'], state.get('total_pnl', 0),
+                    wins, losses, wr, active,
+                    state.get('last_scan', 'never')[:16]))
+
+    elif cmd[0] in ('/picks', '/recomendaciones'):
+        # Run a quick scan
+        try:
+            api = CloudbetAPI()
+            state = load_state()
+            picks = scan_tennis(api, state, dry_run=True)
+            if not picks:
+                return 'No value picks found right now.'
+            lines = ['*Tennis Picks*\n']
+            for p in picks[:5]:
+                lines.append('{} @{:.2f} | prob={:.0f}% | edge={:.0f}%'.format(
+                    p['label'], p['price'], p['model_prob']*100, p['edge']*100))
+            return '\n'.join(lines)
+        except Exception as e:
+            return 'Error scanning: {}'.format(e)
+
+    elif cmd[0] in ('/apostar', '/bet'):
+        # /apostar Fils 5 USDT
+        # /apostar Humbert 3
+        if len(cmd) < 3:
+            return 'Uso: /apostar <jugador> <monto> [USDT/USDC]'
+        player = cmd[1]
+        try:
+            stake = float(cmd[2])
+        except ValueError:
+            return 'Monto invalido: {}'.format(cmd[2])
+        currency = cmd[3].upper() if len(cmd) > 3 else 'USDT'
+        if currency not in ('USDT', 'USDC'):
+            return 'Currency debe ser USDT o USDC'
+
+        # Find matching player in current events
+        try:
+            api = CloudbetAPI()
+            found_match = None
+            found_player = None
+            for comp in CB_TENNIS:
+                events = api.get_odds(comp)
+                for ev in events:
+                    home = (ev.get('home') or {}).get('name', '')
+                    away = (ev.get('away') or {}).get('name', '')
+                    if player.lower() in home.lower():
+                        found_match = '{} vs {}'.format(home, away)
+                        found_player = home
+                        break
+                    elif player.lower() in away.lower():
+                        found_match = '{} vs {}'.format(home, away)
+                        found_player = away
+                        break
+                if found_match:
+                    break
+
+            if not found_match:
+                return 'Player "{}" not found in active events'.format(player)
+
+            # Add to manual bets
+            mb_path = os.path.join(SCRIPT_DIR, 'manual_bets.json')
+            mb = {'bets': [], 'parlays': [], 'processed': []}
+            if os.path.exists(mb_path):
+                try:
+                    mb = json.load(open(mb_path))
+                except Exception:
+                    pass
+
+            mb.setdefault('bets', []).append({
+                'match': found_match,
+                'pick': found_player,
+                'sport': 'tennis',
+                'stake': stake,
+                'currency': currency,
+                'owner': 'telegram',
+            })
+            with open(mb_path, 'w') as f:
+                json.dump(mb, f, indent=2)
+
+            return ('Queued: {} | {} | ${:.2f} {}\n'
+                    'Will be placed next cycle (max 1h)'.format(
+                        found_match, found_player, stake, currency))
+
+        except Exception as e:
+            return 'Error: {}'.format(e)
+
+    elif cmd[0] in ('/bets', '/apuestas'):
+        state = load_state()
+        active = state.get('active_bets', [])
+        if not active:
+            return 'No active bets'
+        lines = ['*Active Bets ({})*\n'.format(len(active))]
+        for b in active[-10:]:
+            lines.append('{} | {} | ${:.2f}'.format(
+                b.get('match', '?')[:30], b.get('label', '?'), b.get('stake', 0)))
+        if len(active) > 10:
+            lines.append('... and {} more'.format(len(active) - 10))
+        return '\n'.join(lines)
+
+    elif cmd[0] == '/roi':
+        return get_roi_summary()
+    elif cmd[0] == '/kelly':
+        frac = _get_dynamic_kelly_fraction()
+        return 'Kelly: ' + str(round(frac,3)) + ' (' + str(round(frac*100,1)) + '%) | Base: ' + str(KELLY_FRAC)
+    elif cmd[0] == '/lessons':
+        import json as _jj
+        lf = os.path.join(SCRIPT_DIR, 'llm_postmatch_log.jsonl')
+        if not os.path.exists(lf):
+            return 'No lessons yet.'
+        items = [_jj.loads(x) for x in open(lf).readlines()[-5:]]
+        parts = ['Last LLM lessons:']
+        for e in items:
+            parts.append(('WIN ' if e['outcome']=='WON' else 'LOSS ') + e['match'][:30] + chr(10) + e['lesson'][:100])
+        return (chr(10)+chr(10)).join(parts)
+    elif cmd[0] == '/help':
+        return ('*Oraculo Commands*\n'
+                '/status - Balance and record\n'
+                '/picks - Current value picks\n'
+                '/apostar <player> <amount> [USDT] - Place bet\n'
+                '/bets - Active bets\n'
+                '/help - This message')
+
+    return None
+
+def _start_telegram_bot():
+    """Start Telegram bot in background thread."""
+    t = threading.Thread(target=_telegram_bot_loop, daemon=True)
+    t.start()
+    log.info('Telegram interactive bot started')
+
+
+def run_cycle(dry_run=False):
+    """Single scan + place + check cycle."""
+    reconcile_engine_state()
+    state = load_state()
+    api = CloudbetAPI()
+
+    log.info('=' * 60)
+    log.info('ORACULO AUTO CYCLE | Bankroll: $%.2f | Staked today: $%.2f',
+             state['bankroll'], state['daily_staked'])
+    log.info('=' * 60)
+
+    # 0. Auto-tune strategy parameters
+    _auto_tune_strategy(state)
+
+    # 1. Check results first
+    check_results(api, state)
+
+    # 1a. Process manual bets (user-requested, bypasses exposure cap)
+    manual_placed = process_manual_bets(api, state)
+    if manual_placed:
+        log.info('Placed %d manual bets', manual_placed)
+
+    # 1b. Reconcile bankroll with Cloudbet
+    reconcile_bankroll(api, state)
+
+    # 2. Scan football
+    football_picks = scan_football(api, state, dry_run)
+
+    # 3. Scan tennis
+    tennis_picks = scan_tennis(api, state, dry_run)
+
+    # 3b. Filter tennis picks through LLM (quality gate)
+    if tennis_picks:
+        try:
+            from oraculo_llm import filter_picks_with_llm
+            original_count = len(tennis_picks)
+            _elo = getattr(scan_tennis, '_elo', None)
+            tennis_picks = filter_picks_with_llm(
+                tennis_picks, _elo,
+                surface='hard', tourney='ATP Miami')
+            if len(tennis_picks) < original_count:
+                log.info('LLM vetoed %d/%d tennis picks',
+                         original_count - len(tennis_picks), original_count)
+        except ImportError:
+            log.debug('oraculo_llm not available, skipping LLM filter')
+        except Exception as e:
+            log.warning('LLM filter error (continuing without): %s', e)
+
+    # 4. Build tennis parlays (filter restricted events first)
+    _restricted_evs_p = state.get('restricted_event_ids', [])
+    _restricted_pfx_p = state.get('restricted_market_prefixes', [])
+    tennis_picks_ok = [p for p in tennis_picks
+                       if str(p.get('event_id','')) not in _restricted_evs_p
+                       and not any(p.get('market_url','').startswith(x) for x in _restricted_pfx_p)]
+    if not state.get("tennis_parlay_placed_today"):
+        parlays = build_parlays(tennis_picks_ok)
+    else:
+        parlays = []
+    if parlays:
+        log.info('Tennis parlays: %d combos generated', len(parlays))
+
+    # 4b. Build daily football parlay (once per day, best confidence picks)
+    fb_parlay = build_daily_football_parlay(football_picks, state)
+    if fb_parlay:
+        parlays.append(fb_parlay)
+        log.info('Daily football parlay added: %d legs @%.2f', fb_parlay['n_legs'], fb_parlay['combined_odds'])
+
+    # 4c. Build daily mixed parlay (2 football + 2 tennis, 5% bankroll)
+    mixed = None
+    if not state.get('mixed_parlay_placed_today'):
+        mixed = build_mixed_parlay(football_picks, tennis_picks, state)
+        if mixed:
+            parlays.append(mixed)
+            log.info('Daily mixed parlay added: %d legs @%.2f', mixed['n_legs'], mixed['combined_odds'])
+
+    # 5. Place football bets first (capped to leave room for tennis)
+    placed = 0
+    if football_picks or (parlays and not tennis_picks):
+        # Cap football budget: leave TENNIS_BUDGET_RESERVE for tennis if tennis picks exist
+        bankroll = state['bankroll']
+        max_today = bankroll * MAX_DAILY_PCT
+        if tennis_picks:
+            tennis_reserve = max_today * TENNIS_BUDGET_RESERVE
+            football_cap = max_today - tennis_reserve
+            already_staked = state['daily_staked']
+            football_remaining = max(0, football_cap - already_staked)
+            # Temporarily reduce daily limit for football placement
+            orig_daily_pct = MAX_DAILY_PCT
+            # Set effective ceiling as already_staked + football_remaining
+            state['_football_ceiling'] = already_staked + football_remaining
+        fb_parlays = [p for p in parlays if p.get('sport') in ('soccer', 'mixed')]
+        placed += place_bets(api, state, football_picks, fb_parlays, dry_run)
+        state.pop('_football_ceiling', None)
+
+    # 6. Place tennis bets with remaining budget
+    if tennis_picks or parlays:
+        tn_parlays = [p for p in parlays if p.get('sport') not in ('soccer', 'mixed')]
+        placed += place_bets(api, state, tennis_picks, tn_parlays, dry_run)
+        # Mark parlays as placed today
+        if fb_parlay and not dry_run:
+            state['football_parlay_placed_today'] = True
+        if mixed and not dry_run:
+            state['mixed_parlay_placed_today'] = True
+        state["tennis_parlay_placed_today"] = True
+    else:
+        log.info('No value bets found this cycle')
+        placed = 0
+
+    # 7. Sync Obsidian
+    sync_obsidian(state)
+
+    # 8. Check alerts
+    check_alerts(state)
+
+    # 9. Save state
+    state['last_scan'] = datetime.now().isoformat()
+    save_state(state)
+
+    # 10. Generate dashboard
+    generate_dashboard(state)
+
+    log.info('Cycle complete: %d picks found (%d fb + %d tn), %d placed | Bankroll: $%.2f',
+             len(football_picks) + len(tennis_picks), len(football_picks), len(tennis_picks),
+             placed, state['bankroll'])
+    return state
+
+# ---------------------------------------------------------------------------
+# 24/7 loop
+# ---------------------------------------------------------------------------
+def run_loop():
+    """Run autonomous loop forever."""
+    log.info('*' * 60)
+    log.info('  ORACULO AUTONOMOUS RUNNER STARTED')
+    log.info('  Scan interval: %ds | Result check: %ds', SCAN_INTERVAL, RESULT_INTERVAL)
+    log.info('  Min edge: %.0f%% | Min conf: %.0f%%', MIN_EDGE * 100, MIN_CONF * 100)
+    log.info('  Circuit breaker: $%.2f', CIRCUIT_BREAKER)
+    log.info('*' * 60)
+
+    # Start interactive Telegram bot
+    if TELEGRAM_ENABLED:
+        _start_telegram_bot()
+
+    # Start dashboard HTTP server
+    try:
+        import threading
+        from http.server import HTTPServer, SimpleHTTPRequestHandler
+        class _DashHandler(SimpleHTTPRequestHandler):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, directory=SCRIPT_DIR, **kwargs)
+            def log_message(self, fmt, *args):
+                pass
+        def _serve_dashboard():
+            try:
+                srv = HTTPServer(('0.0.0.0', 8889), _DashHandler)
+                srv.serve_forever()
+            except Exception:
+                pass
+        _dt = threading.Thread(target=_serve_dashboard, daemon=True)
+        _dt.start()
+        log.info('Dashboard server started on port 8889')
+    except Exception as e:
+        log.debug('Dashboard server failed: %s', e)
+
+    last_scan = 0
+    last_check = 0
+    last_tennis_update = 0
+    TENNIS_UPDATE_INTERVAL = 86400  # Once per day
+    NEWS_REFRESH_INTERVAL = 7200   # Refresh tennis news every 2 hours
+    last_news_refresh = 0
+
+    while True:
+        now_t = time.time()
+        # Refresh tennis news for LLM context
+        if now_t - last_news_refresh >= NEWS_REFRESH_INTERVAL:
+            try:
+                from oraculo_llm import fetch_tennis_news
+                news = fetch_tennis_news()
+                if news:
+                    log.info('Tennis news refreshed: %d headlines', len(news))
+                last_news_refresh = now_t
+            except Exception:
+                last_news_refresh = now_t
+
+        # --- Auto-retrain Poisson/ELO models (weekly) ---
+        POISSON_RETRAIN_INTERVAL = 86400 * 7  # 7 days
+        if not hasattr(scan_football, "_last_poisson_train"):
+            scan_football._last_poisson_train = 0
+        if now_t - scan_football._last_poisson_train >= POISSON_RETRAIN_INTERVAL:
+            try:
+                import pickle as _pk
+                from collections import defaultdict as _dd
+                from oraculo_models_advanced import PoissonGoalModel, EloRating
+                try:
+                    from oraculo_xg import fetch_footballdata_results
+                    fetch_footballdata_results(force_refresh=True)
+                    log.info("Refreshed football-data.co.uk results for retrain")
+                except Exception as _fe:
+                    log.warning("Failed to refresh football data: %s", _fe)
+                _xg_cache = os.path.join(SCRIPT_DIR, ".oraculo_cache", "xg_matches.json")
+                if os.path.exists(_xg_cache):
+                    with open(_xg_cache) as _f:
+                        _matches_raw = json.load(_f)
+                    _matches = [{
+                        "home_team": _m.get("home", _m.get("home_team", "")),
+                        "away_team": _m.get("away", _m.get("away_team", "")),
+                        "home_score": _m.get("home_goals", _m.get("home_score")),
+                        "away_score": _m.get("away_goals", _m.get("away_score")),
+                        "utc_date": _m.get("date", ""),
+                    } for _m in _matches_raw]
+                    if len(_matches) >= 50:
+                        _poisson = PoissonGoalModel()
+                        _poisson.fit(_matches)
+                        _elo = EloRating()
+                        _elo.process_matches(_matches)
+                        _mdir = os.path.join(SCRIPT_DIR, "models")
+                        os.makedirs(_mdir, exist_ok=True)
+                        def _ddd(obj):
+                            if isinstance(obj, _dd): return {k: _ddd(v) for k, v in obj.items()}
+                            if isinstance(obj, dict): return {k: _ddd(v) for k, v in obj.items()}
+                            if isinstance(obj, list): return [_ddd(i) for i in obj]
+                            return obj
+                        with open(os.path.join(_mdir, "poisson_state.pkl"), "wb") as _f:
+                            _pk.dump(_ddd(_poisson.__dict__), _f)
+                        with open(os.path.join(_mdir, "elo_state.pkl"), "wb") as _f:
+                            _pk.dump(_ddd(_elo.__dict__), _f)
+                        log.info("Poisson+ELO retrained from %d matches", len(_matches))
+                        scan_football._last_poisson_train = now_t
+            except Exception as _e:
+                log.warning("Poisson/ELO retrain failed: %s", _e)
+
+        # --- Refresh NBA results cache (weekly) ---
+        NBA_REFRESH_INTERVAL = 21600  # 6h - matches fetch_nba_results TTL
+        if not hasattr(scan_football, "_last_nba_refresh"):
+            scan_football._last_nba_refresh = 0
+        if now_t - scan_football._last_nba_refresh >= NBA_REFRESH_INTERVAL:
+            try:
+                from oraculo_nba import fetch_nba_results, train_nba_elo as _nba_retrain
+                fetch_nba_results(force_refresh=True)
+                _nba_retrain(force=True)  # rebuild Elo from fresh results
+                scan_football._last_nba_refresh = now_t
+                log.info('NBA results + Elo refreshed')
+                log.info("NBA results cache refreshed")
+            except Exception as _e:
+                log.warning("NBA refresh skipped: %s", _e, exc_info=True)
+
+        # Daily tennis Elo data refresh
+        if now_t - last_tennis_update >= TENNIS_UPDATE_INTERVAL:
+            try:
+                from update_tennis_data import update_cache
+                if update_cache():
+                    log.info('Tennis Elo data updated from GitHub')
+                last_tennis_update = now_t
+            except Exception as e:
+                log.debug('Tennis data update skipped: %s', e)
+                last_tennis_update = now_t  # Don't retry immediately
+        now = time.time()
+        try:
+            # Full scan cycle
+            if now - last_scan >= SCAN_INTERVAL:
+                run_cycle()
+                last_scan = now
+                last_check = now  # cycle already checks results
+
+            # Intermediate result check
+            elif now - last_check >= RESULT_INTERVAL:
+                state = load_state()
+                api = CloudbetAPI()
+                settled = check_results(api, state)
+                if settled:
+                    sync_obsidian(state)
+                    save_state(state)
+                last_check = now
+
+        except KeyboardInterrupt:
+            log.info('Shutting down...')
+            break
+        except Exception as e:
+            log.error('Loop error: %s', e, exc_info=True)
+
+        # Sleep in small increments for responsive shutdown
+        for _ in range(60):
+            time.sleep(1)
+
+# ---------------------------------------------------------------------------
+# Status display
+# ---------------------------------------------------------------------------
+def show_status():
+    state = load_state()
+    wins = state.get('wins', 0)
+    losses = state.get('losses', 0)
+    total = wins + losses
+    wr = (wins / total * 100) if total > 0 else 0
+    print(f'''
+ORACULO AUTONOMOUS RUNNER - STATUS
+===================================
+Bankroll:     ${state["bankroll"]:.2f} USDC
+Total P&L:    ${state["total_pnl"]:+.2f}
+Today P&L:    ${state["daily_pnl"]:+.2f}
+Record:       {wins}W / {losses}L ({wr:.1f}%)
+Active bets:  {len(state.get("active_bets", []))}
+Settled today:{len(state.get("settled_today", []))}
+Staked today: ${state["daily_staked"]:.2f} / ${state["bankroll"] * MAX_DAILY_PCT:.2f}
+Last scan:    {state.get("last_scan", "never")}
+Last check:   {state.get("last_result_check", "never")}
+Loss streak:  {state.get("consecutive_losses", 0)}
+''')
+    for ab in state.get('active_bets', []):
+        print(f'  [{ab.get("sport","?")}] {ab.get("match","?")[:40]} | {ab.get("label","")} @{ab["odds"]:.3f} ${ab["stake"]:.2f}')
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description='Oraculo Autonomous Runner')
+    parser.add_argument('--once', action='store_true', help='Single scan cycle')
+    parser.add_argument('--status', action='store_true', help='Show current state')
+    parser.add_argument('--results', action='store_true', help='Check/settle bets only')
+    parser.add_argument('--dry-run', action='store_true', help='Scan without placing')
+    args = parser.parse_args()
+
+    if args.status:
+        show_status()
+    elif args.results:
+        state = load_state()
+        api = CloudbetAPI()
+        check_results(api, state)
+        sync_obsidian(state)
+        save_state(state)
+    elif args.once or args.dry_run:
+        run_cycle(dry_run=args.dry_run)
+    else:
+        run_loop()
