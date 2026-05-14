@@ -15,8 +15,8 @@ Author: Oraculo ML System
 Date: 2026-03-22
 """
 
-import os, sys, json, time, logging, argparse, uuid
-from datetime import datetime, timedelta
+import os, sys, json, time, logging, argparse, uuid, re
+from datetime import datetime, timedelta, timezone
 from itertools import combinations
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -30,6 +30,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 # ---------------------------------------------------------------------------
 log = logging.getLogger('oraculo_auto')
 log.setLevel(logging.INFO)
+log.propagate = False  # evita mensajes duplicados via root logger
 _fmt = logging.Formatter('[%(asctime)s] [%(levelname)s] %(message)s', '%Y-%m-%d %H:%M:%S')
 _ch = logging.StreamHandler()
 _ch.setFormatter(_fmt)
@@ -49,11 +50,18 @@ except Exception:
 # ---------------------------------------------------------------------------
 SCAN_INTERVAL = 3600        # 1 hour between market scans
 RESULT_INTERVAL = 1800      # 30 min between result checks
-MIN_EDGE = 0.05             # 5% minimum edge
+MIN_EDGE = 0.08             # 8% minimum edge — subido de 5%: modelo sobre-estima edge (13.6% declarado vs -7% ROI real)
 MIN_CONF = 0.60             # 60% minimum confidence
-MAX_DAILY_PCT = 0.60        # 60% of bankroll per day
+MAX_DAILY_PCT = 0.40        # 40% of bankroll per day
 MAX_PER_BET = 0.05          # 5% per bet
-KELLY_FRAC = 0.25           # Quarter Kelly
+KELLY_FRAC = 0.25           # Quarter Kelly (global fallback)
+SPORT_KELLY = {             # Per-sport Kelly fractions
+    'tennis':     0.15,  # 2026-05-12: real WR 51.7%, was 0.42 (stale 87.5% bias)
+    'baseball':   0.15,
+    'basketball': 0.10,
+    'darts':      0.10,
+    'soccer':     0.20,
+}
 MIN_STAKE = 0.50            # Minimum bet $0.50
 CIRCUIT_BREAKER = 10.0      # Stop if bankroll < $10
 LOSS_STREAK_LIMIT = 5       # Reduce stake after 5 consecutive losses
@@ -62,15 +70,21 @@ MAX_BETS_PER_SCAN = 8       # Max bets placed per scan cycle
 MAX_PER_MATCH = 1           # Max 1 bet per match (avoid correlated exposure)
 MAX_EXPOSURE_PER_MATCH = 0.10  # Max 10% of bankroll on a single match
 MAX_EXPOSURE_PER_EVENT = 0.05  # Max 5% of bankroll per event_id (cross-cycle)
-MAX_TOTAL_EXPOSURE = 0.80     # Max 80% of bankroll in pending bets total
+MAX_TOTAL_EXPOSURE = 0.30     # Max 30% of bankroll in pending bets — reduced from 60% (crash prevention)
 TENNIS_BUDGET_RESERVE = 0.30  # Reserve 30% of daily budget for tennis
-PARLAY_MIN_LEGS = 3         # Min legs for tennis parlay
-PARLAY_MAX_LEGS = 4         # Max legs for tennis parlay
-PARLAY_MIN_CONF = 0.65      # Min confidence per parlay leg (tennis)
+PARLAYS_ENABLED = False     # Disabled 2026-05-12: 1W/5L, ROI -61.8%, -$15.12 (stale 87.5% WR was sample bias)
+PARLAY_MIN_LEGS = 2         # 2-leg parlays only (3+ leg hit rate too low)
+PARLAY_MAX_LEGS = 2         # Hard cap at 2 legs
+PARLAY_MIN_CONF = 0.65      # Lowered: 87.5% WR validates higher parlay volume
 TENNIS_PARLAY_STAKE_PCT = 0.05  # 5% of bankroll for tennis parlay
 
 STEAM_ENABLED = False          # Disable steam move betting (getting RESTRICTED by Cloudbet)
+SOCCER_ENABLED = False         # Disable soccer betting (negative ROI -3.3%, focus on tennis 70% WR)
 CB_BASE = 'https://sports-api.cloudbet.com'
+# Initial deposits (known constants for bankroll reconciliation)
+INITIAL_DEPOSIT = 57.03        # Total initial deposit (USDC + USDT)
+INITIAL_DEPOSIT_USDC = 39.98   # Initial deposit in USDC
+INITIAL_DEPOSIT_USDT = 26.0    # Initial deposit in USDT
 
 # Markets (V3: no BTTS)
 LEAGUE_MARKETS = {
@@ -81,7 +95,7 @@ LEAGUE_MARKETS = {
     'FL1': ['over25', 'over15', 'under35'],
     'ELC': ['over25', 'over15'],
     'DED': ['over25', 'over15'],
-    'PPL': ['over25', 'over15'],
+    'PPL': ['over25', 'over15', 'under35'],  # 2026-05-13: U3.5=74.5% historical
     'MLS': ['over25', 'over15'],
     'LMX': ['over25', 'over15'],
     'ARG': ['over25', 'over15'],
@@ -99,11 +113,13 @@ LEAGUE_MARKETS = {
     'COL':  ['over25'],
     'CHL':  ['over25'],
     'URU':  ['over25'],
+    'TUR':  ['over25', 'over15'],  # 2026-05-12: O2.5=55.3% U3.5=65.5%
+    'SCO':  ['over25', 'over15'],  # 2026-05-12: O2.5=60.5% Over-friendly
 }
 
 CB_COMPS = {
     'PL': 'soccer-england-premier-league',
-    'PD': 'soccer-spain-la-liga',
+    'PD': 'soccer-spain-laliga',
     'SA': 'soccer-italy-serie-a',
     'BL1': 'soccer-germany-bundesliga',
     'FL1': 'soccer-france-ligue-1',
@@ -111,14 +127,16 @@ CB_COMPS = {
     'PPL': 'soccer-portugal-primeira-liga',
     'ELC': 'soccer-england-championship',
     'MLS': 'soccer-usa-mls',
-    'LMX': 'soccer-mexico-liga-mx',
-    'ARG': 'soccer-argentina-primera-division',
-    'BRA': 'soccer-brazil-serie-a',
-    'ESP2': 'soccer-spain-segunda-division',
-    'BRA2': 'soccer-brazil-serie-b',
-    'COL': 'soccer-colombia-primera-a',
+    'LMX': 'soccer-mexico-t90c7-liga-mx-apertura',
+    'ARG': 'soccer-argentina-superliga',
+    'BRA': 'soccer-brazil-brasileiro-serie-a',
+    'ESP2': 'soccer-spain-laliga-2',
+    'BRA2': 'soccer-brazil-brasileiro-serie-b',
+    'COL': 'soccer-colombia-primera-a-clausura',
     'CHL': 'soccer-chile-primera-division',
     'URU': 'soccer-uruguay-primera-division',
+    'TUR': 'soccer-turkey-super-lig',
+    'SCO': 'soccer-scotland-premiership',
 }
 
 CB_TENNIS = [
@@ -466,26 +484,60 @@ def _get_dynamic_kelly_fraction(base_frac=KELLY_FRAC, window=20):
 def _auto_tune_strategy(state):
     """
     Auto-adjust strategy parameters based on recent performance.
-    Runs every cycle, reads predictions_log.jsonl for last N settled bets.
-    Adjusts: MIN_EDGE, MIN_CONF, MAX_PER_BET, MAX_TOTAL_EXPOSURE, MAX_BETS_PER_SCAN.
+    Primary source: sibila_picks DB (placed=1, settled). Fallback: predictions_log.jsonl.
+    Adjusts: MIN_EDGE, MIN_CONF, MAX_PER_BET, MAX_TOTAL_EXPOSURE, MAX_BETS_PER_SCAN, SPORT_KELLY.
     """
-    global MIN_EDGE, MIN_CONF, MAX_PER_BET, MAX_TOTAL_EXPOSURE, MAX_BETS_PER_SCAN
+    global MIN_EDGE, MIN_CONF, MAX_PER_BET, MAX_TOTAL_EXPOSURE, MAX_BETS_PER_SCAN, SPORT_KELLY
     try:
-        if not os.path.exists(PREDICTIONS_FILE):
-            return
-        lines = open(PREDICTIONS_FILE).readlines()
+        # ── Primary: read from Sibila DB ─────────────────────────────────────
         settled = []
-        for ln in lines:
+        _sibila_db = os.path.join(SCRIPT_DIR, 'sibila.db')
+        _use_sibila = False
+        if os.path.exists(_sibila_db):
             try:
-                e = json.loads(ln)
-                if e.get('result') in ('WIN', 'LOSS'):
-                    settled.append(e)
-            except Exception:
-                pass
+                import sqlite3 as _sq3
+                _conn = _sq3.connect(_sibila_db)
+                _rows = _conn.execute("""
+                    SELECT sport, prob_model, edge, odds, result, pnl, real_stake, bet_id
+                    FROM sibila_picks
+                    WHERE placed=1 AND result IN ('WIN','LOSS')
+                    ORDER BY ts DESC LIMIT 200
+                """).fetchall()
+                _conn.close()
+                for r in _rows:
+                    sp, pm, eg, odds, result, pnl, stake, bid = r
+                    settled.append({
+                        'sport': sp or 'unknown',
+                        'prob_model': pm or 0,
+                        'edge': eg or 0,
+                        'odds': odds or 2.0,
+                        'result': result,
+                        'stake': stake or 0,
+                        'win_loss': (float(stake)*(float(odds or 2.0)-1.0)) if result=='WIN' and stake else (-float(stake) if result=='LOSS' and stake else 0),
+                        'bet_id': bid,
+                    })
+                _use_sibila = len(settled) >= 15
+            except Exception as _e:
+                log.debug('AutoTune Sibila read error: %s', _e)
+
+        if not _use_sibila:
+            # Fallback: predictions_log.jsonl
+            if not os.path.exists(PREDICTIONS_FILE):
+                return
+            lines = open(PREDICTIONS_FILE).readlines()
+            for ln in lines:
+                try:
+                    e = json.loads(ln)
+                    if e.get('result') in ('WIN', 'LOSS'):
+                        if e.get('stake', 0) > 0 and e.get('bet_id'):
+                            settled.append(e)
+                except Exception:
+                    pass
+
         if len(settled) < 10:
             return  # Not enough data
 
-        recent = settled[-30:]  # Last 30 bets
+        recent = settled[:100]  # Already ordered DESC, take 100 most recent
         wins = sum(1 for b in recent if b.get('result') == 'WIN')
         losses = len(recent) - wins
         win_rate = wins / len(recent)
@@ -502,8 +554,10 @@ def _auto_tune_strategy(state):
         # Per-sport analysis
         football = [b for b in recent if b.get('sport') == 'soccer']
         tennis = [b for b in recent if b.get('sport') == 'tennis']
+        baseball = [b for b in recent if b.get('sport') == 'baseball']
         fb_wr = sum(1 for b in football if b.get('result') == 'WIN') / max(len(football), 1)
         tn_wr = sum(1 for b in tennis if b.get('result') == 'WIN') / max(len(tennis), 1)
+        bb_wr = sum(1 for b in baseball if b.get('result') == 'WIN') / max(len(baseball), 1)
 
         old_edge = MIN_EDGE
         old_conf = MIN_CONF
@@ -512,44 +566,67 @@ def _auto_tune_strategy(state):
         # --- AUTO-ADJUST RULES ---
 
         # 1. MIN_EDGE: if low-edge bets lose too much, raise threshold
-        if low_wr < 0.45 and len(low_edge) >= 5:
-            MIN_EDGE = min(0.10, MIN_EDGE + 0.01)  # Raise edge bar
-        elif low_wr > 0.65 and len(low_edge) >= 5:
-            MIN_EDGE = max(0.03, MIN_EDGE - 0.01)  # Lower edge bar (capturing value)
-        else:
-            MIN_EDGE = 0.05  # Default
+        if low_wr < 0.40 and len(low_edge) >= 15:  # umbral mas bajo, muestra minima mayor
+            MIN_EDGE = min(0.10, MIN_EDGE + 0.005)  # sube mas lento
+        elif low_wr > 0.65 and len(low_edge) >= 15:
+            MIN_EDGE = max(0.06, MIN_EDGE - 0.005)  # baja mas lento, piso mas alto
+        # else: insufficient data -- leave MIN_EDGE unchanged
 
-        # 2. MIN_CONF: adjust based on overall win rate
-        if win_rate > 0.75:
-            MIN_CONF = max(0.55, MIN_CONF - 0.02)  # Can afford lower confidence
-        elif win_rate < 0.55:
-            MIN_CONF = min(0.70, MIN_CONF + 0.02)  # Be more selective
-        else:
-            MIN_CONF = 0.60  # Default
+        # 2. MIN_CONF: adjust based on baseball-specific WR (tennis WR=73% must not poison baseball threshold)
+        if len(baseball) >= 20:
+            if bb_wr > 0.60:
+                MIN_CONF = max(0.55, MIN_CONF - 0.01)  # piso 0.55: permite raw probs 55-60%
+            elif bb_wr < 0.40:
+                MIN_CONF = min(0.62, MIN_CONF + 0.01)  # cap 0.62: Platt cal comprime probs, mayor cap mata picks
+        elif len(recent) >= 30 and len(baseball) < 20:
+            # Fall back to overall WR only if insufficient baseball sample
+            if win_rate > 0.75:
+                MIN_CONF = max(0.55, MIN_CONF - 0.01)
+            elif win_rate < 0.40:
+                MIN_CONF = min(0.62, MIN_CONF + 0.01)
+        # else: leave MIN_CONF unchanged
 
         # 3. MAX_TOTAL_EXPOSURE: expand if winning, contract if losing
-        if roi > 0.15 and win_rate > 0.65:
-            MAX_TOTAL_EXPOSURE = min(1.50, MAX_TOTAL_EXPOSURE + 0.10)  # Let it ride
-        elif roi < -0.05:
-            MAX_TOTAL_EXPOSURE = max(0.50, MAX_TOTAL_EXPOSURE - 0.10)  # Pull back
-        else:
-            MAX_TOTAL_EXPOSURE = 0.80  # Default
+        if len(recent) >= 10:
+            if roi > 0.15 and win_rate > 0.65:
+                MAX_TOTAL_EXPOSURE = min(0.60, MAX_TOTAL_EXPOSURE + 0.05)
+            elif roi < -0.05:
+                MAX_TOTAL_EXPOSURE = max(0.55, MAX_TOTAL_EXPOSURE - 0.10)
+        # else: leave MAX_TOTAL_EXPOSURE unchanged
 
         # 4. MAX_PER_BET: scale with confidence
-        if roi > 0.10 and win_rate > 0.70:
-            MAX_PER_BET = min(0.08, 0.05 * 1.3)  # Increase sizing
-        elif roi < -0.10:
-            MAX_PER_BET = max(0.03, 0.05 * 0.70)  # Decrease sizing
-        else:
-            MAX_PER_BET = 0.05
+        if len(recent) >= 10:
+            if roi > 0.10 and win_rate > 0.70:
+                MAX_PER_BET = min(0.08, 0.05 * 1.3)
+            elif roi < -0.10:
+                MAX_PER_BET = max(0.03, 0.05 * 0.70)
 
         # 5. MAX_BETS_PER_SCAN: more volume if profitable, less if not
-        if roi > 0.10:
-            MAX_BETS_PER_SCAN = 12
-        elif roi < -0.05:
-            MAX_BETS_PER_SCAN = 5
-        else:
-            MAX_BETS_PER_SCAN = 8
+        if len(recent) >= 10:
+            if roi > 0.10:
+                MAX_BETS_PER_SCAN = 12
+            elif roi < -0.05:
+                MAX_BETS_PER_SCAN = 5
+
+        # Per-sport Kelly fine-tuning from Sibila data
+        for _sport, _min_wr, _max_wr, _step in [
+            ('tennis',   0.72, 0.95, 0.02),
+            ('baseball', 0.38, 0.55, 0.02),
+            ('soccer',   0.50, 0.70, 0.02),
+            ('basketball', 0.45, 0.65, 0.02),
+        ]:
+            _sp_bets = [b for b in recent if b.get('sport') == _sport]
+            if len(_sp_bets) < 15:
+                continue
+            _sp_settled = [b for b in _sp_bets if b.get('result') in ('WIN','LOSS')]
+            if not _sp_settled:
+                continue
+            _sp_wr = sum(1 for b in _sp_settled if b.get('result') == 'WIN') / len(_sp_settled)
+            _cur_k = SPORT_KELLY.get(_sport, 0.25)
+            if _sp_wr > _max_wr:
+                SPORT_KELLY[_sport] = min(_cur_k + _step, 0.50)
+            elif _sp_wr < _min_wr:
+                SPORT_KELLY[_sport] = max(_cur_k - _step, 0.05)
 
         # Store tuning state for Obsidian/logging
         state['_autotune'] = {
@@ -559,6 +636,7 @@ def _auto_tune_strategy(state):
             'low_edge_wr': round(low_wr, 3),
             'fb_wr': round(fb_wr, 3),
             'tn_wr': round(tn_wr, 3),
+            'bb_wr': round(bb_wr, 3),
             'sample_size': len(recent),
             'min_edge': MIN_EDGE,
             'min_conf': MIN_CONF,
@@ -615,7 +693,7 @@ def _auto_tune_strategy(state):
     except Exception as e:
         log.debug('AutoTune error: %s', e)
 
-def kelly_stake(bankroll, prob, odds, consecutive_losses=0):
+def kelly_stake(bankroll, prob, odds, consecutive_losses=0, sport=None):
     """Dynamic Kelly with circuit breaker, loss streak, and recent ROI adaptation."""
     if bankroll < CIRCUIT_BREAKER:
         return 0
@@ -623,7 +701,10 @@ def kelly_stake(bankroll, prob, odds, consecutive_losses=0):
     if b <= 0:
         return 0
     kelly = (b * prob - (1 - prob)) / b
-    dyn_frac = _get_dynamic_kelly_fraction()
+    if sport and sport in SPORT_KELLY:
+        dyn_frac = SPORT_KELLY[sport]
+    else:
+        dyn_frac = _get_dynamic_kelly_fraction()
     kelly = max(0, kelly * dyn_frac)
     kelly = min(kelly, MAX_PER_BET)
     stake = bankroll * kelly
@@ -790,7 +871,7 @@ def scan_football(api, state, dry_run=False):
         log.info('  %s: %d events, markets: %s', league, len(events), league_mkts)
 
         # Filter: only events within 24h
-        cutoff_limit = (datetime.utcnow() + timedelta(hours=24)).isoformat() + 'Z'
+        cutoff_limit = (datetime.now(timezone.utc) + timedelta(hours=24)).strftime('%Y-%m-%dT%H:%M:%SZ')
         for ev in events:
             if not ev or not isinstance(ev, dict):
                 continue
@@ -952,7 +1033,7 @@ def scan_football(api, state, dry_run=False):
         }
         INTL_MARKETS = ['ft_result', 'over25']
         BLACKLIST_TEAMS = ['Ukraine']  # Skip teams with war/displacement context
-        cutoff_intl = (datetime.utcnow() + timedelta(hours=96)).isoformat() + 'Z'
+        cutoff_intl = (datetime.now(timezone.utc) + timedelta(hours=96)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
         for intl_league, comp_key in INTL_COMPS.items():
             try:
@@ -1149,6 +1230,32 @@ def scan_football(api, state, dry_run=False):
              sum(1 for p in picks if p.get('signal') == 'steam'))
     for _p in picks:
         log.info('  [FB] %s | %s | edge=%.1f%% conf=%.0f%% @%.2f', _p.get('match','?')[:35], _p.get('label','?'), _p.get('edge',0)*100, _p.get('model_prob',0)*100, _p.get('price',0))
+    if _FRESH_ENABLED:
+        picks = _fresh_check(picks)
+        _fs = _fresh_summary(picks)
+        if _fs: log.info(_fs)
+    # Benter trick: recalibrar model_prob con implied del bookmaker
+    if _BENTER_ENABLED:
+        picks = _BENTER.apply_batch(picks, book='cloudbet')
+    # Benter trick
+    if _BENTER_ENABLED:
+        picks = _BENTER.apply_batch(picks, book='cloudbet')
+    # Benter trick: recalibrar model_prob con implied del bookmaker
+    if _BENTER_ENABLED:
+        picks = _BENTER.apply_batch(picks, book='cloudbet')
+    # Benter trick
+    if _BENTER_ENABLED:
+        picks = _BENTER.apply_batch(picks, book='cloudbet')
+    if _FRESH_ENABLED:
+        picks = _fresh_check(picks)
+        _fs = _fresh_summary(picks)
+        if _fs: log.info(_fs)
+    if _RLM_ENABLED:
+        _RLM.record_batch(picks, book='cloudbet')
+        picks = _RLM.tag_picks(picks)
+    if _SIBILA_ENABLED:
+        for _sp in picks:
+            _sibila_record(_sp)
     return picks
 
 # ---------------------------------------------------------------------------
@@ -1201,6 +1308,28 @@ def scan_tennis(api, state, dry_run=False):
                         tennis_elo.process_matches(matches)
             tennis_elo.save_state(elo_path_atp)
             log.info('Tennis ATP Elo trained & saved (%d players)', len(tennis_elo.overall))
+        # ServeReturn Elo (Newton-Keller model)
+        _sr_elo_path = os.path.join(cache_dir, 'sr_elo_atp.pkl')
+        _sr_elo = None
+        try:
+            from oraculo_tennis import ServeReturnElo
+            _sr_elo = ServeReturnElo()
+            _sr_loaded = _sr_elo.load_state(_sr_elo_path)
+            if not _sr_loaded or not _elo_fresh:
+                # Retrain from ATP data
+                for fname in sorted(os.listdir(cache_dir)) if os.path.isdir(cache_dir) else []:
+                    if fname.startswith('atp_') and fname.endswith('.json'):
+                        with open(os.path.join(cache_dir, fname)) as _f:
+                            _ms = json.load(_f)
+                        if isinstance(_ms, list):
+                            _sr_elo.process_matches(_ms)
+                _sr_elo.save_state(_sr_elo_path)
+            _n_sr = sum(1 for c in _sr_elo.serve_count.values() if c >= _sr_elo.MIN_MATCHES)
+            log.info('ServeReturn Elo: %d players with serve data', _n_sr)
+            scan_tennis._sr_elo = _sr_elo
+        except Exception as _e_sr:
+            log.debug('ServeReturnElo unavailable: %s', _e_sr)
+            scan_tennis._sr_elo = None
         # WTA Elo
         wta_elo = TennisElo()
         _wta_fresh = False
@@ -1222,6 +1351,12 @@ def scan_tennis(api, state, dry_run=False):
             log.info('Tennis WTA Elo trained & saved (%d players)', len(wta_elo.overall))
         scan_tennis._wta_elo = wta_elo
         scan_tennis._elo = tennis_elo
+        # Save top Elo ratings to state for display
+        try:
+            _elo_snapshot = dict(sorted(tennis_elo.overall.items(), key=lambda x: x[1], reverse=True)[:50])
+            state['tennis_elo'] = _elo_snapshot
+        except Exception:
+            pass
         # Load advanced tennis features (fatigue, retirement, surface form)
         try:
             from oraculo_tennis_advanced import TennisAdvanced
@@ -1275,7 +1410,7 @@ def scan_tennis(api, state, dry_run=False):
         log.info('  %s: %d events', comp_key, len(events))
 
         # Filter: only events within 48h
-        cutoff_limit_tn = (datetime.utcnow() + timedelta(hours=96)).isoformat() + 'Z'
+        cutoff_limit_tn = (datetime.now(timezone.utc) + timedelta(hours=168)).strftime('%Y-%m-%dT%H:%M:%SZ')
         for ev in events:
             if not ev or not isinstance(ev, dict):
                 continue
@@ -1307,45 +1442,70 @@ def scan_tennis(api, state, dry_run=False):
                     _use_elo = getattr(scan_tennis, '_wta_elo', tennis_elo) if _is_wta else tennis_elo
                     pred = _use_elo.predict(home, away, surface=_surf)
                     prob_home = pred if isinstance(pred, float) else pred.get('prob_a', 0.5)
+                # Blend with ServeReturn Elo (Newton-Keller) when data available
+                _sr = getattr(scan_tennis, '_sr_elo', None)
+                if _sr and not _is_wta:
+                    _sr_prob = _sr.predict(home, away, surface=_surf)
+                    if _sr_prob is not None:
+                        prob_home = 0.55 * prob_home + 0.45 * _sr_prob
+                        log.debug('  SR blend: elo=%.3f sr=%.3f final=%.3f %s',
+                                  pred if isinstance(pred, float) else prob_home, _sr_prob, prob_home, home[:15])
             except Exception:
                 continue
 
-            # Scan winner market (try both market keys)
+            # Scan winner market — try 3 market keys:
+            # 1. tennis.match_odds (classic), 2. tennis.winner (alt), 3. tennis.exact_sets (Rome/clay)
             winner_data = markets.get('tennis.match_odds', markets.get('tennis.winner', {}))
+            _using_exact_sets = False
+            if not winner_data.get('submarkets'):
+                _es = markets.get('tennis.exact_sets', {})
+                if _es.get('submarkets'):
+                    winner_data = _es
+                    _using_exact_sets = True
             for sub in winner_data.get('submarkets', {}).values():
                 for sel in sub.get('selections', []):
-                    if sel.get('status') != 'SELECTION_ENABLED':
-                        continue
+                    if sel.get('status') not in ('SELECTION_ENABLED', None, ''):
+                        if sel.get('status') and sel.get('status') != 'SELECTION_ENABLED':
+                            continue
                     price = sel.get('price', 0)
                     murl = sel.get('marketUrl', '')
                     outcome = sel.get('outcome', '')
                     if price < 1.1 or not murl:
                         continue
+                    # tennis.exact_sets: outcome=2 → home wins, outcome=3 → away wins
+                    if _using_exact_sets:
+                        if outcome == 'outcome=2':
+                            outcome = 'home'
+                        elif outcome == 'outcome=3':
+                            outcome = 'away'
+                        else:
+                            continue
+                    elif outcome not in ('home', 'away'):
+                        continue
                     prob = prob_home if outcome == 'home' else (1 - prob_home)
                     player = home if outcome == 'home' else away
-                    implied = 1.0 / price
-                    edge = prob - implied
+                    # Kelly-style edge: prob * price - 1 (consistent with MLB/NBA)
+                    edge = round(prob * float(price) - 1.0, 4)
                     # Require minimum Elo match history for confidence
-                    player_matches = tennis_elo._match_count.get(player, 0)
-                    opp = away if player == home else home; opponent_matches = tennis_elo._match_count.get(opp, 0)
+                    player_matches = (tennis_elo._match_count.get(player, 0) or
+                                      tennis_elo._match_count.get(player.replace('-', ' '), 0))
+                    opp = away if player == home else home
+                    opponent_matches = (tennis_elo._match_count.get(opp, 0) or
+                                        tennis_elo._match_count.get(opp.replace('-', ' '), 0))
                     if player_matches < 20 or opponent_matches < 20:
                         log.debug('  [SKIP] Insufficient Elo data: %s (%d) vs %s (%d)',
                                   player, player_matches, opp, opponent_matches)
                         continue
-                    # Line shopping: verify edge is real, not just model noise
-                    # Fair odds = 1/prob. Cloudbet margin ~6%. Real edge should beat that.
-                    fair_odds = 1.0 / prob if prob > 0 else 99
-                    margin_over_fair = (price - fair_odds) / fair_odds if fair_odds > 0 else 0
-                    if margin_over_fair < 0.03:
-                        # Odds barely above fair value - likely no real edge after bookmaker margin
-                        continue
-                    if edge > MIN_EDGE and prob > MIN_CONF and edge < 0.45 and prob < 0.92:
+                    if edge > MIN_EDGE and prob > MIN_CONF and edge < 0.50 and prob < 0.92:
                         picks.append({
                             'match': f'{home} vs {away}', 'league': comp_key,
                             'event_id': eid, 'market_url': murl,
-                            'price': price, 'label': f'Winner: {player}',
-                            'model_prob': prob, 'edge': edge,
-                            'sport': 'tennis', 'player': player,
+                            'price': float(price), 'label': f'Winner: {player}',
+                            'model_prob': round(prob, 4),
+                            'raw_model_prob_uncal': round(prob, 4),
+                            'confidence': round(prob, 4),
+                            'edge': edge, 'sport': 'tennis', 'player': player,
+                            '_max_stake': 2.00,
                         })
 
     # Scan set handicap markets (total sets over/under)
@@ -1357,7 +1517,7 @@ def scan_tennis(api, state, dry_run=False):
                 continue
             _is_wta = 'wta' in comp_key.lower()
             _use_adv = getattr(scan_tennis, '_adv_wta' if _is_wta else '_adv_atp', _adv)
-            cutoff_sets = (datetime.utcnow() + timedelta(hours=96)).isoformat() + 'Z'
+            cutoff_sets = (datetime.now(timezone.utc) + timedelta(hours=168)).strftime('%Y-%m-%dT%H:%M:%SZ')
             for ev in events:
                 if not ev or not isinstance(ev, dict):
                     continue
@@ -1371,7 +1531,7 @@ def scan_tennis(api, state, dry_run=False):
                     continue
                 markets = ev.get('markets', {})
                 # Check for total sets market
-                sets_mkt = markets.get('tennis.total_sets', {})
+                sets_mkt = markets.get('tennis.total_sets', markets.get('tennis.exact_sets', {}))
                 for sv in sets_mkt.get('submarkets', {}).values():
                     for sel in sv.get('selections', []):
                         price = float(sel.get('price', 0) or 0)
@@ -1380,17 +1540,30 @@ def scan_tennis(api, state, dry_run=False):
                         params = str(sel.get('params', ''))
                         if price < 1.1 or not murl:
                             continue
-                        if '2.5' in params:
+                        # Map tennis.exact_sets outcomes: outcome=2 -> under, outcome=3 -> over
+                        if outcome == 'outcome=2':
+                            outcome = 'under'
+                        elif outcome == 'outcome=3':
+                            outcome = 'over'
+                        if '2.5' in params or outcome in ('under', 'over'):
                             try:
-                                set_pred = _use_adv.predict_sets(home, away, 'hard', 3)
+                                _clay_keys = ['roland','clay','madrid','rome','barcelona','monte','hamburg','geneva','lyon','strasbourg','rabat','marrakech','munich']
+                                _grass_keys = ['wimbledon','grass','eastbourne','halle','queens']
+                                _surf_su = ('clay' if any(x in comp_key for x in _clay_keys)
+                                            else ('grass' if any(x in comp_key for x in _grass_keys)
+                                            else 'hard'))
+                                set_pred = _use_adv.predict_sets(home, away, _surf_su, 3)
                                 if outcome == 'over':
                                     prob = set_pred.get('over_25_sets', 0.5)
                                 elif outcome == 'under':
                                     prob = set_pred.get('under_25_sets', 0.5)
                                 else:
                                     continue
+                                if prob < 0.01:
+                                    continue
                                 edge = prob * price - 1
-                                if edge > MIN_EDGE and prob > 0.55 and edge < 0.45 and prob < 0.92:
+                                if (edge > MIN_EDGE and prob >= 0.68 and edge < 0.40
+                                        and prob < 0.92 and price <= 1.65):
                                     picks.append({
                                         'match': f'{home} vs {away}',
                                         'league': comp_key,
@@ -1399,39 +1572,311 @@ def scan_tennis(api, state, dry_run=False):
                                         'price': price,
                                         'label': f'Sets {outcome.title()} 2.5',
                                         'model_prob': prob,
+                                        'raw_model_prob_uncal': prob,
                                         'edge': edge,
                                         'sport': 'tennis',
+                                        'market_type': 'sets_under',
+                                        'surface': _surf_su,
                                     })
                             except Exception:
                                 pass
+
+    # --- Episodic memory: penalize players with recent loss history ---
+    _mem = _build_episodic_memory(days_back=21)
+    if _mem:
+        for _p in picks:
+            _mstr = _p.get('match', '')
+            if ' vs ' not in _mstr:
+                continue
+            _pa, _pb = [x.strip().lower() for x in _mstr.split(' vs ', 1)]
+            _ma = _mem.get(_pa, {})
+            _mb = _mem.get(_pb, {})
+            _losses = _ma.get('losses', 0) + _mb.get('losses', 0)
+            _wins   = _ma.get('wins', 0)   + _mb.get('wins', 0)
+            # Only penalize if net negative (more losses than wins)
+            if _losses > _wins:
+                if _losses >= 3:
+                    # 3+ net losses → skip entirely
+                    _p['_skip_memory'] = True
+                    log.info('  [MEM SKIP] %s | losses=%d wins=%d',
+                             _mstr[:40], _losses, _wins)
+                elif _losses >= 2:
+                    # 2 net losses → halve stake
+                    _p['_llm_reduce'] = True
+                    log.info('  [MEM REDUCE] %s | losses=%d wins=%d',
+                             _mstr[:40], _losses, _wins)
+        picks = [p for p in picks if not p.get('_skip_memory')]
+
+
+    # -- FASE 2: Nuevos mercados tennis (Cloudbet actual) ------------------
+    # Markets: tennis.exact_sets / tennis.winner_and_total / tennis.team_to_win_a_set
+    import math as _math
+
+    def _norm_cdf(_x, _mu, _sigma):
+        return 0.5 * (1 + _math.erf((_x - _mu) / (_sigma * _math.sqrt(2))))
+
+    _GAMES_2SET = {'clay': 23.5, 'hard': 21.5, 'grass': 19.0}
+    _GAMES_3SET = {'clay': 33.0, 'hard': 30.5, 'grass': 27.5}
+
+    _tn_adv = getattr(scan_tennis, '_adv_atp', None)
+    if _tn_adv:
+        _p2_comps = []
+        try:
+            import requests as _rq2
+            _cfg2 = json.load(open(os.path.join(SCRIPT_DIR, 'cloudbet_config.json')))
+            _ts2 = _rq2.Session()
+            _ts2.headers.update({'Authorization': 'Bearer ' + _cfg2['api_key'], 'Accept': 'application/json'})
+            _r2 = _ts2.get(CB_BASE + '/pub/v2/odds/sports/tennis', timeout=10,
+                           params={'markets': 'tennis.exact_sets', 'limit': 100})
+            if _r2.status_code == 200:
+                for _cat in _r2.json().get('categories', []):
+                    for _comp in _cat.get('competitions', []):
+                        _ck = _comp.get('key', '')
+                        if (_ck and 'double' not in _ck and 'srl' not in _ck
+                                and 'simulated' not in _ck
+                                and 'international' not in _ck
+                                and 'monte-carlo' not in _ck):
+                            _p2_comps.append(_ck)
+        except Exception as _e2:
+            log.debug('Phase2 comp discovery error: %s', _e2)
+        if not _p2_comps:
+            _p2_comps = [c for c in tennis_comps if 'itf' not in c]
+
+        log.info('[TN P2] Scanning %d comps for exact_sets/winner_and_total', len(_p2_comps))
+        _p2_picks_added = 0
+
+        for comp_key in _p2_comps:
+            events = api.get_odds(comp_key)
+            if not events:
+                continue
+            _is_wta = 'wta' in comp_key.lower()
+            _use_adv = getattr(scan_tennis, '_adv_wta' if _is_wta else '_adv_atp', _tn_adv)
+            _use_elo = getattr(scan_tennis, '_wta_elo', tennis_elo) if _is_wta else tennis_elo
+            cutoff_p2 = (datetime.now(timezone.utc) + timedelta(hours=168)).strftime('%Y-%m-%dT%H:%M:%SZ')
+            for ev in events:
+                if not ev or not isinstance(ev, dict):
+                    continue
+                if (ev.get('cutoffTime') or '') > cutoff_p2:
+                    continue
+                home = (ev.get('home') or {}).get('name', '')
+                away = (ev.get('away') or {}).get('name', '')
+                eid  = str(ev.get('id', ''))
+                if not home or not away:
+                    continue
+                home_mc = (_use_elo._match_count.get(home, 0) or
+                            _use_elo._match_count.get(home.replace('-', ' '), 0))
+                away_mc = (_use_elo._match_count.get(away, 0) or
+                            _use_elo._match_count.get(away.replace('-', ' '), 0))
+                if home_mc < 15 or away_mc < 15:
+                    continue
+                try:
+                    _surf_p2 = 'hard'
+                    for _sk, _sv in COMP_SURFACE.items():
+                        if _sk in comp_key.lower():
+                            _surf_p2 = _sv
+                            break
+                    _is_slam = any(s in comp_key.lower() for s in (
+                        'roland-garros', 'french-open', 'wimbledon', 'us-open', 'australian-open'))
+                    _bo = 5 if (_is_slam and not _is_wta) else 3
+                    set_pred = _use_adv.predict_sets(home, away, _surf_p2, _bo)
+                    if _bo == 3:
+                        p_h20 = set_pred.get('a_2_0', 0)
+                        p_h21 = set_pred.get('a_2_1', 0)
+                        p_a20 = set_pred.get('b_2_0', 0)
+                        p_a21 = set_pred.get('b_2_1', 0)
+                        p_home_wins = p_h20 + p_h21
+                        p_exact2 = p_h20 + p_a20
+                        p_exact3_raw = p_h21 + p_a21
+                        # Calibrate: model overshoots real 3-set base rates.
+                        # Sackmann 2024-26: clay=37.3%, hard=35.2%, grass=39.6%
+                        _P3_BASE_RATE = {'clay': 0.373, 'hard': 0.352, 'grass': 0.396}
+                        _p3_base = _P3_BASE_RATE.get(_surf_p2, 0.370)
+                        # 30% model signal, 70% base rate
+                        p_exact3 = 0.30 * p_exact3_raw + 0.70 * _p3_base
+                        mu2 = _GAMES_2SET.get(_surf_p2, 21.5)
+                        mu3 = _GAMES_3SET.get(_surf_p2, 30.5)
+                    else:
+                        p_h30 = set_pred.get('a_3_0', 0)
+                        p_h31 = set_pred.get('a_3_1', 0)
+                        p_h32 = set_pred.get('a_3_2', 0)
+                        p_a30 = set_pred.get('b_3_0', 0)
+                        p_a31 = set_pred.get('b_3_1', 0)
+                        p_a32 = set_pred.get('b_3_2', 0)
+                        p_home_wins = p_h30 + p_h31 + p_h32
+                        p_exact2 = p_h30 + p_a30
+                        p_exact3 = p_h31 + p_a31
+                        mu2 = _GAMES_2SET.get(_surf_p2, 21.5) * 1.6
+                        mu3 = _GAMES_3SET.get(_surf_p2, 30.5) * 1.6
+                except Exception:
+                    continue
+
+                match_s = '%s vs %s' % (home, away)
+                mkts = ev.get('markets', {})
+
+                # 2.1: tennis.exact_sets
+                es_mkt = mkts.get('tennis.exact_sets', {})
+                for _sub_k, _sub_v in es_mkt.get('submarkets', {}).items():
+                    for sel in (_sub_v.get('selections') or []):
+                        if sel.get('status') not in ('SELECTION_ENABLED', None, ''):
+                            continue
+                        _price = float(sel.get('price', 0) or 0)
+                        _murl  = sel.get('marketUrl', '')
+                        _oc    = str(sel.get('outcome', ''))
+                        if _price < 2.75 or not _murl:  # min @2.75: real base rate only gives edge when book underprices
+                            continue
+                        try:
+                            n_sets = int(_oc.replace('outcome=', ''))
+                        except Exception:
+                            continue
+                        if _bo == 3:
+                            _prob = p_exact2 if n_sets == 2 else p_exact3
+                        else:
+                            if n_sets == 3:   _prob = p_exact2
+                            elif n_sets == 4: _prob = p_exact3
+                            elif n_sets == 5: _prob = p_h32 + p_a32
+                            else: continue
+                        _edge = _prob * _price - 1.0
+                        if _edge > MIN_EDGE and _prob > 0.38 and _edge < 0.40:
+                            picks.append({
+                                'match': match_s, 'league': comp_key,
+                                'event_id': eid, 'market_url': _murl,
+                                'price': _price,
+                                'label': 'Exact %d sets' % n_sets,
+                                'model_prob': round(_prob, 4),
+                                'edge': round(_edge, 4),
+                                'sport': 'tennis',
+                                'market_type': 'tennis_exact_sets',
+                                'surface': _surf_p2,
+                                '_max_stake': 1.50,
+                            })
+                            _p2_picks_added += 1
+
+                # 2.2: tennis.winner_and_total
+                wt_mkt = mkts.get('tennis.winner_and_total', {})
+                for _sub_k, _sub_v in wt_mkt.get('submarkets', {}).items():
+                    for sel in (_sub_v.get('selections') or []):
+                        if sel.get('status') not in ('SELECTION_ENABLED', None, ''):
+                            continue
+                        _price  = float(sel.get('price', 0) or 0)
+                        _murl   = sel.get('marketUrl', '')
+                        _oc     = str(sel.get('outcome', ''))
+                        _params = str(sel.get('params', ''))
+                        if _price < 1.15 or not _murl:
+                            continue
+                        try:
+                            _line = float(_params.split('total=')[-1])
+                        except Exception:
+                            continue
+                        if 'home' in _oc and 'under' in _oc:
+                            _prob = (p_h20 * _norm_cdf(_line, mu2, 3.0) +
+                                     p_h21 * _norm_cdf(_line, mu3, 4.0))
+                        elif 'home' in _oc and 'over' in _oc:
+                            _prob = (p_h20 * (1 - _norm_cdf(_line, mu2, 3.0)) +
+                                     p_h21 * (1 - _norm_cdf(_line, mu3, 4.0)))
+                        elif 'away' in _oc and 'under' in _oc:
+                            _prob = (p_a20 * _norm_cdf(_line, mu2, 3.0) +
+                                     p_a21 * _norm_cdf(_line, mu3, 4.0))
+                        elif 'away' in _oc and 'over' in _oc:
+                            _prob = (p_a20 * (1 - _norm_cdf(_line, mu2, 3.0)) +
+                                     p_a21 * (1 - _norm_cdf(_line, mu3, 4.0)))
+                        else:
+                            continue
+                        _edge = _prob * _price - 1.0
+                        if _edge > MIN_EDGE and _prob > 0.45 and _edge < 0.35:
+                            picks.append({
+                                'match': match_s, 'league': comp_key,
+                                'event_id': eid, 'market_url': _murl,
+                                'price': _price,
+                                'label': 'W+Total %s %.1f' % (_oc, _line),
+                                'model_prob': round(_prob, 4),
+                                'edge': round(_edge, 4),
+                                'sport': 'tennis',
+                                'market_type': 'tennis_winner_and_total',
+                                '_max_stake': 1.00,
+                            })
+                            _p2_picks_added += 1
+
+                # 2.3: tennis.team_to_win_a_set
+                ts_mkt = mkts.get('tennis.team_to_win_a_set', {})
+                for _sub_k, _sub_v in ts_mkt.get('submarkets', {}).items():
+                    _team = ('home' if 'team=home' in _sub_k
+                             else ('away' if 'team=away' in _sub_k else None))
+                    if not _team:
+                        continue
+                    for sel in (_sub_v.get('selections') or []):
+                        if sel.get('status') not in ('SELECTION_ENABLED', None, ''):
+                            continue
+                        _price = float(sel.get('price', 0) or 0)
+                        _murl  = sel.get('marketUrl', '')
+                        _oc    = str(sel.get('outcome', ''))
+                        if _price < 1.15 or not _murl or _oc not in ('yes', 'no'):
+                            continue
+                        if _team == 'home' and _oc == 'yes':
+                            _prob = 1.0 - p_a20
+                        elif _team == 'home' and _oc == 'no':
+                            _prob = p_a20
+                        elif _team == 'away' and _oc == 'yes':
+                            _prob = 1.0 - p_h20
+                        elif _team == 'away' and _oc == 'no':
+                            _prob = p_h20
+                        else:
+                            continue
+                        _edge = _prob * _price - 1.0
+                        if _edge > MIN_EDGE and 0.50 < _prob < 0.93 and _edge < 0.35:
+                            _player = home if _team == 'home' else away
+                            picks.append({
+                                'match': match_s, 'league': comp_key,
+                                'event_id': eid, 'market_url': _murl,
+                                'price': _price,
+                                'label': '%s wins set (%s)' % (_player[:16], _oc),
+                                'model_prob': round(_prob, 4),
+                                'edge': round(_edge, 4),
+                                'sport': 'tennis',
+                                'market_type': 'tennis_team_win_set',
+                                '_max_stake': 1.00,
+                            })
+                            _p2_picks_added += 1
+
+        log.info('[TN P2] %d additional picks from exact_sets/winner_total/team_set', _p2_picks_added)
 
     log.info('Tennis: %d value picks found', len(picks))
     for _tp in picks:
         log.info('  [TN] %s | %s | edge=%.1f%% conf=%.0f%% @%.2f',
                  _tp.get('match','?')[:35], _tp.get('label','?'),
                  _tp.get('edge',0)*100, _tp.get('model_prob',0)*100, _tp.get('price',0))
+    if _SIBILA_ENABLED:
+        for _sp in picks:
+            _sibila_record(_sp)
 
     # --- NBA SCANNING ---
     # NBA game markets only active during season (Oct-Apr). Check if game markets exist.
     _nba_game_markets_active = False
     try:
         _cfg_key = json.load(open(os.path.join(SCRIPT_DIR, 'cloudbet_config.json'))).get('api_key', '')
-        _rnba = requests.get(CB_BASE + '/pub/v2/odds/sports/basketball',
-                             headers={'X-API-Key': _cfg_key}, params={'markets': 'basketball.moneyline', 'limit': 2}, timeout=5)
+        _rnba = requests.get(CB_BASE + '/pub/v2/odds/competitions/basketball-usa-nba',
+                             headers={'X-API-Key': _cfg_key}, timeout=5)
         if _rnba.status_code == 200:
-            for _ncat in _rnba.json().get('categories', []):
-                for _ncomp in _ncat.get('competitions', []):
-                    if 'nba' in _ncomp.get('key','').lower():
-                        _nba_game_markets_active = True
+            for _nev in _rnba.json().get('events', []):
+                if 'basketball.1x2' in _nev.get('markets', {}):
+                    _nba_game_markets_active = True
+                    break
     except Exception:
         pass
     try:
         from oraculo_nba import train_nba_elo, scan_nba
         _nba_elo = train_nba_elo()
-        # NBA disabled: basketball.moneyline restricted on this account, no other game markets
-        if False and _nba_game_markets_active and _nba_elo and len(_nba_elo.ratings) >= 20:
-            _nba_picks = scan_nba(api, state, _nba_elo)
+        # NBA active: basketball.1x2 confirmed available (moneyline was restricted)
+        if _nba_game_markets_active and _nba_elo and len(_nba_elo.ratings) >= 20:
+            _nba_picks = scan_nba(api, state, _nba_elo, shadow=False)
             if _nba_picks:
+                log.info('[NBA] %d picks:', len(_nba_picks))
+                for _np in _nba_picks:
+                    log.info('  [NBA] %s | %s | edge=%.1f%% conf=%.0f%% @%.3f',
+                             _np['match'], _np['label'], _np['edge']*100,
+                             _np['model_prob']*100, _np['price'])
+                if _SIBILA_ENABLED:
+                    for _np in _nba_picks:
+                        _sibila_record(_np)
                 picks.extend(_nba_picks)
     except Exception as e:
         log.debug('NBA scan error: %s', e)
@@ -1440,39 +1885,110 @@ def scan_tennis(api, state, dry_run=False):
 # ---------------------------------------------------------------------------
 # Build tennis parlays from individual picks
 # ---------------------------------------------------------------------------
-def build_parlays(tennis_picks):
-    """Generate parlay combos from high-confidence tennis picks."""
+def build_parlays(tennis_picks, state=None):
+    """Generate 2-leg parlay combos from top tennis picks.
+    Only uses players with positive profit history.
+    Blacklists players with net negative profit."""
     parlays = []
-    strong = [p for p in tennis_picks if p['model_prob'] >= PARLAY_MIN_CONF]
+    if not PARLAYS_ENABLED:
+        return parlays
+
+    # Build player profit history from predictions log
+    _whitelist = set()  # players with 2+ wins and positive profit
+    _blacklist = set()  # players with net negative profit
+    try:
+        import json as _json
+        _plines = open(PREDICTIONS_FILE).readlines()
+        _pbets = [_json.loads(l) for l in _plines
+                  if _json.loads(l).get('result') in ('WIN','LOSS')
+                  and 'PARLAY' not in _json.loads(l).get('label','').upper()]
+        _pstats = {}
+        for _b in _pbets:
+            _lbl = _b.get('label','')
+            _player = _lbl.replace('Winner:','').strip() if 'Winner:' in _lbl else ''
+            if not _player:
+                continue
+            if _player not in _pstats:
+                _pstats[_player] = {'wins':0,'losses':0,'profit':0.0}
+            _wl = float(_b.get('win_loss',0))
+            _sk = float(_b.get('stake',0))
+            if _b['result'] == 'WIN':
+                _pstats[_player]['wins'] += 1
+                _pstats[_player]['profit'] += _wl
+            else:
+                _pstats[_player]['losses'] += 1
+                _pstats[_player]['profit'] -= _sk
+        for _player, _d in _pstats.items():
+            if _d['profit'] < -1.0:  # net loser: blacklist
+                _blacklist.add(_player.lower())
+            elif _d['wins'] >= 2 and _d['profit'] > 0:  # proven winner: whitelist
+                _whitelist.add(_player.lower())
+    except Exception:
+        pass
+
+    # Filter: high confidence, not blacklisted
+    strong = []
+    for p in tennis_picks:
+        if p['model_prob'] < PARLAY_MIN_CONF:
+            continue
+        _pname = (p.get('player','') or p.get('match','').split(' vs ')[0]).lower()
+        if _pname in _blacklist:
+            log.debug('Parlay: skip blacklisted %s', _pname)
+            continue
+        # Boost sort score for whitelisted players
+        p['_parlay_score'] = p['model_prob'] * p['edge'] * (1.3 if _pname in _whitelist else 1.0)
+        strong.append(p)
+
+    # Sort by combined score: prefer whitelisted high-edge high-prob
+    strong.sort(key=lambda x: x.get('_parlay_score', x['model_prob']), reverse=True)
+
     if len(strong) < PARLAY_MIN_LEGS:
         return parlays
 
-    for n_legs in range(PARLAY_MIN_LEGS, min(PARLAY_MAX_LEGS + 1, len(strong) + 1)):
-        for combo in combinations(strong, n_legs):
-            combined_odds = 1.0
-            combined_prob = 1.0
-            sels = []
-            for p in combo:
-                combined_odds *= p['price']
-                combined_prob *= p['model_prob']
-                sels.append({
-                    'eventId': p['event_id'], 'marketUrl': p['market_url'],
-                    'price': p['price'], 'player': p.get('player', '') or p.get('match', '').split(' vs ')[0],
-                })
-            implied = 1.0 / combined_odds
-            edge = combined_prob - implied
-            if edge > 0.05 and combined_prob > 0.30:
-                parlays.append({
-                    'selections': sels,
-                    'combined_odds': round(combined_odds, 2),
-                    'combined_prob': combined_prob,
-                    'edge': edge,
-                    'n_legs': n_legs,
-                    'label': ' + '.join(s['player'] for s in sels),
-                })
+    # Only 2-leg combos from top candidates
+    for combo in combinations(strong[:8], 2):  # max top-8 candidates
+        combined_odds = 1.0
+        combined_prob = 1.0
+        sels = []
+        for p in combo:
+            combined_odds *= p['price']
+            combined_prob *= p['model_prob']
+            sels.append({
+                'eventId': p['event_id'], 'marketUrl': p['market_url'],
+                'price': p['price'],
+                'player': p.get('player','') or p.get('match','').split(' vs ')[0],
+            })
+        implied = 1.0 / combined_odds
+        edge = combined_prob - implied
+        # Tighter filters for 2-leg parlays
+        if edge <= 0.05 or combined_prob < 0.45:
+            continue
+        # Dedup: skip if same combo or any leg already active
+        combo_key = frozenset(str(p['event_id']) for p in combo)
+        if state:
+            _active_keys = set()
+            _straight_eids = set()
+            for _ab in state.get('active_bets', []):
+                _ab_eids = _ab.get('event_ids', [])
+                if _ab_eids:
+                    _active_keys.add(frozenset(str(e) for e in _ab_eids))
+                elif _ab.get('event_id'):
+                    _straight_eids.add(str(_ab['event_id']))
+            if combo_key in _active_keys:
+                continue
+            if combo_key & _straight_eids:
+                continue
+        parlays.append({
+            'selections': sels,
+            'combined_odds': round(combined_odds, 2),
+            'combined_prob': combined_prob,
+            'edge': edge,
+            'n_legs': 2,
+            'label': ' + '.join(s['player'] for s in sels),
+        })
 
     parlays.sort(key=lambda x: x['edge'], reverse=True)
-    return parlays[:3]  # Top 3 parlays max
+    return parlays[:2]  # Top 2 parlays max (was 3)
 
 # ---------------------------------------------------------------------------
 # Daily football parlay (best confidence picks)
@@ -1484,6 +2000,8 @@ FOOTBALL_PARLAY_STAKE_PCT = 0.03  # 3% of bankroll
 def build_daily_football_parlay(football_picks, state):
     """Build one daily parlay from highest-confidence football picks.
     Only runs once per day (tracked in state)."""
+    if not PARLAYS_ENABLED:
+        return None
     if state.get('football_parlay_placed_today'):
         return None
 
@@ -1546,6 +2064,8 @@ MIXED_PARLAY_STAKE_PCT = 0.05   # 5% of bankroll
 
 def build_mixed_parlay(football_picks, tennis_picks, state):
     """Build daily mixed parlay: 2 best football + 2 best tennis."""
+    if not PARLAYS_ENABLED:
+        return None
     if state.get('mixed_parlay_placed_today'):
         return None
 
@@ -1630,6 +2150,22 @@ def _choose_currency(state):
 # ---------------------------------------------------------------------------
 def place_bets(api, state, picks, parlays, dry_run=False):
     """Place straight bets + parlays, respecting limits."""
+    # Apply per-market-type calibration to model_prob before Kelly sizing
+    # _cal factors: actual_win_rate / avg_model_prob per market type
+    try:
+        _cal_factors = _load_calibration()
+        if _cal_factors:
+            for _p in picks:
+                _mtype = _p.get("market_type") or _p.get("sport") or "unknown"
+                _cf = _cal_factors.get(_mtype, _cal_factors.get("unknown", 1.0))
+                if isinstance(_cf, (int, float)) and 0.5 < _cf < 2.0 and _cf != 1.0:
+                    _p["raw_model_prob"] = _p["model_prob"]  # preserve for logging
+                    _p["model_prob"] = min(0.95, max(0.05, float(_p["model_prob"]) * _cf))
+    except Exception:
+        pass
+    # Filtrar picks con learned_rules.json
+    picks = _apply_learned_rules(list(picks))
+
     bankroll = state['bankroll']
     if bankroll < CIRCUIT_BREAKER:
         log.warning('CIRCUIT BREAKER: bankroll $%.2f < $%.2f, NOT placing bets',
@@ -1728,6 +2264,28 @@ def place_bets(api, state, picks, parlays, dry_run=False):
             log.info('  [SKIP] Match exposure $%.2f >= max $%.2f: %s',
                      match_exposure, max_match_exposure, match_name[:35])
             continue
+        # --- Aprendizajes de errores (2026-04-28) ---
+        # 1. Match Winner con odds > 2.0: ROI -51%, skip
+        _is_winner_mkt = any(w in (p.get('label') or '') for w in ('Winner:', 'winner/', 'home', 'away', 'moneyline'))
+        _odds_float = float(p.get('price', 0) or 0)
+        if _is_winner_mkt and _odds_float > 2.0:
+            log.info('  [SKIP] Match Winner odds %.2f > 2.0 cap: %s', _odds_float, p.get('match','')[:35])
+            continue
+        # 3. tennis_exact_sets: real WR=0% en 5 bets resueltas (2026-05), desactivado
+        if p.get('market_type') == 'tennis_exact_sets':
+            log.info('  [SKIP] tennis_exact_sets disabled real WR=0%%: %s', p.get('match','')[:35])
+            continue
+        # 4. tennis_winner_and_total (Games O/U): sin validacion, 1 loss: desactivado
+        if p.get('market_type') == 'tennis_winner_and_total':
+            log.info('  [SKIP] tennis_winner_and_total disabled: %s', p.get('match','')[:35])
+            continue
+        # 2. Match Winner: stake reducido al 50% vs Sets Under
+        _stake_factor = 0.5 if _is_winner_mkt else 1.0
+        # 5. Skip if model_prob is 0 or negative (model failed to compute)
+        if float(p.get('model_prob', 0) or 0) < 0.01:
+            log.info('  [SKIP] model_prob~0 (model error): %s', p.get('match','')[:35])
+            continue
+
         # Portfolio Kelly: correlation-aware sizing
         try:
             from oraculo_portfolio import PortfolioKelly
@@ -1736,15 +2294,15 @@ def place_bets(api, state, picks, parlays, dry_run=False):
             stake = _pk_result[0][1] if _pk_result else 0
         except Exception:
             stake = kelly_stake(bankroll, p['model_prob'], p['price'],
-                               state.get('consecutive_losses', 0))
+                               state.get('consecutive_losses', 0),
+                               sport=p.get('sport', ''))
+        stake = round(stake * _stake_factor, 2)
         if stake <= 0:
             continue
-        # Avoid $2-5 dead zone (historically 29% WR, negative P&L)
-        if MIN_STAKE < stake < 5.0:
-            if p.get("edge", 0) > 0.15:  # High confidence -> go bigger
-                stake = 5.0
-            else:
-                stake = MIN_STAKE  # Low confidence -> go minimum
+        # Hard cap per pick (applied BEFORE dead-zone so cap is respected)
+        if p.get('_max_stake'):
+            stake = min(stake, p['_max_stake'])
+        # Per-sport Kelly fractions replace the old dead-zone binary logic
         # LLM said REDUCE: cut stake by 50%
         if p.get('_llm_reduce'):
             stake = round(stake * 0.5, 2)
@@ -1758,6 +2316,18 @@ def place_bets(api, state, picks, parlays, dry_run=False):
             continue
 
         _bet_currency = _choose_currency(state)
+        # Fallback: switch currency if chosen one has insufficient balance for this stake
+        _bbc_check = state.get('bankroll_by_currency', {})
+        if _bbc_check.get(_bet_currency, 0) < stake:
+            _alt_curr = 'USDC' if _bet_currency == 'USDT' else 'USDT'
+            if _bbc_check.get(_alt_curr, 0) >= stake:
+                log.info('  [CURR] Switching %s->%s (balance $%.2f < stake $%.2f)',
+                         _bet_currency, _alt_curr, _bbc_check.get(_bet_currency, 0), stake)
+                _bet_currency = _alt_curr
+            else:
+                log.warning('  [SKIP] Insufficient balance in both currencies for stake $%.2f (USDC=%.2f, USDT=%.2f)',
+                            stake, _bbc_check.get('USDC', 0), _bbc_check.get('USDT', 0))
+                continue
         _orig_currency = api.currency
         api.currency = _bet_currency
         log.info('  Placing: %s | %s @%.3f | $%.2f %s', p['match'][:35], p['label'], p['price'], stake, _bet_currency)
@@ -1783,7 +2353,9 @@ def place_bets(api, state, picks, parlays, dry_run=False):
             _save_bet(state, bet_id, p['match'], p['label'], p.get('sport','soccer'),
                       p['price'], stake, edge=p['edge'],
                       event_id=p.get('event_id',''), market_url=p.get('market_url',''),
-                      cutoff_time=p.get('cutoff_time',''), currency=_bet_currency)
+                      cutoff_time=p.get('cutoff_time',''), currency=_bet_currency,
+                      model_prob=p.get('model_prob', 0),
+                      market_type=p.get('market_type', ''))
             log.info('  [OK] Bet placed: %s | ID: %s', p['label'], bet_id[:12])
             match_bets_this_cycle[p['match']] = match_bets_this_cycle.get(p['match'], 0) + 1
             active_matches[p['match']] = active_matches.get(p['match'], 0) + stake
@@ -1791,11 +2363,44 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                 active_events[p['event_id']] = active_events.get(p['event_id'], 0) + stake
             # save_state called by _save_bet
             # Track prediction for backtest
-            _log_prediction(p['match'], p['label'], p['model_prob'], p['edge'],
-                           p['price'], stake, bet_id, p.get('sport', 'soccer'),
+            _log_prediction(p['match'], p['label'],
+                           p.get('raw_model_prob', p['model_prob']),  # always log raw prob
+                           p['edge'], p['price'], stake, bet_id, p.get('sport', 'soccer'),
                            signal=p.get('signal', 'model'),
                            league=p.get('league', ''),
                            event_id=p.get('event_id', ''))
+            # Portfolio Kelly: ajustar stake por correlacion con bets abiertas
+            if _PORTFOLIO_ENABLED:
+                _port_result = _PORTFOLIO.get_adjusted_stake(p, base_stake=stake)
+                if _port_result.get('skip'):
+                    log.info('  [Portfolio] SKIP: %s', _port_result.get('reason',''))
+                    continue
+                stake = _port_result['stake_adj']
+                p['portfolio_adj']  = _port_result['stake_adj']
+                p['portfolio_corr'] = _port_result.get('corr_penalty', 0)
+                p['portfolio_capped'] = _port_result.get('capped', False)
+            # Portfolio Kelly: ajustar stake por correlacion con bets abiertas
+            if _PORTFOLIO_ENABLED:
+                _port_result = _PORTFOLIO.get_adjusted_stake(p, base_stake=stake)
+                if _port_result.get('skip'):
+                    log.info('  [Portfolio] SKIP: %s', _port_result.get('reason',''))
+                    continue
+                stake = _port_result['stake_adj']
+                p['portfolio_adj']  = _port_result['stake_adj']
+                p['portfolio_corr'] = _port_result.get('corr_penalty', 0)
+                p['portfolio_capped'] = _port_result.get('capped', False)
+            if _SIBILA_ENABLED:
+                _sibila_placed(p['match'], p['label'], bet_id, stake)
+            # RLM boost: si sharp money confirma nuestro pick -> +20% stake
+            if _RLM_ENABLED and p.get('rlm_signal') and p.get('rlm_score', 0) >= 0.5:
+                _rlm_boost = min(stake * 1.20, stake + 20)  # max +20 unidades
+                log.info('  [RLM] Stake boost %.2f->%.2f (score=%.2f)', stake, _rlm_boost, p.get('rlm_score',0))
+                stake = round(_rlm_boost, 2)
+            # RLM boost: si sharp money confirma nuestro pick -> +20% stake
+            if _RLM_ENABLED and p.get('rlm_signal') and p.get('rlm_score', 0) >= 0.5:
+                _rlm_boost = min(stake * 1.20, stake + 20)  # max +20 unidades
+                log.info('  [RLM] Stake boost %.2f->%.2f (score=%.2f)', stake, _rlm_boost, p.get('rlm_score',0))
+                stake = round(_rlm_boost, 2)
         else:
             _rejected_keys.add(dedup_key)
             consecutive_fails += 1
@@ -1843,9 +2448,11 @@ def place_bets(api, state, picks, parlays, dry_run=False):
             state['bets_placed_today'] += 1
             remaining -= stake
             bet_id = resp.get('betId', '')
+            _parlay_eids = [s.get('eventId', s.get('event_id', '')) for s in par.get('selections', [])]
             _save_bet(state, bet_id, 'PARLAY: '+par['label'], str(par['n_legs'])+'-leg parlay',
                       'tennis', par['combined_odds'], stake, edge=par['edge'],
-                      currency=_bet_currency)
+                      currency=_bet_currency,
+                      event_ids=_parlay_eids)  # persisted atomically with save_state
             log.info('  [OK] Parlay placed: %s', bet_id[:12])
         time.sleep(2.0)  # Respect rate limit
 
@@ -1904,7 +2511,7 @@ def check_results(api, state):
             log.info('[InPlay] %d active bets in danger', len(_ip_alerts))
     except Exception:
         pass
-    bets = api.get_bets(limit=200, days_back=120)
+    bets = api.get_bets(limit=500, days_back=120)
     if not bets:
         log.info('No bets found from API')
         return 0
@@ -1948,26 +2555,42 @@ def check_results(api, state):
             log.info('  WIN: $%+.2f | %s', wl,
                      matched_active.get('match', bet_id[:12]) if matched_active else bet_id[:12])
         elif result == 'LOSS':
-            state['bankroll'] -= stake
-            state['total_pnl'] -= stake
-            state['daily_pnl'] -= stake
+            # Use actual loss from API (wl is negative); stake is what we placed
+            # If partial fill: API stake may differ from local stake — wl is authoritative
+            _actual_loss = abs(wl) if wl != 0 else stake
+            state['bankroll'] -= _actual_loss
+            state['total_pnl'] -= _actual_loss
+            state['daily_pnl'] -= _actual_loss
             state['losses'] = state.get('losses', 0) + 1
             state['consecutive_losses'] = state.get('consecutive_losses', 0) + 1
             # Per-currency tracking
             _curr = matched_active.get('currency', 'USDC') if matched_active else 'USDC'
             _bbc = state.setdefault('bankroll_by_currency', {'USDC': 39.98, 'USDT': 26.0})
-            _bbc[_curr] = _bbc.get(_curr, 0) - stake
-            log.info('  LOSS: $-%.2f | %s', stake,
+            _bbc[_curr] = _bbc.get(_curr, 0) - _actual_loss
+            log.info('  LOSS: $-%.2f | %s', _actual_loss,
                      matched_active.get('match', bet_id[:12]) if matched_active else bet_id[:12])
         elif result in ('VOID', 'PUSH', 'HALF_WIN', 'HALF_LOSS', 'PARTIAL'):
             log.info('  %s: %s', result, bet_id[:12])
-            # Partial handling
-            if wl != 0:
+            _curr = matched_active.get('currency', 'USDC') if matched_active else 'USDC'
+            _bbc = state.setdefault('bankroll_by_currency', {'USDC': 39.98, 'USDT': 26.0})
+            # HALF_WIN: winLoss = net profit on winning half only.
+            # The pushed half-stake is also returned by the exchange.
+            # HALF_LOSS: winLoss = -stake/2 (correct, nothing extra to add).
+            # VOID/PUSH: full stake returned, wl=0 → add stake back.
+            if result == 'HALF_WIN' and wl > 0:
+                _net = wl + stake / 2.0  # profit + returned pushed half
+                state['bankroll'] += _net
+                state['total_pnl'] += wl    # only profit counts as P&L
+                state['daily_pnl'] += wl
+                _bbc[_curr] = round(_bbc.get(_curr, 0) + _net, 5)
+            elif result in ('VOID', 'PUSH'):
+                # Full stake returned, no P&L change
+                state['bankroll'] += stake
+                _bbc[_curr] = round(_bbc.get(_curr, 0) + stake, 5)
+            elif wl != 0:  # HALF_LOSS or PARTIAL
                 state['bankroll'] += wl
                 state['total_pnl'] += wl
                 state['daily_pnl'] += wl
-                _curr = matched_active.get('currency', 'USDC') if matched_active else 'USDC'
-                _bbc = state.setdefault('bankroll_by_currency', {'USDC': 39.98, 'USDT': 26.0})
                 _bbc[_curr] = round(_bbc.get(_curr, 0) + wl, 5)
 
         state['settled_today'].append({
@@ -1976,6 +2599,54 @@ def check_results(api, state):
             'match': matched_active.get('match', '') if matched_active else '',
         })
         _log_settlement(bet_id, result, wl)
+        # CLV Oracle: calcular CLV con Betfair/Pinnacle como referencia
+        _clv_data = {}
+        if _CLV_ORACLE_ENABLED and matched_active:
+            try:
+                _clv_data = _CLV_ORACLE.resolve_clv_for_pick(
+                    matched_active,
+                    entry_odds=matched_active.get('price') or matched_active.get('odds'),
+                    settled_ts=int(time.time())
+                )
+            except Exception as _clve:
+                log.warning('[CLV] resolve error: %s', _clve)
+        if _SIBILA_ENABLED:
+            _closing = (_clv_data.get('closing_odds_betfair')
+                        or _clv_data.get('closing_odds_pinnacle'))
+            _sibila_resolve(
+                bet_id=bet_id, result=result,
+                closing_odds=_closing,
+            )
+            if matched_active:
+                _n_shad = _sibila_resolve_shadow(
+                    match=matched_active.get('match', ''),
+                    side=matched_active.get('label', ''),
+                    result=result,
+                    closing_odds=_closing,
+                )
+                if _n_shad:
+                    log.debug('[Sibila] %d shadow picks resolved for %s',
+                              _n_shad, matched_active.get('match', '')[:30])
+        if _PORTFOLIO_ENABLED:
+            _PORTFOLIO.invalidate_cache()  # bet cerrada -> recalcular portafolio
+        # Telegram notification for each settlement
+        try:
+            _tg_emoji = chr(9989) if result == 'WIN' else chr(10060) if result == 'LOSS' else chr(9208)
+            _tg_match = matched_active.get('match', bet_id[:12]) if matched_active else bet_id[:12]
+            _tg_label = matched_active.get('label', '') if matched_active else ''
+            _tg_pnl = wl if result == 'WIN' else -stake if result == 'LOSS' else wl
+            _tg_clv = matched_active.get('clv') if matched_active else None
+            _tg_clv_str = f' | CLV: {_tg_clv:+.1%}' if _tg_clv is not None else ''
+            _tg_prob = matched_active.get('model_prob') if matched_active else None
+            _tg_odds = matched_active.get('odds', matched_active.get('price', 0)) if matched_active else 0
+            _tg_prob_str = f' @{_tg_odds:.2f} (model {_tg_prob:.0%})' if _tg_prob else f' @{_tg_odds:.2f}'
+            send_telegram(
+                f'{_tg_emoji} *{result}*: ${_tg_pnl:+.2f}{_tg_clv_str} | {_tg_match}\n'
+                f'{_tg_label}{_tg_prob_str}\n'
+                f'Bankroll: ${state["bankroll"]:.2f} | Today: ${state["daily_pnl"]:+.2f}'
+            )
+        except Exception as _tg_err:
+            log.debug('Telegram settlement notification failed: %s', _tg_err)
         # Learn tennis results for Elo update
         if matched_active and matched_active.get('sport') == 'tennis':
             _learn_tennis_result(
@@ -1988,17 +2659,45 @@ def check_results(api, state):
         # Remove from active
         state['active_bets'] = [ab for ab in state['active_bets'] if ab.get('bet_id') != bet_id]
         processed_ids.add(bet_id)
+        # Persist to bet_history (used for per-sport settled count, auto-tune, etc.)
+        _hist_entry = {
+            'bet_id': bet_id,
+            'result': result,
+            'winLoss': wl,
+            'stake': stake,
+            'match': matched_active.get('match', '') if matched_active else '',
+            'label': matched_active.get('label', '') if matched_active else '',
+            'sport': matched_active.get('sport', '') if matched_active else '',
+            'market_type': matched_active.get('market_type', '') if matched_active else '',
+            'odds': matched_active.get('odds', 0) if matched_active else 0,
+            'edge': matched_active.get('edge', 0) if matched_active else 0,
+            'model_prob': matched_active.get('model_prob', 0) if matched_active else 0,
+            'clv': matched_active.get('clv') if matched_active else None,
+            'settled': datetime.now().isoformat(),
+        }
+        bh = state.setdefault('bet_history', [])
+        bh.append(_hist_entry)
+        if len(bh) > 500:
+            state['bet_history'] = bh[-500:]
         settled += 1
 
     # Persist processed IDs (keep last 200 to avoid unbounded growth)
     all_ids = list(processed_ids)
-    state['all_processed_ids'] = all_ids[-200:] if len(all_ids) > 200 else all_ids
+    state['all_processed_ids'] = all_ids[-1000:] if len(all_ids) > 1000 else all_ids
 
     if settled:
         log.info('Settled %d bets | P&L today: $%+.2f | Bankroll: $%.2f',
                  settled, state['daily_pnl'], state['bankroll'])
     else:
         log.info('No new settlements')
+        # Update CLV for settled bets (non-blocking)
+        if _CLV_ENABLED:
+            try:
+                _n_clv = record_closing_for_settled(PREDICTIONS_FILE)
+                if _n_clv:
+                    log.info('CLV: updated %d bets with closing odds', _n_clv)
+            except Exception as _e_clv:
+                log.debug('CLV update error: %s', _e_clv)
 
     state['last_result_check'] = datetime.now().isoformat()
     # Full recalculation of ROI stats after settlements
@@ -2013,7 +2712,7 @@ def check_results(api, state):
 def reconcile_bankroll(api, state):
     """Reconcile local bankroll with Cloudbet actual balance."""
     try:
-        bets = api.get_bets(limit=200, days_back=120)
+        bets = api.get_bets(limit=500, days_back=120)
         if not bets:
             return
         # Sum all pending stakes
@@ -2038,7 +2737,38 @@ def reconcile_bankroll(api, state):
             'checked': datetime.now().isoformat(),
         }
 
+        # Auto-correct bankroll if drift > $2
+        INITIAL_DEPOSIT = 57.03
+        all_settled_pnl = sum(float(b.get('winLoss', 0)) for b in bets if b.get('isSettled'))
+        all_pending_stake = sum(float(b.get('stake', 0)) for b in bets if not b.get('isSettled'))
+        correct_bankroll = INITIAL_DEPOSIT + all_settled_pnl + all_pending_stake + state.get('cumulative_void_returns', 0)
+        drift = abs(state['bankroll'] - correct_bankroll)
+        if drift > 2.0:
+            log.warning('RECONCILE: Auto-correcting bankroll $%.2f -> $%.2f (drift=$%.2f)',
+                        state['bankroll'], correct_bankroll, drift)
+            state['bankroll'] = round(correct_bankroll, 2)
+            # Sync total_pnl to match API-derived settled PnL (avoids silent drift accumulation)
+            api_total_pnl = round(all_settled_pnl, 2)
+            local_pnl = round(state.get('total_pnl', 0), 2)
+            pnl_drift = abs(local_pnl - api_total_pnl)
+            if pnl_drift > 1.0:
+                log.warning('RECONCILE: total_pnl drift local=$%.2f vs api=$%.2f — correcting',
+                            local_pnl, api_total_pnl)
+                state['total_pnl'] = api_total_pnl
+            # Also fix per-currency
+            for curr in ('USDC', 'USDT'):
+                c_settled = sum(float(b.get('winLoss', 0)) for b in bets
+                               if b.get('isSettled') and b.get('currency') == curr)
+                c_pending = sum(float(b.get('stake', 0)) for b in bets
+                               if not b.get('isSettled') and b.get('currency') == curr)
+                c_initial = INITIAL_DEPOSIT_USDC if curr == 'USDC' else INITIAL_DEPOSIT_USDT
+                c_correct = c_initial + c_settled + c_pending
+                _bbc = state.setdefault('bankroll_by_currency', {})
+                _bbc[curr] = round(c_correct, 2)
+
         # --- Ghost bet pruning: remove local bets that API no longer knows about ---
+        # Cloudbet silently voids markets (e.g. tennis.exact_sets) returning 404 with no history entry.
+        # Threshold: >1 day old + absent from API (500-bet window) = treat as VOID, return stake.
         api_bet_ids = {b.get('betId', '') for b in bets}
         now = datetime.now()
         pruned = []
@@ -2049,25 +2779,32 @@ def reconcile_bankroll(api, state):
                 placed_dt = datetime.fromisoformat(placed_str.replace('Z', '+00:00').split('+')[0])
             except (ValueError, TypeError):
                 placed_dt = now  # keep if we can't parse date
-            age_days = (now - placed_dt.replace(tzinfo=None)).days
+            age_hours = (now - placed_dt.replace(tzinfo=None)).total_seconds() / 3600
             bet_id = ab.get('bet_id', '')
-            # If bet is >5 days old and NOT in API response (neither pending nor settled), prune it
-            if age_days > 5 and bet_id not in api_bet_ids:
+            # If bet is >24h old and NOT in API response (neither pending nor settled), it was voided
+            if age_hours > 24 and bet_id not in api_bet_ids:
                 pruned.append(ab)
             else:
                 kept.append(ab)
         if pruned:
             state['active_bets'] = kept
+            pruned_stake = sum(p.get('stake', 0) for p in pruned)
             for p in pruned:
-                log.warning('PRUNE ghost bet: %s | %s | age=%dd | stake=$%.2f',
-                            p.get('bet_id', '')[:12], p.get('match', ''),
-                            (now - datetime.fromisoformat(p.get('placed', now.isoformat()))).days,
-                            p.get('stake', 0))
+                age_h = (now - datetime.fromisoformat(p.get('placed', now.isoformat()))).total_seconds() / 3600
+                log.warning('PRUNE ghost bet (VOID+stake_returned): %s | %s | age=%.0fh | stake=$%.2f',
+                            p.get('bet_id', '')[:12], p.get('match', ''), age_h, p.get('stake', 0))
+                # Return stake to bankroll (treat voided-by-exchange as VOID)
+                stake_back = float(p.get('stake', 0))
+                state['bankroll'] = round(state['bankroll'] + stake_back, 5)
+                state['cumulative_void_returns'] = round(state.get('cumulative_void_returns', 0) + stake_back, 5)
+                curr = p.get('currency', 'USDC')
+                _bbc = state.setdefault('bankroll_by_currency', {})
+                _bbc[curr] = round(_bbc.get(curr, 0) + stake_back, 5)
             _pruned_ids = [p.get('bet_id', '') for p in pruned if p.get('bet_id')]
             _pids2 = list(set(state.get('all_processed_ids', []) + _pruned_ids))
-            state['all_processed_ids'] = _pids2[-200:]
-            log.info('Pruned %d ghost bets (total stake=$%.2f)',
-                     len(pruned), sum(p.get('stake', 0) for p in pruned))
+            state['all_processed_ids'] = _pids2[-1000:]
+            log.info('Pruned %d ghost bets — stake $%.2f returned (VOID) | new bankroll: $%.2f',
+                     len(pruned), pruned_stake, state['bankroll'])
         # --- Auto-void bets stuck PENDING in API >20 days ---
         api_pending_by_id = {b.get('betId',''): b for b in bets if not b.get('isSettled')}
         voided = []
@@ -2091,7 +2828,7 @@ def reconcile_bankroll(api, state):
             state['active_bets'] = kept2
             _voided_ids = [v.get('bet_id', '') for v in voided if v.get('bet_id')]
             _pids = list(set(state.get('all_processed_ids', []) + _voided_ids))
-            state['all_processed_ids'] = _pids[-200:]
+            state['all_processed_ids'] = _pids[-1000:]
             log.info('Auto-voided %d stuck bets (total stake=$%.2f) — treated as VOID, no P&L change',
                      len(voided), sum(v.get('stake', 0) for v in voided))
         # --- Detect bets in API but missing locally ---
@@ -2191,12 +2928,20 @@ def _learn_tennis_result(match_name, result, label):
 
         picked = label.replace("Winner: ", "").replace("Winner:", "").strip()
 
+        # Normalize: check if picked name matches player_a (either is substring of other)
+        _pa_low = player_a.lower()
+        _pb_low = player_b.lower()
+        _pk_low = picked.lower()
+        # picked matches player_a if any word of picked appears as last name in player_a
+        _pk_words = set(_pk_low.split())
+        _pa_words = set(_pa_low.split())
+        _matched_a = bool(_pk_words & _pa_words) or (_pk_low in _pa_low) or (_pa_low in _pk_low)
         if result == "WIN":
             winner = picked
-            loser = player_b if picked in player_a or player_a in picked else player_a
+            loser = player_b if _matched_a else player_a
         elif result == "LOSS":
             loser = picked
-            winner = player_b if picked in player_a or player_a in picked else player_a
+            winner = player_b if _matched_a else player_a
         else:
             return
 
@@ -2229,7 +2974,7 @@ def _learn_tennis_result(match_name, result, label):
 # ---------------------------------------------------------------------------
 # Telegram alerts
 # ---------------------------------------------------------------------------
-TELEGRAM_BOT_TOKEN = '8238423049:AAF0KtHgp2oej4HRIQ-RqhD34xZWlH_OI1o'
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID = '1521532947'
 TELEGRAM_ENABLED = True
 
@@ -2294,7 +3039,7 @@ def _capture_closing_odds(api, state):
     """Capture closing odds for active bets near kickoff (within 2h).
     Stores closing_odds on the bet entry for CLV calculation later."""
     try:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         for bet in state.get('active_bets', []):
             if bet.get('closing_odds'):
                 continue  # Already captured
@@ -2367,6 +3112,213 @@ def _compute_clv_stats(state):
         return None
 
 PREDICTIONS_FILE = os.path.join(SCRIPT_DIR, 'predictions_log.jsonl')
+import threading as _threading
+try:
+    from oraculo_clv import record_closing_for_settled, format_clv_telegram
+    _CLV_ENABLED = True
+except ImportError:
+    _CLV_ENABLED = False
+    def record_closing_for_settled(f): return 0
+    def format_clv_telegram(f): return "CLV module no disponible"
+try:
+    from oraculo_sibila import record_pick as _sibila_record, mark_placed as _sibila_placed, resolve_pick as _sibila_resolve, resolve_shadow_picks as _sibila_resolve_shadow, format_telegram as _sibila_fmt
+    try:
+        from soccer_sibila_resolver import resolve_all_pending as _soccer_resolve_shadows
+    except ImportError:
+        def _soccer_resolve_shadows(**kw): return (0, 0, 0)
+    _SIBILA_ENABLED = True
+except ImportError:
+    _SIBILA_ENABLED = False
+    def _sibila_record(*a, **kw): pass
+    def _sibila_placed(*a, **kw): pass
+    def _sibila_resolve(*a, **kw): pass
+    def _sibila_resolve_shadow(*a, **kw): return 0
+    def _sibila_fmt(**kw): return 'Sibila no disponible'
+# ── Learned Rules (generado por _learn_from_losses.py) ──────────────────
+import json as _json
+_LEARNED_RULES       = []
+_LEARNED_RULES_MTIME = 0.0
+_LEARNED_RULES_PATH  = os.path.join(os.path.dirname(__file__), 'learned_rules.json')
+
+def _load_learned_rules():
+    global _LEARNED_RULES, _LEARNED_RULES_MTIME
+    try:
+        mtime = os.path.getmtime(_LEARNED_RULES_PATH)
+        if mtime == _LEARNED_RULES_MTIME:
+            return
+        data  = _json.load(open(_LEARNED_RULES_PATH))
+        rules = data.get('rules', data) if isinstance(data, dict) else data
+        _LEARNED_RULES = rules if isinstance(rules, list) else []
+        _LEARNED_RULES_MTIME = mtime
+        log.info('[Rules] %d reglas aprendidas cargadas desde learned_rules.json', len(_LEARNED_RULES))
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        log.warning('[Rules] Error cargando learned_rules.json: %s', exc)
+
+def _apply_learned_rules(picks: list) -> list:
+    """Filtra/reduce picks segun reglas aprendidas de historial."""
+    _load_learned_rules()
+    if not _LEARNED_RULES:
+        return picks
+    out = []
+    for p in picks:
+        if p.get('_skip_rules'):
+            out.append(p)
+            continue
+        price  = float(p.get('odds', p.get('price', 0)) or 0)
+        edge   = float(p.get('edge', 0) or 0)
+        market = str(p.get('market_type', p.get('market', '')) or '').lower()
+        level  = str(p.get('level', '') or '').lower()
+        sport  = str(p.get('sport', '') or '').lower()
+        skip   = False
+        factor = 1.0
+        for r in _LEARNED_RULES:
+            dim = r.get('dimension', '')
+            val = r.get('value', '')
+            act = r.get('action', 'skip')
+            match = False
+            if dim == 'price':
+                if val == '1.20-1.50' and 1.20 <= price < 1.50: match = True
+                elif val == '1.50-2.00' and 1.50 <= price < 2.00: match = True
+                elif val == '2.00-2.50' and 2.00 <= price < 2.50: match = True
+                elif val == '2.50-3.00' and 2.50 <= price < 3.00: match = True
+                elif val == '3.00+' and price >= 3.00: match = True
+            elif dim == 'edge':
+                ep = edge * 100
+                if val == '1-2%' and 1 <= ep < 2: match = True
+                elif val == '2-4%' and 2 <= ep < 4: match = True
+                elif val == '4-7%' and 4 <= ep < 7: match = True
+                elif val == '7-12%' and 7 <= ep < 12: match = True
+                elif val == '12%+' and ep >= 12: match = True
+            elif dim == 'market' and val.lower() in market: match = True
+            elif dim == 'level'  and val.lower() in level:  match = True
+            # Solo aplicar si la regla aplica al deporte del pick
+            rule_sport = r.get('sport', '')
+            if rule_sport and rule_sport != sport:
+                continue
+            if match:
+                if act == 'skip':
+                    skip = True
+                    log.info('[Rules] SKIP %s | %s @ %.2f — regla: %s %s ROI %.1f%%',
+                             p.get('match','?'), p.get('label','?'), price, dim, val,
+                             r.get('roi_observed', 0))
+                    break
+                elif act in ('reduce_stake_50pct', 'stake_x0.5'):
+                    factor = min(factor, 0.5)
+        if not skip:
+            if factor < 1.0:
+                p['_rules_stake_factor'] = factor
+            out.append(p)
+    removed = len(picks) - len(out)
+    if removed:
+        log.info('[Rules] %d picks filtrados por learned_rules', removed)
+    return out
+
+try:
+    from oraculo_fresh_line import check_picks as _fresh_check, fresh_summary as _fresh_summary
+    _FRESH_ENABLED = True
+except ImportError:
+    _FRESH_ENABLED = False
+    def _fresh_check(p): return p
+    def _fresh_summary(p): return ''
+try:
+    from oraculo_rlm import get_tracker as _rlm_tracker
+    _RLM = _rlm_tracker()
+    _RLM_ENABLED = True
+except Exception:
+    _RLM_ENABLED = False
+    class _FakeRLM:
+        def record_batch(self, *a, **kw): pass
+        def tag_picks(self, p): return p
+        def purge_old(self, **kw): pass
+    _RLM = _FakeRLM()
+try:
+    from oraculo_portfolio import PortfolioManager as _PortfolioManager
+    _PORTFOLIO = _PortfolioManager(
+        predictions_file=PREDICTIONS_FILE,
+        bankroll=1000.0,
+    )
+    _PORTFOLIO_ENABLED = True
+except Exception as _pe:
+    _PORTFOLIO_ENABLED = False
+    log.warning('Portfolio Kelly no disponible: %s', _pe)
+    class _FakePort:
+        def get_adjusted_stake(self, p, base_stake=None):
+            return {'stake_adj': base_stake or 0, 'skip': False, 'capped': False, 'reason': ''}
+        def invalidate_cache(self): pass
+        def format_status(self): return 'Portfolio no disponible'
+    _PORTFOLIO = _FakePort()
+try:
+    from oraculo_clv import CLVOracle as _CLVOracle
+    _ODDS_API_KEY = os.environ.get('ODDS_API_KEY', '')
+    _CLV_ORACLE = _CLVOracle(odds_api_key=_ODDS_API_KEY, rlm_tracker=_RLM if _RLM_ENABLED else None)
+    _CLV_ORACLE_ENABLED = True
+except Exception as _ce:
+    _CLV_ORACLE_ENABLED = False
+    log.warning('CLV Oracle no disponible: %s', _ce)
+    class _FakeCLV:
+        def fetch_and_record(self, *a, **kw): return 0
+        def resolve_clv_for_pick(self, *a, **kw): return {}
+        def clv_quality_label(self, clv): return ''
+    _CLV_ORACLE = _FakeCLV()
+try:
+    from oraculo_benter import get_calibrator as _benter_cal
+    _BENTER = _benter_cal(
+        sibila_db=os.path.join(os.path.dirname(__file__), 'sibila.db')
+    )
+    _BENTER_ENABLED = True
+    log.info('Benter Calibrator cargado (alpha football=%.2f tennis=%.2f mlb=%.2f)',
+             _BENTER._alphas.get('soccer',0.60),
+             _BENTER._alphas.get('tennis',0.65),
+             _BENTER._alphas.get('mlb',0.55))
+except Exception as _be:
+    _BENTER_ENABLED = False
+    log.warning('Benter no disponible: %s', _be)
+    class _FakeBenter:
+        _alphas = {}
+        def apply_batch(self, picks, **kw): return picks
+        def recalibrate(self, **kw): return False
+    _BENTER = _FakeBenter()
+_predictions_lock = _threading.Lock()  # Thread-safe writes to predictions_log.jsonl
+
+def _build_episodic_memory(days_back=21):
+    """Build player-level win/loss memory from llm_postmatch_log.jsonl.
+    Returns: {player_name_lower: {'losses': int, 'wins': int, 'markets': [str]}}
+    Used to penalize picks against players we have recent bad history with."""
+    memory = {}
+    try:
+        log_file = os.path.join(SCRIPT_DIR, 'llm_postmatch_log.jsonl')
+        if not os.path.exists(log_file):
+            return memory
+        cutoff = (datetime.now() - timedelta(days=days_back)).isoformat()
+        with open(log_file) as f:
+            for line in f:
+                try:
+                    e = json.loads(line)
+                    if e.get('ts', '') < cutoff:
+                        continue
+                    match = e.get('match', '')
+                    outcome = e.get('outcome', '')
+                    market = e.get('label', e.get('market_type', ''))
+                    if ' vs ' not in match:
+                        continue  # skip parlays
+                    players = [p.strip() for p in match.split(' vs ', 1)]
+                    for player in players:
+                        key = player.lower()
+                        if key not in memory:
+                            memory[key] = {'losses': 0, 'wins': 0, 'markets': []}
+                        if outcome == 'LOST':
+                            memory[key]['losses'] += 1
+                            memory[key]['markets'].append(market)
+                        elif outcome == 'WON':
+                            memory[key]['wins'] += 1
+                except Exception:
+                    continue
+    except Exception as e:
+        log.debug('Episodic memory load failed: %s', e)
+    return memory
+
 
 def _classify_market_type(label, sport):
     """Classify bet into market category for ROI tracking."""
@@ -2418,6 +3370,9 @@ def _save_bet(state, bet_id, match, label, sport, odds, stake, edge=0,
     if not bet_id or not isinstance(bet_id, str):
         log.warning('[_save_bet] Rejected: empty or invalid bet_id (match=%s label=%s)', match[:30], label[:20])
         return False
+    if stake <= 0:
+        log.warning('[_save_bet] Rejected: stake=%.4f <= 0 (match=%s label=%s)', stake, match[:30], label[:20])
+        return False
 
     existing = {b.get('bet_id') for b in state.get('active_bets', [])}
     if bet_id in existing:
@@ -2446,26 +3401,31 @@ def _save_bet(state, bet_id, match, label, sport, odds, stake, edge=0,
     return True
 
 def _log_settlement(bet_id, result, win_loss):
-    """Update prediction log with result. Also update ROI-by-type tracking."""
+    """Update prediction log with result. Thread-safe write with lock."""
     try:
         if not os.path.exists(PREDICTIONS_FILE):
             return
-        lines = open(PREDICTIONS_FILE).readlines()
-        updated = False
-        new_lines = []
-        settled_entry = None
-        for line in lines:
-            entry = json.loads(line.strip())
-            if entry.get('bet_id') == bet_id and entry.get('result') is None:
-                entry['result'] = result
-                entry['win_loss'] = win_loss
-                entry['settled_ts'] = datetime.now().isoformat()
-                updated = True
-                settled_entry = entry
-            new_lines.append(json.dumps(entry) + '\n')
-        if updated:
-            with open(PREDICTIONS_FILE, 'w') as f:
-                f.writelines(new_lines)
+        with _predictions_lock:
+            lines = open(PREDICTIONS_FILE).readlines()
+            updated = False
+            new_lines = []
+            settled_entry = None
+            for line in lines:
+                try:
+                    entry = json.loads(line.strip())
+                except Exception:
+                    new_lines.append(line)
+                    continue
+                if entry.get('bet_id') == bet_id and entry.get('result') is None:
+                    entry['result'] = result
+                    entry['win_loss'] = win_loss
+                    entry['settled_ts'] = datetime.now().isoformat()
+                    updated = True
+                    settled_entry = entry
+                new_lines.append(json.dumps(entry) + '\n')
+            if updated:
+                with open(PREDICTIONS_FILE, 'w') as f:
+                    f.writelines(new_lines)
         if settled_entry:
             _update_roi_by_type(settled_entry)
     except Exception:
@@ -2493,25 +3453,29 @@ def _recalculate_roi_by_type():
             by_type[mt]["bets"] += 1
             by_type[mt]["staked"] += p.get("stake", 0)
             r = p.get("result")
+            # Use actual win_loss if available (consistent with incremental path)
+            _p_stake = p.get('stake', 0)
+            _p_wl = p.get('win_loss',
+                          _p_stake * (p.get('odds', p.get('price', 1)) - 1) if r == 'WIN' else -_p_stake)
             if r == "WIN":
                 by_type[mt]["wins"] += 1
-                by_type[mt]["profit"] += p.get("stake", 0) * (p.get("odds", p.get("price", 1)) - 1)
+                by_type[mt]["profit"] += _p_wl
             elif r == "LOSS":
                 by_type[mt]["losses"] += 1
-                by_type[mt]["profit"] -= p.get("stake", 0)
+                by_type[mt]["profit"] += _p_wl  # wl is negative for LOSS
             # Also track by signal
             sig = p.get("signal", "model")
             sig_key = "signal_" + sig
             if sig_key not in by_type:
                 by_type[sig_key] = {"bets": 0, "wins": 0, "losses": 0, "staked": 0.0, "profit": 0.0}
             by_type[sig_key]["bets"] += 1
-            by_type[sig_key]["staked"] += p.get("stake", 0)
+            by_type[sig_key]["staked"] += _p_stake
             if r == "WIN":
                 by_type[sig_key]["wins"] += 1
-                by_type[sig_key]["profit"] += p.get("stake", 0) * (p.get("odds", p.get("price", 1)) - 1)
+                by_type[sig_key]["profit"] += _p_wl
             elif r == "LOSS":
                 by_type[sig_key]["losses"] += 1
-                by_type[sig_key]["profit"] -= p.get("stake", 0)
+                by_type[sig_key]["profit"] += _p_wl
         for mt, d in by_type.items():
             d["staked"] = round(d["staked"], 2)
             d["profit"] = round(d["profit"], 2)
@@ -2895,6 +3859,10 @@ def process_manual_bets(api, state):
                     break
 
         elif sport == 'soccer':
+            if not SOCCER_ENABLED:
+                log.info('Manual soccer bet skipped -- SOCCER_ENABLED=False: %s', match_name)
+                remaining.append(bet)
+                continue
             market_key = bet.get('market', 'asian_handicap')
             comps_to_check = [comp] if comp else list(CB_COMPS.values())
             for ck in comps_to_check:
@@ -3203,6 +4171,28 @@ def _handle_telegram_command(text):
 
     elif cmd[0] == '/roi':
         return get_roi_summary()
+    elif cmd[0] == '/clv':
+        _clv_base = format_clv_telegram(PREDICTIONS_FILE)
+        if _CLV_ORACLE_ENABLED:
+            _clv_base += '\n\n_Referencia: Betfair Exchange + Pinnacle_'
+        return _clv_base
+    elif cmd[0] == '/sibila':
+        _days = int(cmd[1]) if len(cmd) > 1 and cmd[1].isdigit() else 30
+        return _sibila_fmt(days=_days)
+    elif cmd[0] == '/portfolio':
+        return _PORTFOLIO.format_status() if _PORTFOLIO_ENABLED else 'Portfolio no disponible'
+    elif cmd[0] == '/benter':
+        if not _BENTER_ENABLED:
+            return 'Benter no disponible'
+        _ba = _BENTER._alphas
+        lines = ['*Benter Calibrator*', '']
+        lines.append('Alpha por deporte (modelo vs mercado):')
+        for _sp, _al in sorted(_ba.items()):
+            if _sp == 'default': continue
+            lines.append(f'  {_sp}: {_al:.2f} ({_al*100:.0f}% modelo / {(1-_al)*100:.0f}% mercado)')
+        lines.append('')
+        lines.append('_Alpha 1.0 = solo modelo | 0.0 = solo mercado_')
+        return '\n'.join(lines)
     elif cmd[0] == '/kelly':
         frac = _get_dynamic_kelly_fraction()
         return 'Kelly: ' + str(round(frac,3)) + ' (' + str(round(frac*100,1)) + '%) | Base: ' + str(KELLY_FRAC)
@@ -3216,12 +4206,66 @@ def _handle_telegram_command(text):
         for e in items:
             parts.append(('WIN ' if e['outcome']=='WON' else 'LOSS ') + e['match'][:30] + chr(10) + e['lesson'][:100])
         return (chr(10)+chr(10)).join(parts)
+    elif cmd[0] in ('/metrics', '/metricas'):
+        try:
+            import sqlite3 as _sq3
+            _db = _sq3.connect(os.path.join(SCRIPT_DIR, 'sibila.db'))
+            lines = ['*Oraculo Metrics*']
+            # Sport breakdown
+            _rows = _db.execute("""
+                SELECT sport,
+                    COUNT(*) as n,
+                    SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN result='LOSS' THEN 1 ELSE 0 END),
+                    ROUND(SUM(pnl),2),
+                    ROUND(AVG(odds),2)
+                FROM sibila_picks WHERE placed=1
+                GROUP BY sport ORDER BY n DESC""").fetchall()
+            lines.append('\n*Por deporte (reales):*')
+            for r in _rows:
+                sp, n, w, l, pnl, ao = r
+                s2 = (w or 0)+(l or 0)
+                wr = (w or 0)/s2*100 if s2 else 0
+                lines.append(f'  {sp}: {n} bets | WR={wr:.0f}% | PnL=${pnl or 0:+.2f} | @{ao or 0:.2f}')
+            # Prob calibration buckets
+            _cal = _db.execute("""
+                SELECT CAST(ROUND(prob_model*10) AS INT)*10 as pb,
+                    COUNT(*), SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END)
+                FROM sibila_picks
+                WHERE placed=1 AND result IN ('WIN','LOSS') AND prob_model > 0.01
+                GROUP BY pb ORDER BY pb""").fetchall()
+            if _cal:
+                lines.append('\n*Calibracion por prob:*')
+                for pb, n, w in _cal:
+                    wr = (w or 0)/n*100 if n else 0
+                    bar = '█'*int(wr/10) + '░'*(10-int(wr/10))
+                    lines.append(f'  {pb}%: {n:2d} bets | WR={wr:.0f}% {bar}')
+            # AutoTune params
+            _at = state.get('_autotune', {}) if 'state' in dir() else {}
+            if _at:
+                lines.append('\n*AutoTune:*')
+                lines.append(f'  edge={_at.get("min_edge",0)*100:.0f}% conf={_at.get("min_conf",0)*100:.0f}%')
+                lines.append(f'  exposure={_at.get("max_exposure",0)*100:.0f}% sample={_at.get("sample_size",0)}')
+            # SPORT_KELLY
+            lines.append('\n*Kelly por deporte:*')
+            for sp, fr in SPORT_KELLY.items():
+                lines.append(f'  {sp}: {fr*100:.0f}%')
+            _db.close()
+            return '\n'.join(lines)
+        except Exception as _e:
+            return f'Metrics error: {_e}'
+
     elif cmd[0] == '/help':
         return ('*Oraculo Commands*\n'
                 '/status - Balance and record\n'
                 '/picks - Current value picks\n'
                 '/apostar <player> <amount> [USDT] - Place bet\n'
                 '/bets - Active bets\n'
+                '/metrics - Calibracion y estadisticas\n'
+                '/clv - Closing Line Value (edge real?)\n'
+                '/sibila - Libro sombra (ROI sin limites)\n'
+                '/portfolio - Estado del portafolio Kelly\n'
+                '/benter - Alphas modelo vs mercado\n'
                 '/help - This message')
 
     return None
@@ -3258,11 +4302,105 @@ def run_cycle(dry_run=False):
     # 1b. Reconcile bankroll with Cloudbet
     reconcile_bankroll(api, state)
 
-    # 2. Scan football
-    football_picks = scan_football(api, state, dry_run)
+    # 2. Scan football — always scan (records to Sibila shadow); bet only if SOCCER_ENABLED
+    # 2026-05-13: scan with dry_run=True so picks populate Sibila even when betting is off.
+    # Then discard football_picks=[] so place_bets / parlay builders don't try to bet.
+    football_picks = scan_football(api, state, dry_run=True)
+    if not SOCCER_ENABLED:
+        football_picks = []
+    mlb_picks = []
 
     # 3. Scan tennis
     tennis_picks = scan_tennis(api, state, dry_run)
+    # 3c. Scan MLB
+    try:
+        from oraculo_mlb import scan_mlb, train_mlb_elo
+        _mlb_elo = train_mlb_elo(days_back=45)
+        if _mlb_elo and len(_mlb_elo.ratings) >= 20:
+            # Scan amplio: genera TODOS los picks del modelo para Sibila
+            _all_mlb = scan_mlb(api, state, _mlb_elo, dry_run, min_edge=0.02, min_conf=0.40)
+            # Platt calibration sobre TODOS (aprende de todo el espectro)
+            try:
+                from oraculo_mlb_calibrator import calibrate_picks, train_platt
+                train_platt()
+                _all_mlb = calibrate_picks(_all_mlb)
+            except Exception as _ce:
+                log.debug('MLB calibrator skipped: %s', _ce)
+            # Sibila graba TODOS antes de filtros
+            if _SIBILA_ENABLED:
+                for _sp in _all_mlb:
+                    _sibila_record(_sp)
+            # Solo picks reales para apostar (post-calibracion)
+            def _mlb_line_ok(p):
+                # v4: Over 6.5+, Under 4.0-5.0, ML pass through
+                lbl = (p.get('label') or '').lower()
+                m = re.search(r'(over|under)\s+([\d.]+)', lbl)
+                if not m:
+                    return True  # ML or other — pass through
+                direction, line = m.group(1), float(m.group(2))
+                if direction == 'over':
+                    return line >= 4.5  # v5: backtest OOS Over4.5+ ROI=+30.8%
+                if direction == 'under':
+                    return False  # v5: Under desactivado (OOS WR=47%)
+                return True
+
+            mlb_picks = [p for p in _all_mlb
+                         if float(p.get('raw_edge_uncal') or p.get('edge') or 0) >= MIN_EDGE
+                         and float(p.get('raw_model_prob_uncal') or p.get('model_prob') or 0) >= 0.60]
+            log.info('MLB: %d candidatos totales, %d pasan pre-filtro v5 (prob>=60%%)',
+                     len(_all_mlb), len(mlb_picks))
+            # Dead-man switch: reset AutoTune si 3+ ciclos sin picks MLB
+            if len(mlb_picks) == 0:
+                state['_mlb_zero_cycles'] = state.get('_mlb_zero_cycles', 0) + 1
+                if state['_mlb_zero_cycles'] >= 3:
+                    state['_mlb_zero_cycles'] = 0
+                    log.info('[MLB-Reset] 3 ciclos sin picks MLB (filtro v5 activo — normal en temporada baja)')
+            else:
+                state['_mlb_zero_cycles'] = 0
+    except ImportError:
+        log.debug("oraculo_mlb not available")
+    except Exception as e:
+        log.warning("MLB scan error: %s", e)
+
+    # 3d. Scan soccer corners/bookings (UCL + PL + BL1 + FL1 + SA + PD)
+    # v2: form rolling-5 + referee multiplier + league base rate consensus
+    sc_picks = []
+    try:
+        from oraculo_soccer_v2 import scan_soccer_v2, SoccerModelV2
+        if not hasattr(scan_soccer_v2, '_sc_model'):
+            scan_soccer_v2._sc_model = SoccerModelV2().load()
+        sc_picks = scan_soccer_v2(api, state, model=scan_soccer_v2._sc_model, dry_run=dry_run)
+        if _SIBILA_ENABLED:
+            _sc_prob_key = chr(39)+chr(114)+chr(97)+chr(119)+chr(95)+chr(109)+chr(111)+chr(100)+chr(101)+chr(108)+chr(95)+chr(112)+chr(114)+chr(111)+chr(98)+chr(39)
+            for _sp in sc_picks:
+                _sp[_sc_prob_key] = float(_sp.get('raw_model_prob') or _sp.get('model_prob') or _sp.get('base_rate_prob') or 0)
+                _sibila_record(_sp)
+    except ImportError as _sie:
+        log.warning('Soccer v2 import error: %s', _sie)
+    except Exception as _sce:
+        log.warning('Soccer corners scan error: %s', _sce)
+
+
+    # 3e. Scan darts (Premier League + Modus)
+    try:
+        from oraculo_darts import train_darts_elo, scan_darts
+        _darts_elo = train_darts_elo()
+        _darts_picks = scan_darts(api, state, _darts_elo, shadow=False)
+        if _darts_picks:
+            log.info('[Darts] %d picks:', len(_darts_picks))
+            for _dp in _darts_picks:
+                log.info('  [Darts] %s | %s | edge=%.1f%% conf=%.0f%% @%.3f',
+                         _dp.get("match"), _dp.get("label"),
+                         _dp.get("edge", 0) * 100, _dp.get("confidence", 0) * 100,
+                         _dp.get("price", 0))
+            if _SIBILA_ENABLED:
+                for _dp in _darts_picks:
+                    _sibila_record(_dp)
+            picks.extend(_darts_picks)
+        else:
+            log.debug("Darts: 0 value picks")
+    except Exception as _de:
+        log.debug("Darts scan error: %s", _de)
 
     # 3b. Filter tennis picks through LLM (quality gate)
     if tennis_picks:
@@ -3288,7 +4426,7 @@ def run_cycle(dry_run=False):
                        if str(p.get('event_id','')) not in _restricted_evs_p
                        and not any(p.get('market_url','').startswith(x) for x in _restricted_pfx_p)]
     if not state.get("tennis_parlay_placed_today"):
-        parlays = build_parlays(tennis_picks_ok)
+        parlays = build_parlays(tennis_picks_ok, state)
     else:
         parlays = []
     if parlays:
@@ -3341,6 +4479,97 @@ def run_cycle(dry_run=False):
         log.info('No value bets found this cycle')
         placed = 0
 
+    # 6b. Place MLB bets — with quality filters (2026-05-04)
+    if mlb_picks:
+        _mlb_settled = sum(1 for h in state.get('bet_history', [])
+                           if h.get('sport') == 'baseball' and h.get('result') in ('WIN', 'LOSS'))
+
+        # FILTROS MLB v4 (2026-05-07) — patron mining sobre 3077 picks Sibila
+        # OVER 6.5+: prob>=70% WR=100% (n=24) vs prob<65% WR=49% — exigir 70%
+        # UNDER 4.5: prob>=65% WR=100% (n=18) — exigir 65%
+        # Lunes: WR=0% PnL=-$253 — no apostar
+        # Odds 1.90-2.10: WR=34% dentro de v3 — evitar
+        # Edge >=25%: WR=96% PnL=+$2019 — priorizar
+        import datetime as _dt
+        _dow = _dt.datetime.utcnow().weekday()  # 0=Mon
+        _active_matches = set(b.get('match', '') for b in state.get('active_bets', []))
+        _filtered_mlb = []
+
+        # Regla global: no apostar los lunes (WR=0% historico)
+        if _dow == 0:
+            log.info('MLB [lunes-skip]: WR historico=0%% en lunes — no se apuesta hoy')
+            mlb_picks = []
+        else:
+            for _mp in mlb_picks:
+                _lbl = str(_mp.get('label', '') or _mp.get('side', '')).lower()
+                _mch = str(_mp.get('match', ''))
+                _m = re.search(r'[\d.]+', _lbl.replace('f5', '').replace('under', '').replace('over', ''))
+                _line = float(_m.group()) if _m else 0.0
+                _odds = float(_mp.get('price') or _mp.get('odds') or 2.0)
+                _edge = float(_mp.get('edge') or 0)
+                _is_over  = 'over'  in _lbl
+                _is_under = 'under' in _lbl
+                _is_ml    = 'ml'    in _lbl
+                _conf = float(_mp.get('raw_model_prob_uncal') or _mp.get('raw_model_prob') or _mp.get('model_prob') or _mp.get('confidence') or 0)
+
+                # Filtro 0: PROB minima 0.60 (O/U) — bucket 55-59% destruye $13k
+                # Under 4.5: ML model validated threshold is 0.58
+                # Filtro v5 (2026-05-11): backtest OOS 1218 juegos, ROI +30.8%
+                # Over >= 4.5, prob >= 0.65, odds >= 1.75 | Under DESACTIVADO
+
+                # Filtro 0: prob minima 0.63 para O/U (no ML)
+                if _conf < 0.63 and not _is_ml:
+                    log.info('MLB [prob-skip %.0f%%<63%%]: bajo threshold v5', _conf * 100)
+                    continue
+
+                # Filtro 1: 1 apuesta por partido
+                if _mch in _active_matches:
+                    log.info('MLB [1-per-match]: %s ya activo', _mch[:30])
+                    continue
+
+                # Filtro 2 v5: OVER — lineas >= 4.5, prob >= 0.65, odds >= 1.75
+                if _is_over:
+                    if _line < 4.5:
+                        log.info('MLB [over-skip line%.1f]: linea < 4.5', _line)
+                        continue
+                    if _conf < 0.63:
+                        log.info('MLB [over-prob-skip %.0f%%<63%%]: requiere prob>=63%%', _conf * 100)
+                        continue
+                    if _odds < 1.75:
+                        log.info('MLB [over-odds-skip @%.2f<1.75]: odds insuficientes', _odds)
+                        continue
+
+                # Filtro 3 v5: UNDER — DESACTIVADO (ROI -10.6% OOS, 1218 juegos)
+                if _is_under and not _is_ml:
+                    log.info('MLB [under-disabled]: Under desactivado en v5 (ROI -10.6%% OOS)')
+                    continue
+
+                # Filtro 4: odds muertos 1.90-2.10 solo aplica a no-ML
+                # (removido para Over — el backtest muestra edge en esa zona)
+
+                _filtered_mlb.append(_mp)
+                _active_matches.add(_mch)
+
+            _n_removed = len(mlb_picks) - len(_filtered_mlb)
+            if _n_removed:
+                log.info('MLB filters v5: %d/%d removidos', _n_removed, len(mlb_picks))
+            mlb_picks = _filtered_mlb
+
+        # Stake cap: F5 O/U $2.00 (shadow-validated 3000+ picks), F5 ML $1.00 (unvalidated market)
+        for _mp in mlb_picks:
+            if _mp.get('raw_model_prob_uncal'):
+                _mp['model_prob'] = _mp['raw_model_prob_uncal']  # raw prob -> Kelly positivo
+            _mkt = str(_mp.get('market', ''))
+            if 'moneyline' in _mkt:
+                _mp['_max_stake'] = 1.00  # F5 ML cap reducido hasta validar en shadow
+            else:
+                _mp['_max_stake'] = 2.00  # F5 O/U validado por shadow analysis
+        if mlb_picks:
+            _caps = {p.get('match','?'): p.get('_max_stake',2.0) for p in mlb_picks}
+            log.info('MLB: %d picks -> place_bets | caps=%s | settled=%d',
+                     len(mlb_picks), _caps, _mlb_settled)
+        placed += place_bets(api, state, mlb_picks, [], dry_run)
+
     # 7. Sync Obsidian
     sync_obsidian(state)
 
@@ -3354,8 +4583,79 @@ def run_cycle(dry_run=False):
     # 10. Generate dashboard
     generate_dashboard(state)
 
-    log.info('Cycle complete: %d picks found (%d fb + %d tn), %d placed | Bankroll: $%.2f',
-             len(football_picks) + len(tennis_picks), len(football_picks), len(tennis_picks),
+    # 6c. Soccer corners/bookings — SHADOW MODE PERMANENTE hasta nuevo modelo
+    # BACKTEST 2026-05-06: correlation=0.020 (sin señal real). Poisson medio
+    # predice siempre ~40bp sin discriminar partidos. Modelo NO apto para live.
+    # ROI simulado Over45.5=-34.7%, Under35.5=-26.6%. Requiere: referee data +
+    # form + table position antes de reactivar.
+
+    # Soccer goals model runs independently (no referee required)
+    try:
+        from oraculo_soccer_v2 import scan_soccer_goals as _scan_goals
+        _goals_comps = [c for c in (
+            state.get('_soccer_comps') or [
+                'soccer-england-premier-league', 'soccer-germany-bundesliga',
+                'soccer-italy-serie-a', 'soccer-spain-laliga',
+                'soccer-france-ligue-1', 'soccer-netherlands-eredivisie',
+                'soccer-portugal-primeira-liga', 'soccer-champions-league',
+                # New leagues (added 2026-05-11)
+                'soccer-england-championship', 'soccer-germany-bundesliga-2',
+                'soccer-spain-laliga-2', 'soccer-france-ligue-2',
+                'soccer-italy-serie-b', 'soccer-scotland-premiership',
+                'soccer-belgium-jupiler',
+            ]
+        ) if 'soccer' in c]
+        _goal_picks = _scan_goals(api, state, comp_keys=_goals_comps, dry_run=dry_run)
+        if _goal_picks:
+            log.info('[Soccer Goals] %d picks found', len(_goal_picks))
+            if _SIBILA_ENABLED:
+                for _gp in _goal_picks:
+                    _sibila_record(_gp)
+            if SOCCER_ENABLED:
+                # Temporarily raise cap by 10pp so soccer goals aren't always blocked
+                # by tennis filling the full exposure budget each cycle.
+                global MAX_TOTAL_EXPOSURE
+                _saved_exp = MAX_TOTAL_EXPOSURE
+                MAX_TOTAL_EXPOSURE = min(0.70, MAX_TOTAL_EXPOSURE + 0.10)
+                placed += place_bets(api, state, _goal_picks, [], dry_run)
+                MAX_TOTAL_EXPOSURE = _saved_exp
+            else:
+                log.debug('[Soccer Goals] SOCCER_ENABLED=False — shadow only, %d picks', len(_goal_picks))
+    except Exception as _ge:
+        log.debug('Soccer goals scan error: %s', _ge)
+
+    if sc_picks:
+        # Referee-filtered picks go to place_bets; unfiltered shadow only
+        from oraculo_soccer_v2 import _is_high_card_ref
+        _sc_real = [p for p in sc_picks if _is_high_card_ref(p.get('_referee',''))[0]]
+        _sc_shadow = [p for p in sc_picks if not _is_high_card_ref(p.get('_referee',''))[0]]
+        if _sc_real and SOCCER_ENABLED:
+            log.info('[Soccer] %d picks con arbitro alta-tarjeta -> place_bets', len(_sc_real))
+            for _scp in _sc_real:
+                log.info('  [SC-real] %s | %s | ref=%s | edge=%.1f%% conf=%.0f%% @%.2f',
+                         _scp.get('match','?')[:30], _scp.get('label','?')[:25],
+                         _scp.get('_referee','?')[:15],
+                         _scp.get('edge',0)*100, _scp.get('model_prob',0)*100, _scp.get('price',0))
+            placed += place_bets(api, state, _sc_real, [], dry_run)
+        elif _sc_real:
+            log.debug('[Soccer V2] SOCCER_ENABLED=False — shadow only, %d picks', len(_sc_real))
+        if _sc_shadow:
+            log.info('[Soccer] SHADOW (sin arbitro confirmado): %d picks', len(_sc_shadow))
+            for _scp in _sc_shadow:
+                log.info('  [SC-shadow] %s | %s | edge=%.1f%% conf=%.0f%% @%.2f',
+                         _scp.get('match','?')[:35], _scp.get('label','?')[:30],
+                         _scp.get('edge',0)*100, _scp.get('model_prob',0)*100, _scp.get('price',0))
+
+    # CLV: update closing odds snapshot for all active bets
+    if _CLV_ORACLE_ENABLED:
+        try:
+            _CLV_ORACLE.record_cloudbet_clv(api, state.get('active_bets', []),
+                os.path.join(SCRIPT_DIR, 'sibila.db'))
+        except Exception as _clve:
+            log.debug('CLV cloudbet update failed: %s', _clve)
+
+    log.info('Cycle complete: %d picks found (%d fb + %d tn + %d mlb + %d sc), %d placed | Bankroll: $%.2f',
+             len(football_picks) + len(tennis_picks) + len(mlb_picks) + len(sc_picks), len(football_picks), len(tennis_picks), len(mlb_picks), len(sc_picks),
              placed, state['bankroll'])
     return state
 
@@ -3398,6 +4698,7 @@ def run_loop():
 
     last_scan = 0
     last_check = 0
+    last_soccer_resolve = 0
     last_tennis_update = 0
     TENNIS_UPDATE_INTERVAL = 86400  # Once per day
     NEWS_REFRESH_INTERVAL = 7200   # Refresh tennis news every 2 hours
@@ -3500,8 +4801,22 @@ def run_loop():
             elif now - last_check >= RESULT_INTERVAL:
                 state = load_state()
                 api = CloudbetAPI()
+                # Capture closing odds for CLV before checking results
+                try:
+                    _capture_closing_odds(api, state)
+                except Exception as _clv_e:
+                    log.debug('CLV capture skipped: %s', _clv_e)
                 settled = check_results(api, state)
-                if settled:
+                # Soccer shadow resolver (runs when CSV data available)
+                if now - last_soccer_resolve >= 3600:
+                    try:
+                        _n_res, _n_skip, _n_nf = _soccer_resolve_shadows()
+                        if _n_res:
+                            log.info('Soccer shadow resolver: %d resolved', _n_res)
+                    except Exception as _sr_e:
+                        log.debug('Soccer resolve error: %s', _sr_e)
+                    last_soccer_resolve = now
+                if settled or True:  # always save to persist closing_odds
                     sync_obsidian(state)
                     save_state(state)
                 last_check = now

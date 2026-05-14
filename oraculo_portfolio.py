@@ -134,3 +134,89 @@ class PortfolioKelly:
                      len(allocated), len(picks), total_s, avg_edge * 100)
 
         return result
+
+class PortfolioManager:
+    """Wrapper compatible con el runner: get_adjusted_stake() por pick individual."""
+
+    def __init__(self, predictions_file=None, bankroll=1000.0,
+                 max_total=0.50, max_per_match=0.10, kelly_frac=0.25):
+        self._kelly = PortfolioKelly(
+            bankroll=bankroll,
+            max_total=max_total,
+            max_per_match=max_per_match,
+            kelly_frac=kelly_frac,
+        )
+        self._active_bets = []
+        self._cache = {}
+
+    def update_bankroll(self, bankroll):
+        self._kelly.bankroll = bankroll
+
+    def set_active_bets(self, active_bets):
+        self._active_bets = list(active_bets or [])
+        self._cache = {}
+
+    def invalidate_cache(self):
+        self._cache = {}
+
+    def get_adjusted_stake(self, pick, base_stake=None):
+        """
+        Ajusta el stake de un pick considerando correlacion con bets activas.
+        Retorna dict: {stake_adj, skip, capped, reason, corr_penalty}
+        """
+        try:
+            if base_stake is None or base_stake <= 0:
+                return {'stake_adj': 0, 'skip': True, 'capped': False,
+                        'reason': 'base_stake=0', 'corr_penalty': 0}
+
+            kelly = self._kelly
+            bankroll = kelly.bankroll
+
+            # Correlacion total con bets activas
+            total_corr = sum(
+                kelly._correlation(pick, ab) for ab in self._active_bets
+            )
+            discount = max(0.3, 1.0 - total_corr * 0.15)
+            stake = base_stake * discount
+
+            # Cap por match
+            match_key = pick.get('match', '')
+            match_exp = sum(
+                b.get('stake', 0) for b in self._active_bets
+                if b.get('match', '') == match_key
+            )
+            max_match = bankroll * kelly.max_per_match
+            if match_exp >= max_match:
+                return {'stake_adj': 0, 'skip': True, 'capped': True,
+                        'reason': 'match cap %.0f%%' % (kelly.max_per_match * 100),
+                        'corr_penalty': round(1 - discount, 3)}
+
+            stake = min(stake, max_match - match_exp)
+
+            # Cap total
+            total_exp = sum(b.get('stake', 0) for b in self._active_bets)
+            max_total = bankroll * kelly.max_total
+            if total_exp >= max_total:
+                return {'stake_adj': 0, 'skip': True, 'capped': True,
+                        'reason': 'exposure cap %.0f%%' % (kelly.max_total * 100),
+                        'corr_penalty': round(1 - discount, 3)}
+
+            stake = min(stake, max_total - total_exp)
+            stake = round(max(0, stake), 2)
+
+            return {
+                'stake_adj':    stake,
+                'skip':         stake < 0.25,
+                'capped':       stake < base_stake * 0.9,
+                'reason':       ('corr discount %.0f%%' % ((1 - discount) * 100)) if discount < 1 else '',
+                'corr_penalty': round(1 - discount, 3),
+            }
+        except Exception as ex:
+            log.debug('PortfolioManager.get_adjusted_stake error: %s', ex)
+            return {'stake_adj': base_stake or 0, 'skip': False,
+                    'capped': False, 'reason': '', 'corr_penalty': 0}
+
+    def format_status(self):
+        active = len(self._active_bets)
+        exp = sum(b.get('stake', 0) for b in self._active_bets)
+        return 'Portfolio: %d bets activos | $%.2f expuesto' % (active, exp)

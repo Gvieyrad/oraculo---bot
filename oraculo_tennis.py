@@ -222,18 +222,24 @@ class TennisElo:
 
     def process_match(self, winner, loser, surface='hard'):
         """Update Elo, form, and H2H after a match."""
+        # Dynamic K-factor: higher for new players (uncertain), lower for established (stable)
+        # 250/(5+n) gives ~42 at career start, decays to ~16 at 200+ matches (FiveThirtyEight method)
+        k_winner = max(10, min(40, 250.0 / (5 + self._match_count[winner])))
+        k_loser  = max(10, min(40, 250.0 / (5 + self._match_count[loser])))
+        k = (k_winner + k_loser) / 2.0  # symmetric update
+
         # Overall Elo
         exp_w = self._expected(self.overall[winner], self.overall[loser])
-        self.overall[winner] += self.k * (1 - exp_w)
-        self.overall[loser] += self.k * (0 - (1 - exp_w))
+        self.overall[winner] += k * (1 - exp_w)
+        self.overall[loser] += k * (0 - (1 - exp_w))
 
         # Surface-specific Elo
         if surface in self.by_surface:
             surf = self.by_surface[surface]
             exp_ws = self._expected(surf[winner], surf[loser])
-            self.overall[winner] += self.k * 0.5 * (1 - exp_ws)
-            surf[winner] += self.k * (1 - exp_ws)
-            surf[loser] += self.k * (0 - (1 - exp_ws))
+            self.overall[winner] += k * 0.5 * (1 - exp_ws)
+            surf[winner] += k * (1 - exp_ws)
+            surf[loser] += k * (0 - (1 - exp_ws))
 
         self._match_count[winner] += 1
         self._match_count[loser] += 1
@@ -274,8 +280,19 @@ class TennisElo:
             return record[0], record[1]
         return record[1], record[0]
 
-    def predict(self, player_a, player_b, surface='hard'):
+    def _norm_player(self, name):
+        """Try hyphen->space normalization if name not in overall."""
+        if name in self.overall:
+            return name
+        alt = name.replace('-', ' ')
+        if alt in self.overall:
+            return alt
+        return name  # fallback: use as-is (will get initial Elo)
+
+    def predict(self, player_a, player_b, surface='hard', include_h2h=True):
         """Predict win probability for player_a with Elo + form + H2H."""
+        player_a = self._norm_player(player_a)
+        player_b = self._norm_player(player_b)
         elo_a = self.overall[player_a]
         elo_b = self.overall[player_b]
 
@@ -298,16 +315,17 @@ class TennisElo:
             elif form_b > 0.7 and form_a < 0.4:
                 form_adj = -0.05  # Opposite
 
-        # H2H adjustment (+/- 5% max)
+        # H2H adjustment (+/- 5% max) — skip when predict_enhanced handles it
         h2h_adj = 0.0
-        wins_a, wins_b = self.get_h2h(player_a, player_b)
-        total_h2h = wins_a + wins_b
-        if total_h2h >= 3:
-            h2h_ratio = wins_a / total_h2h
-            if h2h_ratio > 0.70:
-                h2h_adj = 0.05  # Player A dominates H2H
-            elif h2h_ratio < 0.30:
-                h2h_adj = -0.05  # Player B dominates
+        if include_h2h:
+            wins_a, wins_b = self.get_h2h(player_a, player_b)
+            total_h2h = wins_a + wins_b
+            if total_h2h >= 3:
+                h2h_ratio = wins_a / total_h2h
+                if h2h_ratio > 0.70:
+                    h2h_adj = 0.05  # Player A dominates H2H
+                elif h2h_ratio < 0.30:
+                    h2h_adj = -0.05  # Player B dominates
 
         # Combine and clip
         final = base_prob + form_adj + h2h_adj
@@ -433,6 +451,13 @@ def build_tennis_features(player_a, player_b, surface, matches, elo):
     features['ace_rate_b'] = b_serve['ace_rate']
     features['bp_saved_a'] = a_serve['bp_saved_rate']
     features['bp_saved_b'] = b_serve['bp_saved_rate']
+    features['spw_a'] = a_serve['spw']
+    features['spw_b'] = b_serve['spw']
+    features['rpw_a'] = a_serve['rpw']
+    features['rpw_b'] = b_serve['rpw']
+    features['dominance_a'] = a_serve['dominance_ratio']
+    features['dominance_b'] = b_serve['dominance_ratio']
+    features['dominance_diff'] = a_serve['dominance_ratio'] - b_serve['dominance_ratio']
 
     # 8. Surface encoding
     features['is_clay'] = 1.0 if surface == 'clay' else 0.0
@@ -453,6 +478,8 @@ def get_tennis_feature_names():
         'h2h_a_wins', 'h2h_b_wins', 'h2h_a_rate',
         'fatigue_a_7d', 'fatigue_b_7d', 'fatigue_diff',
         'ace_rate_a', 'ace_rate_b', 'bp_saved_a', 'bp_saved_b',
+        'spw_a', 'spw_b', 'rpw_a', 'rpw_b',
+        'dominance_a', 'dominance_b', 'dominance_diff',
         'is_clay', 'is_grass', 'is_hard',
     ]
 
@@ -523,28 +550,325 @@ def _compute_fatigue(matches, player):
 
 
 def _compute_serve_stats(matches, player, n=20):
-    aces = svpts = bp_saved = bp_faced = 0
+    """Compute serve/return dominance stats from ATP match data.
+    SPW = Service Points Won % (how well you hold serve)
+    RPW = Return Points Won % (how well you break opponent's serve)
+    dominance_ratio: the strongest single tennis predictor per Tennis Abstract research
+    """
+    aces = svpts = first_won = second_won = 0
+    bp_saved = bp_faced = 0
+    opp_svpts = opp_first_won = opp_second_won = 0
     count = 0
     for m in reversed(matches):
         if count >= n:
             break
         if m['winner'] == player:
-            if m.get('w_ace') is not None:
-                aces += m['w_ace']
-                svpts += m.get('w_svpt', 0) or 0
-                bp_saved += m.get('w_bpSaved', 0) or 0
-                bp_faced += m.get('w_bpFaced', 0) or 0
+            if m.get('w_svpt') is not None:
+                aces       += m.get('w_ace', 0) or 0
+                svpts      += m.get('w_svpt', 0) or 0
+                first_won  += m.get('w_1stWon', 0) or 0
+                second_won += m.get('w_2ndWon', 0) or 0
+                bp_saved   += m.get('w_bpSaved', 0) or 0
+                bp_faced   += m.get('w_bpFaced', 0) or 0
+                opp_svpts      += m.get('l_svpt', 0) or 0
+                opp_first_won  += m.get('l_1stWon', 0) or 0
+                opp_second_won += m.get('l_2ndWon', 0) or 0
                 count += 1
         elif m['loser'] == player:
-            if m.get('l_ace') is not None:
-                aces += m['l_ace']
+            if m.get('l_svpt') is not None:
+                aces       += m.get('l_ace', 0) or 0
+                svpts      += m.get('l_svpt', 0) or 0
+                first_won  += m.get('l_1stWon', 0) or 0
+                second_won += m.get('l_2ndWon', 0) or 0
+                bp_saved   += m.get('l_bpSaved', 0) or 0
+                bp_faced   += m.get('l_bpFaced', 0) or 0
+                opp_svpts      += m.get('w_svpt', 0) or 0
+                opp_first_won  += m.get('w_1stWon', 0) or 0
+                opp_second_won += m.get('w_2ndWon', 0) or 0
                 count += 1
 
+    spw = (first_won + second_won) / max(svpts, 1)
+    opp_spw = (opp_first_won + opp_second_won) / max(opp_svpts, 1)
+    rpw = 1.0 - opp_spw
+    # dominance_ratio > 1.0 = player dominates; < 1.0 = struggles
+    dominance_ratio = spw / max(1.0 - rpw, 0.01)
+
     return {
-        'ace_rate': aces / max(svpts, 1),
-        'bp_saved_rate': bp_saved / max(bp_faced, 1),
+        'ace_rate':        aces / max(svpts, 1),
+        'bp_saved_rate':   bp_saved / max(bp_faced, 1),
+        'spw':             round(spw, 4),
+        'rpw':             round(rpw, 4),
+        'dominance_ratio': round(dominance_ratio, 4),
     }
 
+
+
+
+# =========================================================================
+# SERVE / RETURN ELO  (Newton-Keller model)
+# Source: Jeff Sackmann / Tennis Abstract serve model
+# SPW = Service Points Won %, RPW = Return Points Won %
+# Match win probability computed via Markov chain over games/sets
+# =========================================================================
+
+def _p_win_game(p: float) -> float:
+    """P(hold serve game) when winning each service point with prob p.
+    Uses exact formula with deuce handling.
+    """
+    if p <= 0: return 0.0
+    if p >= 1: return 1.0
+    q = 1.0 - p
+    # Pre-deuce paths: 4-0, 4-1, 4-2
+    pre_deuce = p**4 + 4*(p**4)*q + 10*(p**4)*(q**2)
+    # Deuce: P(reach deuce) = 20 * p^3 * q^3
+    # P(win from deuce) = p^2 / (p^2 + q^2)
+    p_deuce_reached = 20 * (p**3) * (q**3)
+    p_win_from_deuce = (p**2) / (p**2 + q**2)
+    return pre_deuce + p_deuce_reached * p_win_from_deuce
+
+
+def _p_win_set(p_hold_server: float, p_hold_returner: float) -> float:
+    """P(A wins a set) when A serves first.
+    p_hold_server   = P(A wins a game when A is serving)
+    p_hold_returner = P(B wins a game when B is serving)
+    Uses iterative DP — no recursion, no lru_cache issues.
+    Handles: 6-0..6-4, 7-5, 7-6(tiebreak)
+    """
+    p_a_hold  = p_hold_server
+    p_a_break = 1.0 - p_hold_returner  # P(A wins game when B serves)
+    # Tiebreak win prob: slight advantage for better hold/break player
+    p_a_tb    = max(0.05, min(0.95, 0.5 + (p_a_hold - p_hold_returner) * 0.5))
+
+    # DP table: dp[ga][gb][serves] = P(A wins set from this state)
+    # serves: 0=A serves, 1=B serves
+    # Scores go from 0-0 up to 7-6
+    MAX = 8
+    dp = [[[0.0, 0.0] for _ in range(MAX)] for _ in range(MAX)]
+
+    # Fill terminal states first (backward from max score)
+    for ga in range(MAX):
+        for gb in range(MAX):
+            for s in range(2):
+                # A wins set
+                if (ga == 6 and gb <= 4) or (ga == 7 and gb == 5) or (ga == 7 and gb == 6):
+                    dp[ga][gb][s] = 1.0
+                # B wins set
+                elif (gb == 6 and ga <= 4) or (gb == 7 and ga == 5) or (gb == 7 and ga == 6):
+                    dp[ga][gb][s] = 0.0
+                # Tiebreak
+                elif ga == 6 and gb == 6:
+                    dp[ga][gb][s] = p_a_tb
+
+    # Fill non-terminal states iteratively (all reachable scores up to 7-5/6-6)
+    # Process in reverse order to ensure dependencies are filled
+    all_states = []
+    for ga in range(8):
+        for gb in range(8):
+            is_terminal = ((ga >= 6 and abs(ga - gb) >= 2 and ga <= 7)
+                           or (gb >= 6 and abs(gb - ga) >= 2 and gb <= 7)
+                           or (ga == 6 and gb == 6))
+            if not is_terminal and ga + gb <= 13:
+                all_states.append((ga + gb, ga, gb))
+
+    # Sort by total games descending (fill high scores first, then (0,0) last)
+    for _, ga, gb in sorted(all_states, reverse=True):
+        for s in range(2):
+            if s == 0:  # A serves
+                p_win_game = p_a_hold
+            else:       # B serves
+                p_win_game = p_a_break
+            next_s = 1 - s
+            # Clip transitions to valid range
+            next_ga = min(ga + 1, 7)
+            next_gb = min(gb + 1, 7)
+            p_a = dp[next_ga][gb][next_s]
+            p_b = dp[ga][next_gb][next_s]
+            dp[ga][gb][s] = p_win_game * p_a + (1.0 - p_win_game) * p_b
+
+    return dp[0][0][0]  # A serves first
+
+
+def _p_win_match_bo3(p_win_set_serving: float, p_win_set_returning: float) -> float:
+    """P(A wins best-of-3 match).
+    p_win_set_serving   = P(A wins set when A serves first)
+    p_win_set_returning = P(A wins set when B serves first)
+    Alternating serve between sets.
+    """
+    ps = p_win_set_serving
+    pr = p_win_set_returning
+    # Set 1: A serves first → P(A wins) = ps
+    # Set 2: B serves first → P(A wins) = pr
+    # Set 3: A serves first (if reached) → P(A wins) = ps
+    p_20 = ps * pr                           # A wins sets 1 and 2
+    p_21 = ps * (1-pr) * ps                  # A wins 1, loses 2, wins 3
+    p_12 = (1-ps) * pr * ps                  # A loses 1, wins 2 and 3 (set3: A serves first)
+    return p_20 + p_21 + p_12
+
+
+class ServeReturnElo:
+    """Track rolling SPW (Service Points Won) and RPW (Return Points Won)
+    per player per surface. Use Newton-Keller equations to convert
+    serve/return stats into match win probability.
+
+    Blended with TennisElo for final prediction:
+      final = 0.5 * elo_prob + 0.5 * serve_return_prob
+
+    Falls back gracefully when serve data is sparse.
+
+    Source: Tennis Abstract serve model by Jeff Sackmann
+    """
+
+    # ATP tour averages (fallback when player has no data)
+    _ATP_AVG_SPW = {'hard': 0.638, 'clay': 0.598, 'grass': 0.660, 'carpet': 0.640}
+    # Min matches with serve data before we trust the estimate
+    MIN_MATCHES = 10
+
+    def __init__(self, alpha: float = 0.15):
+        """alpha: EMA smoothing factor (0.15 = ~12 match memory)"""
+        self.alpha = alpha
+        # spw[surface][player] = exponential moving avg of service points won
+        self.spw = {s: {} for s in ('hard', 'clay', 'grass', 'carpet')}
+        self.rpw = {s: {} for s in ('hard', 'clay', 'grass', 'carpet')}
+        # Count of matches with serve data per player
+        self.serve_count = {}   # player -> int
+
+    def _surface(self, surface: str) -> str:
+        return surface if surface in self.spw else 'hard'
+
+    # ATP average 2nd serve win rates by surface (used when w_2ndWon is missing)
+    _ATP_2ND_WIN = {'hard': 0.55, 'clay': 0.52, 'grass': 0.57, 'carpet': 0.54}
+
+    def _calc_spw(self, svpt, first_won, second_won, first_in, surface):
+        """Calculate SPW handling missing w_2ndWon (common in 2023+ Sackmann data)."""
+        if not svpt or svpt < 10:
+            return None
+        if second_won is not None:
+            return (first_won + second_won) / svpt
+        # Estimate 2nd serve points won from w_1stIn
+        if first_in is not None and first_in > 0:
+            second_serves = svpt - first_in
+            avg_2nd = self._ATP_2ND_WIN.get(self._surface(surface), 0.54)
+            est_second_won = second_serves * avg_2nd
+            return (first_won + est_second_won) / svpt
+        # Fallback: only 1st serve data
+        return None
+
+    def update(self, winner: str, loser: str, surface: str,
+               w_svpt: int, w_1stWon: int, w_2ndWon,
+               l_svpt: int, l_1stWon: int, l_2ndWon,
+               w_1stIn: int = None, l_1stIn: int = None):
+        """Update SPW/RPW for both players from a single match."""
+        s = self._surface(surface)
+        avg = self._ATP_AVG_SPW[s]
+
+        w_spw = self._calc_spw(w_svpt, w_1stWon or 0, w_2ndWon, w_1stIn, surface)
+        l_spw = self._calc_spw(l_svpt, l_1stWon or 0, l_2ndWon, l_1stIn, surface)
+
+        if w_spw is not None:
+            w_rpw = 1.0 - (l_spw if l_spw is not None else avg)
+            self.spw[s][winner] = (self.spw[s].get(winner, avg) * (1 - self.alpha)
+                                   + w_spw * self.alpha)
+            self.rpw[s][winner] = (self.rpw[s].get(winner, 1 - avg) * (1 - self.alpha)
+                                   + w_rpw * self.alpha)
+            self.serve_count[winner] = self.serve_count.get(winner, 0) + 1
+
+        if l_spw is not None:
+            l_rpw = 1.0 - (w_spw if w_spw is not None else avg)
+            self.spw[s][loser] = (self.spw[s].get(loser, avg) * (1 - self.alpha)
+                                  + l_spw * self.alpha)
+            self.rpw[s][loser] = (self.rpw[s].get(loser, 1 - avg) * (1 - self.alpha)
+                                  + l_rpw * self.alpha)
+            self.serve_count[loser] = self.serve_count.get(loser, 0) + 1
+
+    def process_matches(self, matches: list):
+        """Bulk process match list (from Sackmann CSV data)."""
+        for m in sorted(matches, key=lambda x: x.get('date', '')):
+            w_svpt   = m.get('w_svpt') or 0
+            w_1stWon = m.get('w_1stWon') or 0
+            w_2ndWon = m.get('w_2ndWon')   # keep None — _calc_spw handles estimation
+            l_svpt   = m.get('l_svpt') or 0
+            l_1stWon = m.get('l_1stWon') or 0
+            l_2ndWon = m.get('l_2ndWon')   # keep None — _calc_spw handles estimation
+            if w_svpt < 10 and l_svpt < 10:
+                continue  # No serve data for this match
+            self.update(
+                m['winner'], m['loser'], m.get('surface', 'hard'),
+                w_svpt, w_1stWon, w_2ndWon,
+                l_svpt, l_1stWon, l_2ndWon,
+                w_1stIn=m.get('w_1stIn'), l_1stIn=m.get('l_1stIn'),
+            )
+
+    def get_spw(self, player: str, surface: str) -> float:
+        """Get SPW for player on surface. Returns ATP average if unknown."""
+        s = self._surface(surface)
+        return self.spw[s].get(player, self._ATP_AVG_SPW[s])
+
+    def get_rpw(self, player: str, surface: str) -> float:
+        """Get RPW for player on surface. Returns ATP average if unknown."""
+        s = self._surface(surface)
+        return self.rpw[s].get(player, 1.0 - self._ATP_AVG_SPW[s])
+
+    def has_data(self, player: str) -> bool:
+        return self.serve_count.get(player, 0) >= self.MIN_MATCHES
+
+    def predict(self, player_a: str, player_b: str, surface: str = 'hard'):
+        """Predict P(A wins match) using serve/return stats.
+        Returns float or None if insufficient data for both players.
+        """
+        has_a = self.has_data(player_a)
+        has_b = self.has_data(player_b)
+        if not has_a and not has_b:
+            return None   # No serve data, defer to Elo
+
+        spw_a = self.get_spw(player_a, surface)
+        rpw_a = self.get_rpw(player_a, surface)
+        spw_b = self.get_spw(player_b, surface)
+        rpw_b = self.get_rpw(player_b, surface)
+
+        # Convert to game-win probabilities (A serving / B serving)
+        p_hold_a = _p_win_game(spw_a)                # P(A holds serve)
+        p_hold_b = _p_win_game(spw_b)                # P(B holds serve)
+        # Note: rpw_a = 1 - spw_b (return points won = opponent fails to win service pts)
+        # We blend actual tracked RPW with implied (1-opponent_SPW) for stability
+        rpw_a_combined = 0.7 * rpw_a + 0.3 * (1.0 - spw_b)
+        rpw_b_combined = 0.7 * rpw_b + 0.3 * (1.0 - spw_a)
+
+        # Set win probabilities
+        # When A serves first: _p_win_set(P(A holds), P(B holds))
+        # When B serves first: 1 - _p_win_set(P(B holds), P(A holds))
+        p_win_set_serving   = _p_win_set(p_hold_a, p_hold_b)
+        p_win_set_returning = 1.0 - _p_win_set(p_hold_b, p_hold_a)
+
+        # Match win probability (best of 3)
+        prob = _p_win_match_bo3(p_win_set_serving, p_win_set_returning)
+        return max(0.05, min(0.95, prob))
+
+    def save_state(self, path: str):
+        import pickle
+        state = {'spw': {s: dict(v) for s, v in self.spw.items()},
+                 'rpw': {s: dict(v) for s, v in self.rpw.items()},
+                 'serve_count': dict(self.serve_count),
+                 'alpha': self.alpha}
+        with open(path, 'wb') as f:
+            pickle.dump(state, f)
+
+    def load_state(self, path: str) -> bool:
+        import pickle, os
+        if not os.path.exists(path):
+            return False
+        try:
+            with open(path, 'rb') as f:
+                state = pickle.load(f)
+            for s, vals in state.get('spw', {}).items():
+                if s in self.spw:
+                    self.spw[s].update(vals)
+            for s, vals in state.get('rpw', {}).items():
+                if s in self.rpw:
+                    self.rpw[s].update(vals)
+            self.serve_count.update(state.get('serve_count', {}))
+            return True
+        except Exception:
+            return False
 
 # =========================================================================
 # TRAIN + PREDICT + BACKTEST

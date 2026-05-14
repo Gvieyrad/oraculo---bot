@@ -222,6 +222,14 @@ def filter_picks_with_llm(picks, tennis_elo, surface='hard', tourney=''):
     filtered = []
     for p in picks:
         match = p.get('match', '')
+        # Phase 2 set-market picks — LLM analyze_match() is designed for match
+        # winner only; these markets (exact_sets, winner_and_total, team_win_set)
+        # have their own Poisson-based probability model, bypass LLM veto.
+        _mt = p.get('market_type', '')
+        if _mt in ('tennis_exact_sets', 'tennis_winner_and_total', 'tennis_team_win_set'):
+            filtered.append(p)
+            continue
+
         if ' vs ' not in match:
             filtered.append(p)  # Can't analyze, pass through
             continue

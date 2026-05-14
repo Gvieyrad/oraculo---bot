@@ -99,3 +99,53 @@ for p in players:
     rating = elo.overall.get(p, 1500)
     matches_count = elo._match_count.get(p, 0)
     print("  {:25s} Elo={:.0f} ({} matches)".format(p, rating, matches_count))
+
+
+
+
+# ── WTA Sackmann refresh ─────────────────────────────────────────────────────
+def _refresh_wta(cache_dir=CACHE_DIR):
+    """Download latest WTA CSVs from JeffSackmann/tennis_wta, rebuild WTA Elo."""
+    import io, csv
+    SACKMANN_WTA = 'https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master/wta_matches_{}.csv'
+    smap = {'Hard': 'hard', 'Clay': 'clay', 'Grass': 'grass', 'Carpet': 'hard'}
+    updated = False
+    for year in [2025, 2026]:
+        url = SACKMANN_WTA.format(year)
+        try:
+            r = requests.get(url, headers=headers, timeout=30)
+            if r.status_code != 200:
+                continue
+            reader = csv.DictReader(io.StringIO(r.text))
+            matches = []
+            for row in reader:
+                winner = row.get('winner_name', '').strip()
+                loser  = row.get('loser_name', '').strip()
+                if not winner or not loser:
+                    continue
+                d = row.get('tourney_date', '')
+                date = '{}-{}-{}'.format(d[:4], d[4:6], d[6:]) if len(d) == 8 else str(d)[:10]
+                matches.append({
+                    'winner': winner, 'loser': loser,
+                    'surface': smap.get(row.get('surface', 'Hard'), 'hard'),
+                    'date': date, 'tourney': row.get('tourney_name', ''), 'tour': 'wta_real',
+                })
+            jpath = os.path.join(cache_dir, 'wta_real_{}.json'.format(year))
+            with open(jpath, 'w') as f:
+                json.dump(matches, f)
+            updated = True
+        except Exception:
+            pass
+    if updated:
+        pkl = os.path.join(cache_dir, 'elo_wta.pkl')
+        if os.path.exists(pkl):
+            os.remove(pkl)
+    return updated
+
+
+def update_cache():
+    """Called by runner daily. Refreshes WTA data. Returns True on success."""
+    try:
+        return _refresh_wta()
+    except Exception:
+        return False

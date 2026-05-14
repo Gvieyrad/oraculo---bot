@@ -35,17 +35,22 @@ class TennisAdvanced:
                     retired = 'ret' in score.lower() or 'w/o' in score.lower() if score else False
                     sets = score.count('-') if score else 2
 
+                    _serve_keys = ('w_svpt','w_1stIn','w_1stWon','w_2ndWon',
+                                   'w_bpSaved','w_bpFaced','w_ace','w_df',
+                                   'l_svpt','l_1stIn','l_1stWon','l_2ndWon',
+                                   'l_bpSaved','l_bpFaced','l_ace','l_df')
+                    _extra = {k: m[k] for k in _serve_keys if k in m}
                     if winner:
-                        self._match_log[winner].append({
-                            'date': date, 'surface': surface,
-                            'sets': sets, 'won': True, 'retired_opp': retired
-                        })
+                        entry_w = {'date': date, 'surface': surface,
+                                   'sets': sets, 'won': True, 'retired_opp': retired}
+                        entry_w.update(_extra)
+                        self._match_log[winner].append(entry_w)
                         self._total_matches[winner] += 1
                     if loser:
-                        self._match_log[loser].append({
-                            'date': date, 'surface': surface,
-                            'sets': sets, 'won': False, 'retired': retired
-                        })
+                        entry_l = {'date': date, 'surface': surface,
+                                   'sets': sets, 'won': False, 'retired': retired}
+                        entry_l.update(_extra)
+                        self._match_log[loser].append(entry_l)
                         self._total_matches[loser] += 1
                         if retired:
                             self._retirements[loser] += 1
@@ -96,11 +101,36 @@ class TennisAdvanced:
         recent = matches[-n_recent:]
         return sum(1 for m in recent if m.get('won')) / len(recent)
 
+    def get_serve_dominance(self, player, n=30):
+        """SPW / (1-RPW) dominance ratio from match history. >1 = serve-dominant."""
+        matches = self._match_log.get(player, [])[-n:]
+        if not matches:
+            return None
+        spw_list, rpw_list = [], []
+        for m in matches:
+            svpt  = m.get('w_svpt')  if m.get('won') else m.get('l_svpt')
+            w1st  = m.get('w_1stWon') if m.get('won') else m.get('l_1stWon')
+            w2nd  = m.get('w_2ndWon') if m.get('won') else m.get('l_2ndWon')
+            # Return points won = opponent's serve points lost
+            o_svpt = m.get('l_svpt')  if m.get('won') else m.get('w_svpt')
+            o_1st  = m.get('l_1stWon') if m.get('won') else m.get('w_1stWon')
+            o_2nd  = m.get('l_2ndWon') if m.get('won') else m.get('w_2ndWon')
+            if svpt and svpt > 0 and w1st is not None and w2nd is not None:
+                spw_list.append((w1st + w2nd) / svpt)
+            if o_svpt and o_svpt > 0 and o_1st is not None and o_2nd is not None:
+                rpw_list.append(1.0 - (o_1st + o_2nd) / o_svpt)
+        if not spw_list or not rpw_list:
+            return None
+        spw = sum(spw_list) / len(spw_list)
+        rpw = sum(rpw_list) / len(rpw_list)
+        dom = spw / max(1 - rpw, 0.01)
+        return round(dom, 4)
+
     def predict_enhanced(self, player_a, player_b, surface='hard', ref_date=None):
         """Enhanced prediction: Elo + fatigue + surface form + retirement risk."""
         base_prob = 0.5
         if self.base_elo:
-            base_prob = self.base_elo.predict(player_a, player_b, surface)
+            base_prob = self.base_elo.predict(player_a, player_b, surface, include_h2h=False)
 
         # Fatigue (-10% max)
         fat_a = self.get_fatigue(player_a, ref_date)
@@ -119,7 +149,28 @@ class TennisAdvanced:
         ret_b = self.get_retirement_risk(player_b)
         ret_adj = (ret_b - ret_a) * 0.5
 
-        final_prob = max(0.05, min(0.95, base_prob + fatigue_adj + surface_adj + ret_adj))
+        # H2H adjustment: up to +/-6% if strong head-to-head record (min 4 matches)
+        h2h_adj = 0.0
+        h2h = [0, 0]
+        if self.base_elo and hasattr(self.base_elo, 'get_h2h'):
+            h2h = self.base_elo.get_h2h(player_a, player_b)
+            h2h_total = sum(h2h) if h2h else 0
+            if h2h_total >= 4:
+                h2h_wr_a = h2h[0] / h2h_total
+                # Shrink toward 0.5 to avoid overfit on small samples
+                h2h_shrink = min(1.0, h2h_total / 20)  # 20% weight at 4 matches, 100% at 20+
+                h2h_adj = (h2h_wr_a - 0.5) * 0.12 * h2h_shrink
+
+        # Serve dominance: high SPW/RPW ratio → harder to break → boost slightly
+        dom_a = self.get_serve_dominance(player_a)
+        dom_b = self.get_serve_dominance(player_b)
+        dom_adj = 0.0
+        if dom_a is not None and dom_b is not None:
+            # Adjust by max ±4% based on dominance ratio difference
+            dom_adj = (dom_a - dom_b) * 0.08
+            dom_adj = max(-0.04, min(0.04, dom_adj))
+
+        final_prob = max(0.05, min(0.95, base_prob + fatigue_adj + surface_adj + ret_adj + h2h_adj + dom_adj))
 
         return {
             'prob_a': final_prob, 'prob_b': 1 - final_prob,
@@ -127,6 +178,8 @@ class TennisAdvanced:
             'fatigue_a': fat_a, 'fatigue_b': fat_b, 'fatigue_adj': fatigue_adj,
             'surface_form_a': sf_a, 'surface_form_b': sf_b, 'surface_adj': surface_adj,
             'retirement_risk_a': ret_a, 'retirement_risk_b': ret_b, 'ret_adj': ret_adj,
+            'h2h': h2h, 'h2h_adj': h2h_adj,
+            'dom_a': dom_a, 'dom_b': dom_b, 'dom_adj': dom_adj,
         }
 
     def predict_sets(self, player_a, player_b, surface='hard', best_of=3):

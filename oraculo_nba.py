@@ -8,6 +8,84 @@ log = logging.getLogger('oraculo')
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 NBA_CACHE = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'nba_elo.json')
 NBA_RESULTS_CACHE = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'nba_results.json')
+NBA_INJURY_CACHE = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'nba_injuries.json')
+
+_NBA_STARS = {
+    'LeBron James', 'Stephen Curry', 'Giannis Antetokounmpo', 'Nikola Jokic',
+    'Luka Doncic', 'Kevin Durant', 'Jayson Tatum', 'Jaylen Brown', 'Devin Booker',
+    'Damian Lillard', 'Anthony Davis', 'Joel Embiid', 'Cade Cunningham',
+    'Donovan Mitchell', 'Darius Garland', 'Bam Adebayo', 'Jimmy Butler',
+    'Anthony Edwards', 'Shai Gilgeous-Alexander', 'Alperen Sengun', 'Evan Mobley',
+    'Jalen Brunson', 'Tyrese Haliburton', 'Bennedict Mathurin',
+}
+
+
+def _fetch_nba_injury_adj(home_elo, away_elo):
+    import requests as _req
+    try:
+        if os.path.exists(NBA_INJURY_CACHE):
+            with open(NBA_INJURY_CACHE) as f:
+                cache = json.load(f)
+            if time.time() - cache.get('_ts', 0) < 5400:
+                h = cache.get(home_elo, {})
+                a = cache.get(away_elo, {})
+                if h.get('star_out') or a.get('star_out'):
+                    return None, None
+                return h.get('adj', 0.0), a.get('adj', 0.0)
+    except Exception:
+        pass
+
+    adj_map = {}
+    try:
+        r = _req.get(
+            'http://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard',
+            timeout=10)
+        events = r.json().get('events', [])
+    except Exception as e:
+        log.debug('NBA injury scoreboard failed: %s', e)
+        return 0.0, 0.0
+
+    for ev in events:
+        eid = ev.get('id', '')
+        if not eid:
+            continue
+        try:
+            r2 = _req.get(
+                'http://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary?event=' + eid,
+                timeout=10)
+            injuries = r2.json().get('injuries', [])
+        except Exception:
+            continue
+        for team_inj in injuries:
+            tname = team_inj.get('team', {}).get('displayName', '')
+            players = team_inj.get('injuries', [])
+            adj = 0.0
+            star_out = False
+            for p in players:
+                pname = p.get('athlete', {}).get('displayName', '')
+                status = p.get('status', '').lower()
+                if 'out' in status and 'day-to-day' not in status:
+                    adj -= 0.025
+                    if pname in _NBA_STARS:
+                        star_out = True
+                        log.warning('NBA STAR OUT: %s (%s) — skip bet', pname, tname)
+                elif 'questionable' in status or 'day-to-day' in status:
+                    adj -= 0.010
+            adj_map[tname] = {'adj': max(adj, -0.075), 'star_out': star_out}
+
+    try:
+        os.makedirs(os.path.dirname(NBA_INJURY_CACHE), exist_ok=True)
+        with open(NBA_INJURY_CACHE, 'w') as f:
+            json.dump({'_ts': time.time(), **adj_map}, f)
+    except Exception:
+        pass
+
+    h = adj_map.get(home_elo, {})
+    a = adj_map.get(away_elo, {})
+    if h.get('star_out') or a.get('star_out'):
+        return None, None
+    return h.get('adj', 0.0), a.get('adj', 0.0)
+
 
 
 class NBAElo:
@@ -220,12 +298,17 @@ def train_nba_elo(force=False):
     return elo
 
 
-def scan_nba(api, state, elo=None, dry_run=False):
-    """Scan NBA markets for value bets."""
+def scan_nba(api, state, elo=None, dry_run=False, shadow=True):
+    """Scan NBA markets for value bets using basketball.1x2 market.
+
+    shadow=True: picks logged to sibila only, no real bets placed.
+    Shadow mode for first 2 weeks until Elo WR validated.
+    """
     if elo is None:
         elo = train_nba_elo()
 
     if len(elo.ratings) < 20:
+        log.warning('NBA Elo not ready (%d teams)', len(elo.ratings))
         return []
 
     events = api.get_odds('basketball-usa-nba')
@@ -234,11 +317,11 @@ def scan_nba(api, state, elo=None, dry_run=False):
 
     picks = []
     now = datetime.utcnow()
-    cutoff = (now + timedelta(hours=96)).isoformat() + 'Z'
+    cutoff_max = (now + timedelta(hours=96)).isoformat() + 'Z'
 
     for ev in events:
         ct = ev.get('cutoffTime', '')
-        if ct > cutoff or ct < now.isoformat():
+        if not ct or ct < now.isoformat() + 'Z' or ct > cutoff_max:
             continue
 
         home_cb = (ev.get('home') or {}).get('name', '')
@@ -247,67 +330,110 @@ def scan_nba(api, state, elo=None, dry_run=False):
         if not home_cb or not away_cb:
             continue
 
-        # Resolve names
+        mkts = ev.get('markets', {})
+
+        # Use basketball.1x2 (basketball.moneyline is restricted on this account)
+        mk = mkts.get('basketball.1x2', {})
+        if not mk:
+            continue  # no game market for this event (outright only)
+
+        # Only full-time submarket
+        ft_sub = None
+        for sub_key, sub_data in mk.get('submarkets', {}).items():
+            if 'ft' in sub_key.lower() or 'full' in sub_key.lower() or sub_key == 'period=ft':
+                ft_sub = sub_data
+                break
+        if ft_sub is None:
+            # fallback: take first submarket
+            for sub_data in mk.get('submarkets', {}).values():
+                ft_sub = sub_data
+                break
+        if not ft_sub:
+            continue
+
+        # Resolve names for Elo lookup
         home = _resolve_name(home_cb)
         away = _resolve_name(away_cb)
 
-        # Predict
-        prob_home = elo.predict(home, away)
-        prob_away = 1 - prob_home
-
-        # Check match counts
         if elo._match_count.get(home, 0) < 10 or elo._match_count.get(away, 0) < 10:
             continue
 
-        # Get odds
-        markets = ev.get('markets', {})
-        for mk_name in ['basketball.winner', 'basketball.moneyline', 'match_odds']:
-            mk = markets.get(mk_name, {})
-            if mk:
-                break
-        if not mk:
-            for k, v in markets.items():
-                if 'winner' in k.lower() or 'moneyline' in k.lower():
-                    mk = v
-                    break
+        prob_home = elo.predict(home, away)
+        prob_away = 1.0 - prob_home
 
-        for sv in mk.get('submarkets', {}).values():
-            for sel in sv.get('selections', []):
-                outcome = sel.get('outcome', '')
-                price = float(sel.get('price', 0) or 0)
-                murl = sel.get('marketUrl', '')
-                if price < 1.1 or not murl:
-                    continue
+        # Injury adjustment via ESPN game summary (90 min cache)
+        try:
+            _h_inj, _a_inj = _fetch_nba_injury_adj(home, away)
+            if _h_inj is None:
+                log.info('NBA [star-out-skip]: %s vs %s', home, away)
+                continue
+            if _h_inj != 0 or _a_inj != 0:
+                log.info('NBA [injury-adj]: %s %+.1f%% / %s %+.1f%%',
+                         home, _h_inj * 100, away, _a_inj * 100)
+            prob_home = min(0.95, max(0.05, prob_home + _h_inj - _a_inj))
+            prob_away = 1.0 - prob_home
+        except Exception as _ie:
+            log.debug('NBA injury adj error: %s', _ie)
 
-                prob = prob_home if outcome == 'home' else prob_away
-                player = home_cb if outcome == 'home' else away_cb
-                edge = prob * price - 1
+        for sel in ft_sub.get('selections', []):
+            outcome = sel.get('outcome', '')
+            price = float(sel.get('price', 0) or 0)
+            murl = sel.get('marketUrl', '')
 
-                # Form bonus
-                form = elo.get_form(home if outcome == 'home' else away)
-                form_bonus = 0
-                if form is not None:
-                    if form > 0.7:
-                        form_bonus = 0.02
-                    elif form < 0.3:
-                        form_bonus = -0.02
+            if price < 1.05 or not murl:
+                continue
+            if outcome == 'draw':
+                continue  # NBA draws don't exist, skip the @20x decoy
 
-                adj_prob = min(0.95, max(0.05, prob + form_bonus))
-                adj_edge = adj_prob * price - 1
+            if outcome == 'home':
+                prob = prob_home
+                team = home_cb
+            elif outcome == 'away':
+                prob = prob_away
+                team = away_cb
+            else:
+                continue
 
-                if adj_edge > 0.05 and adj_prob > 0.55 and adj_edge < 0.45 and adj_prob < 0.92:  # sanity cap
-                    picks.append({
-                        'match': f'{home_cb} vs {away_cb}',
-                        'league': 'NBA',
-                        'event_id': eid,
-                        'market_url': murl,
-                        'price': price,
-                        'label': f'Winner: {player}',
-                        'model_prob': adj_prob,
-                        'edge': adj_edge,
-                        'sport': 'basketball',
-                        'form': form,
-                    })
+            # Form adjustment
+            form = elo.get_form(home if outcome == 'home' else away)
+            form_bonus = 0.0
+            if form is not None:
+                if form > 0.70:
+                    form_bonus = 0.02
+                elif form < 0.30:
+                    form_bonus = -0.02
 
-    log.info('NBA: %d value picks found', len(picks))
+            adj_prob = min(0.92, max(0.08, prob + form_bonus))
+            edge = round(adj_prob * price - 1.0, 4)
+
+            # Filters: minimum edge + confidence, sanity caps
+            if edge < 0.06 or adj_prob < 0.58 or adj_prob > 0.92:
+                continue
+            if price > 2.50:  # NBA away dogs > 2.50 are too volatile without team data
+                continue
+
+            picks.append({
+                'match':               '%s vs %s' % (home_cb, away_cb),
+                'league':              'NBA',
+                'sport':               'basketball',
+                'event_id':            eid,
+                'market':              'basketball.1x2',
+                'market_url':          murl,
+                'price':               price,
+                'odds':                price,
+                # Label must NOT contain 'home'/'away'/'Winner:'/'moneyline'
+                # to avoid place_bets 2.0-cap filter designed for soccer
+                'label':               'NBA: %s' % team,
+                'model_prob':          round(adj_prob, 4),
+                'raw_model_prob_uncal': round(adj_prob, 4),
+                'confidence':          round(adj_prob, 4),
+                'edge':                edge,
+                'form':                round(form, 3) if form else None,
+                'shadow':              shadow,           # shadow=True -> sibila only, no real bet
+                '_max_stake':          1.00,             # low cap until model validated
+            })
+
+    log.info('NBA: %d value picks found (%s)', len(picks),
+             'SHADOW' if shadow else 'LIVE')
     return picks
+

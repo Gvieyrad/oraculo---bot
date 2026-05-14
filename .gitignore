@@ -56,3 +56,8 @@ Samael/
 
 # Tests
 tests/
+
+# Runtime data
+*.db
+calibration_data.json
+learned_rules.json

@@ -9,7 +9,7 @@ from datetime import datetime
 log = logging.getLogger('oraculo')
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FC_XG_CACHE = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'xg_firecrawl.json')
-FC_API_KEY = 'fc-6322cb2d2b1e474798749fee9ec1c0f0'
+FC_API_KEY = os.environ.get('FIRECRAWL_API_KEY', '')
 XG_MAX_AGE = 86400  # 24h
 
 UNDERSTAT_URLS = {
