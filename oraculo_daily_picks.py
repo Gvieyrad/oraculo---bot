@@ -141,7 +141,12 @@ def build_feature_vector(match, context, xg_data, elo=None, poisson=None):
         features['xg_total_predict'] = features['home_xg_for_avg'] + features['away_xg_for_avg']
         features['xg_diff'] = features['home_xg_diff'] - features['away_xg_diff']
 
-        # Weather defaults
+        # Weather features (live via Open-Meteo, fallback 0.0)
+        try:
+            from oraculo_xg_weather import get_weather_features
+            features.update(get_weather_features(ht, match.get('utc_date', '')))
+        except Exception:
+            pass
         for wf in ['weather_temp', 'weather_rain', 'weather_wind',
                    'weather_humidity', 'weather_is_rainy', 'weather_is_windy',
                    'weather_is_cold']:
