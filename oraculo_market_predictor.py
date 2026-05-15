@@ -137,15 +137,16 @@ class MarketPredictor:
             )
             models['et'].fit(X, y)
 
-        # CatBoost
+        # CatBoost — thread_count=1 prevents thread pool crash on repeated fit() calls
         try:
             from catboost import CatBoostClassifier
             models['cat'] = CatBoostClassifier(
-                iterations=200, depth=6, learning_rate=0.05,
-                loss_function='Logloss', random_seed=42, verbose=0
+                iterations=150, depth=5, learning_rate=0.05,
+                loss_function='Logloss', random_seed=42, verbose=0,
+                thread_count=1, allow_writing_files=False
             )
             models['cat'].fit(X, y)
-        except ImportError:
+        except Exception:
             pass
 
         # AdaBoost
