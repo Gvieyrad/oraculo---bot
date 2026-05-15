@@ -137,6 +137,29 @@ class MarketPredictor:
             )
             models['et'].fit(X, y)
 
+        # CatBoost
+        try:
+            from catboost import CatBoostClassifier
+            models['cat'] = CatBoostClassifier(
+                iterations=200, depth=6, learning_rate=0.05,
+                loss_function='Logloss', random_seed=42, verbose=0
+            )
+            models['cat'].fit(X, y)
+        except ImportError:
+            pass
+
+        # AdaBoost
+        try:
+            from sklearn.ensemble import AdaBoostClassifier
+            from sklearn.tree import DecisionTreeClassifier
+            models['ada'] = AdaBoostClassifier(
+                estimator=DecisionTreeClassifier(max_depth=3),
+                n_estimators=100, learning_rate=0.1, random_state=44, algorithm='SAMME'
+            )
+            models['ada'].fit(X, y)
+        except Exception:
+            pass
+
         pos_rate = np.mean(y)
         log.info('Market %s trained: %d samples, %.1f%% positive',
                  market_key, len(y), pos_rate * 100)

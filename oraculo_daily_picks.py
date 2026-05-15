@@ -65,6 +65,39 @@ def ensure_dirs():
     os.makedirs(PICKS_DIR, exist_ok=True)
 
 
+
+
+def load_xg_proxy_from_csv(all_matches, leagues):
+    """
+    Compute xG proxies from shots data in CSV matches for leagues without understat.
+    Returns entries in same format as load_xg_data().
+    xG proxy: 0.25 * shots_on_target + 0.05 * (shots - shots_on_target)
+    """
+    entries = []
+    for m in all_matches:
+        if m.get('competition_code') not in leagues:
+            continue
+        hs = m.get('home_shots', 0) or 0
+        hst = m.get('home_shots_target', 0) or 0
+        as_ = m.get('away_shots', 0) or 0
+        ast = m.get('away_shots_target', 0) or 0
+        if hs == 0 and hst == 0:
+            continue
+        xg_h = round(0.25 * hst + 0.05 * max(hs - hst, 0), 3)
+        xg_a = round(0.25 * ast + 0.05 * max(as_ - ast, 0), 3)
+        entries.append({
+            'home_team_us': m.get('home_team', ''),
+            'away_team_us': m.get('away_team', ''),
+            'competition_code': m.get('competition_code', ''),
+            'xg_home': xg_h,
+            'xg_away': xg_a,
+            'goals_home': m.get('home_score', 0) or 0,
+            'goals_away': m.get('away_score', 0) or 0,
+            'datetime': m.get('utc_date', ''),
+            'forecast_home': 0.0, 'forecast_draw': 0.0, 'forecast_away': 0.0,
+        })
+    return entries
+
 def load_all_data():
     """Load CSV + xG data for all leagues."""
     from oraculo_football_csv import download_league_csv, LEAGUE_MAP
@@ -84,6 +117,10 @@ def load_all_data():
         leagues=['PL', 'PD', 'SA', 'BL1', 'FL1'],
         seasons=['2023', '2024']
     )
+
+    # Add shots-based xG proxy for leagues not on understat
+    _proxy_leagues = ['ELC', 'BEL', 'SWE', 'NOR', 'BL2', 'SB', 'FL2']
+    xg_data = xg_data + load_xg_proxy_from_csv(all_matches, _proxy_leagues)
 
     return all_matches, xg_data
 
