@@ -68,10 +68,10 @@ class DixonColesModel:
             if tw > 0:
                 self.defense[team] = max(0.3, sum(g * w for g, w in co) / tw / (self.league_avg_goals / 2))
 
-        # Optimize rho
-        recent = matches[-50:]
+        # Optimize rho — use all matches for stable estimate (50 was too few, picked rho=0.0)
+        recent = matches
         best_rho, best_ll = -0.13, float('-inf')
-        for rho_c in [-0.20, -0.15, -0.13, -0.10, -0.05, 0.0]:
+        for rho_c in [-0.25, -0.20, -0.17, -0.15, -0.13, -0.10, -0.08, -0.05, -0.03, 0.0]:
             ll = 0
             for m in recent:
                 lam = self._lambda(m['home'], m['away'], True)
