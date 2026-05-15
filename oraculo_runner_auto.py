@@ -79,7 +79,8 @@ PARLAY_MIN_CONF = 0.65      # Lowered: 87.5% WR validates higher parlay volume
 TENNIS_PARLAY_STAKE_PCT = 0.05  # 5% of bankroll for tennis parlay
 
 STEAM_ENABLED = False          # Disable steam move betting (getting RESTRICTED by Cloudbet)
-SOCCER_ENABLED = False         # Disable soccer betting (negative ROI -3.3%, focus on tennis 70% WR)
+SOCCER_ENABLED = True          # Re-enabled: 86% WR on 14 real bets, +$185 PnL
+SOCCER_GOALS_ENABLED = False   # Goals Poisson model: ROI -26% to -35%, needs referee data
 CB_BASE = 'https://sports-api.cloudbet.com'
 # Initial deposits (known constants for bankroll reconciliation)
 INITIAL_DEPOSIT = 57.03        # Total initial deposit (USDC + USDT)
@@ -591,7 +592,7 @@ def _auto_tune_strategy(state):
             if roi > 0.15 and win_rate > 0.65:
                 MAX_TOTAL_EXPOSURE = min(0.60, MAX_TOTAL_EXPOSURE + 0.05)
             elif roi < -0.05:
-                MAX_TOTAL_EXPOSURE = max(0.55, MAX_TOTAL_EXPOSURE - 0.10)
+                MAX_TOTAL_EXPOSURE = max(0.25, MAX_TOTAL_EXPOSURE - 0.10)
         # else: leave MAX_TOTAL_EXPOSURE unchanged
 
         # 4. MAX_PER_BET: scale with confidence
@@ -4611,7 +4612,7 @@ def run_cycle(dry_run=False):
             if _SIBILA_ENABLED:
                 for _gp in _goal_picks:
                     _sibila_record(_gp)
-            if SOCCER_ENABLED:
+            if SOCCER_GOALS_ENABLED:
                 # Temporarily raise cap by 10pp so soccer goals aren't always blocked
                 # by tennis filling the full exposure budget each cycle.
                 global MAX_TOTAL_EXPOSURE
@@ -4620,7 +4621,7 @@ def run_cycle(dry_run=False):
                 placed += place_bets(api, state, _goal_picks, [], dry_run)
                 MAX_TOTAL_EXPOSURE = _saved_exp
             else:
-                log.debug('[Soccer Goals] SOCCER_ENABLED=False — shadow only, %d picks', len(_goal_picks))
+                log.debug('[Soccer Goals] SOCCER_GOALS_ENABLED=False — shadow only, %d picks', len(_goal_picks))
     except Exception as _ge:
         log.debug('Soccer goals scan error: %s', _ge)
 

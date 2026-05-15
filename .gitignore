@@ -61,3 +61,4 @@ tests/
 *.db
 calibration_data.json
 learned_rules.json
+_*.py
