@@ -93,23 +93,32 @@ class MarketPredictor:
         from sklearn.ensemble import (RandomForestClassifier,
                                       GradientBoostingClassifier,
                                       ExtraTreesClassifier)
+        import numpy as _np
 
         models = {}
+        # Class balance for sample weighting
+        pos_count = _np.sum(y)
+        neg_count = len(y) - pos_count
+        scale_pos = neg_count / max(pos_count, 1)
+        # Balanced class weight for sklearn models (value >2 or <0.5 means imbalanced)
+        use_balanced = scale_pos > 2.0 or scale_pos < 0.5
 
-        # RF
+        # RF — balanced class weight when imbalanced
         models['rf'] = RandomForestClassifier(
             n_estimators=200, max_depth=10, min_samples_split=10,
-            min_samples_leaf=5, random_state=42, n_jobs=-1
+            min_samples_leaf=5, random_state=42, n_jobs=-1,
+            class_weight='balanced' if use_balanced else None
         )
         models['rf'].fit(X, y)
 
-        # GBC (XGBoost fallback)
+        # XGBoost with scale_pos_weight for class balance
         try:
             from xgboost import XGBClassifier
             models['xgb'] = XGBClassifier(
                 n_estimators=200, max_depth=6, learning_rate=0.05,
                 subsample=0.8, colsample_bytree=0.8, min_child_weight=5,
                 objective='binary:logistic', eval_metric='logloss',
+                scale_pos_weight=float(scale_pos),
                 use_label_encoder=False, random_state=42, n_jobs=-1, verbosity=0
             )
             models['xgb'].fit(X, y)
@@ -120,13 +129,14 @@ class MarketPredictor:
             )
             models['gbc'].fit(X, y)
 
-        # LGB or ExtraTrees
+        # LGB with class balance
         try:
             from lightgbm import LGBMClassifier
             models['lgb'] = LGBMClassifier(
                 n_estimators=200, max_depth=6, learning_rate=0.05,
                 subsample=0.8, colsample_bytree=0.8, min_child_samples=10,
                 objective='binary', metric='binary_logloss',
+                is_unbalance=bool(use_balanced),
                 random_state=42, n_jobs=-1, verbose=-1
             )
             models['lgb'].fit(X, y)
