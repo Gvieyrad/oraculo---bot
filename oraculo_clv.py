@@ -364,30 +364,43 @@ class CLVOracle:
         Called every scan cycle. Last snapshot before cutoff = closing odds proxy.
         CLV = entry_odds / current_odds - 1 (positive = we got better price than now).
         """
-        import sqlite3 as _sq3
+        import sqlite3 as _sq3, json as _json, os as _os
         if not active_bets:
+            return
+        # Load Cloudbet API key for authenticated requests
+        try:
+            _cfg_path = _os.path.join(_os.path.dirname(__file__), 'cloudbet_config.json')
+            _cb_key = _json.load(open(_cfg_path)).get('api_key', '')
+        except Exception:
+            _cb_key = ''
+        if not _cb_key:
             return
         updated = 0
         try:
             con = _sq3.connect(sibila_db_path, timeout=10)
             cur = con.cursor()
             for bet in active_bets:
-                murl    = bet.get('market_url', '')
-                entry_o = float(bet.get('odds', 0) or 0)
-                bet_id  = bet.get('bet_id', '')
-                if not murl or entry_o <= 1:
+                murl     = bet.get('market_url', '')
+                entry_o  = float(bet.get('odds', 0) or 0)
+                bet_id   = bet.get('bet_id', '')
+                event_id = bet.get('event_id', '')
+                if not murl or entry_o <= 1 or not event_id:
                     continue
-                # Fetch current odds from Cloudbet
+                # Fetch current odds via event endpoint (requires auth)
                 try:
                     import requests as _req
                     r = _req.get(
-                        f'https://sports-api.cloudbet.com/pub/v2/odds/markets?marketUrl={murl}',
-                        headers={'accept': 'application/json'},
+                        f'https://sports-api.cloudbet.com/pub/v2/odds/events/{event_id}',
+                        headers={'accept': 'application/json', 'X-API-Key': _cb_key},
                         timeout=8)
+                    if r.status_code != 200:
+                        continue
                     data = r.json()
-                    # Extract best price for this selection
+                    # Traverse: markets[market_key] -> submarkets[period] -> selections
+                    market_key = murl.split('/')[0]
                     current_price = 0.0
-                    for sub in data.get('submarkets', {}).values():
+                    mkt = data.get('markets', {}).get(market_key, {})
+                    for sub in mkt.get('submarkets', {}).values():
                         for sel in sub.get('selections', []):
                             if sel.get('marketUrl', '') == murl:
                                 current_price = float(sel.get('price', 0) or 0)
