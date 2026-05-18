@@ -3127,6 +3127,14 @@ try:
         from soccer_sibila_resolver import resolve_all_pending as _soccer_resolve_shadows
     except ImportError:
         def _soccer_resolve_shadows(**kw): return (0, 0, 0)
+    try:
+        from mlb_sibila_resolver import resolve_all_pending as _mlb_resolve_shadows
+    except ImportError:
+        def _mlb_resolve_shadows(**kw): return (0, 0, 0)
+    try:
+        from tennis_sibila_resolver import resolve_all_pending as _tennis_resolve_shadows
+    except ImportError:
+        def _tennis_resolve_shadows(**kw): return (0, 0, 0)
     _SIBILA_ENABLED = True
 except ImportError:
     _SIBILA_ENABLED = False
@@ -4700,6 +4708,8 @@ def run_loop():
     last_scan = 0
     last_check = 0
     last_soccer_resolve = 0
+    last_mlb_resolve = 0
+    last_tennis_resolve = 0
     last_tennis_update = 0
     TENNIS_UPDATE_INTERVAL = 86400  # Once per day
     NEWS_REFRESH_INTERVAL = 7200   # Refresh tennis news every 2 hours
@@ -4817,6 +4827,22 @@ def run_loop():
                     except Exception as _sr_e:
                         log.debug('Soccer resolve error: %s', _sr_e)
                     last_soccer_resolve = now
+                if now - last_mlb_resolve >= 3600:
+                    try:
+                        _n_res, _n_skip, _n_nf = _mlb_resolve_shadows()
+                        if _n_res:
+                            log.info('MLB shadow resolver: %d resolved', _n_res)
+                    except Exception as _mr_e:
+                        log.debug('MLB resolve error: %s', _mr_e)
+                    last_mlb_resolve = now
+                if now - last_tennis_resolve >= 3600:
+                    try:
+                        _n_res, _n_skip, _n_nf = _tennis_resolve_shadows()
+                        if _n_res:
+                            log.info('Tennis shadow resolver: %d resolved', _n_res)
+                    except Exception as _tr_e:
+                        log.debug('Tennis resolve error: %s', _tr_e)
+                    last_tennis_resolve = now
                 if settled or True:  # always save to persist closing_odds
                     sync_obsidian(state)
                     save_state(state)
