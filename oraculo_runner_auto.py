@@ -84,8 +84,8 @@ SOCCER_GOALS_ENABLED = False   # Goals Poisson model: ROI -26% to -35%, needs re
 CB_BASE = 'https://sports-api.cloudbet.com'
 # Initial deposits (known constants for bankroll reconciliation)
 INITIAL_DEPOSIT = 57.03        # Total initial deposit (USDC + USDT)
-INITIAL_DEPOSIT_USDC = 39.98   # Initial deposit in USDC
-INITIAL_DEPOSIT_USDT = 26.0    # Initial deposit in USDT
+INITIAL_DEPOSIT_USDC = 34.56   # 57.03 x 39.98/65.98 -- proportional split
+INITIAL_DEPOSIT_USDT = 22.47   # 57.03 x 26.00/65.98 -- proportional split
 
 # Markets (V3: no BTTS)
 LEAGUE_MARKETS = {
@@ -138,6 +138,14 @@ CB_COMPS = {
     'URU': 'soccer-uruguay-primera-division',
     'TUR': 'soccer-turkey-super-lig',
     'SCO': 'soccer-scotland-premiership',
+    'PER': 'soccer-peru-primera-division',
+    'BEL': 'soccer-belgium-first-division-a',
+    'BL2': 'soccer-germany-2-bundesliga',
+    'FL2': 'soccer-france-ligue-2',
+    'NOR': 'soccer-norway-eliteserien',
+    'SWE': 'soccer-sweden-allsvenskan',
+    'SWZ': 'soccer-switzerland-super-league',
+    'SB':  'soccer-italy-serie-b',
 }
 
 CB_TENNIS = [
@@ -363,7 +371,7 @@ def load_state():
         'daily_pnl': 0.0, 'total_pnl': 42.83,
         'wins': 13, 'losses': 1, 'consecutive_losses': 0,
         'bets_placed_today': 0,
-        'bankroll_by_currency': {'USDC': 39.98, 'USDT': 26.0},
+        'bankroll_by_currency': {'USDC': INITIAL_DEPOSIT_USDC, 'USDT': INITIAL_DEPOSIT_USDT},
     }
     try:
         with open(STATE_FILE) as f:
@@ -1752,8 +1760,8 @@ def scan_tennis(api, state, dry_run=False):
                             })
                             _p2_picks_added += 1
 
-                # 2.2: tennis.winner_and_total
-                wt_mkt = mkts.get('tennis.winner_and_total', {})
+                # 2.2: tennis.winner_and_total (BO3 only — p_h20/p_a20 undefined for BO5/Slams)
+                wt_mkt = mkts.get('tennis.winner_and_total', {}) if _bo == 3 else {}
                 for _sub_k, _sub_v in wt_mkt.get('submarkets', {}).items():
                     for sel in (_sub_v.get('selections') or []):
                         if sel.get('status') not in ('SELECTION_ENABLED', None, ''):
@@ -1798,7 +1806,7 @@ def scan_tennis(api, state, dry_run=False):
                             _p2_picks_added += 1
 
                 # 2.3: tennis.team_to_win_a_set
-                ts_mkt = mkts.get('tennis.team_to_win_a_set', {})
+                ts_mkt = mkts.get('tennis.team_to_win_a_set', {}) if _bo == 3 else {}
                 for _sub_k, _sub_v in ts_mkt.get('submarkets', {}).items():
                     _team = ('home' if 'team=home' in _sub_k
                              else ('away' if 'team=away' in _sub_k else None))
@@ -2254,14 +2262,14 @@ def place_bets(api, state, picks, parlays, dry_run=False):
         if _ev_id:
             _ev_exp = active_events.get(_ev_id, 0)
             _ev_max = bankroll * MAX_EXPOSURE_PER_EVENT
-            if _ev_exp >= _ev_max:
+            if _ev_exp + MIN_STAKE > _ev_max:
                 log.info('  [SKIP] Event %s exposure $%.2f >= max $%.2f', _ev_id, _ev_exp, _ev_max)
                 continue
 
         # Skip if match exposure exceeds limit
         match_exposure = active_matches.get(match_name, 0)
         max_match_exposure = bankroll * MAX_EXPOSURE_PER_MATCH
-        if match_exposure >= max_match_exposure:
+        if match_exposure + MIN_STAKE > max_match_exposure:
             log.info('  [SKIP] Match exposure $%.2f >= max $%.2f: %s',
                      match_exposure, max_match_exposure, match_name[:35])
             continue
@@ -2551,7 +2559,7 @@ def check_results(api, state):
             state['consecutive_losses'] = 0
             # Per-currency tracking
             _curr = matched_active.get('currency', 'USDC') if matched_active else 'USDC'
-            _bbc = state.setdefault('bankroll_by_currency', {'USDC': 39.98, 'USDT': 26.0})
+            _bbc = state.setdefault('bankroll_by_currency', {'USDC': INITIAL_DEPOSIT_USDC, 'USDT': INITIAL_DEPOSIT_USDT})
             _bbc[_curr] = _bbc.get(_curr, 0) + wl
             log.info('  WIN: $%+.2f | %s', wl,
                      matched_active.get('match', bet_id[:12]) if matched_active else bet_id[:12])
@@ -2566,28 +2574,27 @@ def check_results(api, state):
             state['consecutive_losses'] = state.get('consecutive_losses', 0) + 1
             # Per-currency tracking
             _curr = matched_active.get('currency', 'USDC') if matched_active else 'USDC'
-            _bbc = state.setdefault('bankroll_by_currency', {'USDC': 39.98, 'USDT': 26.0})
+            _bbc = state.setdefault('bankroll_by_currency', {'USDC': INITIAL_DEPOSIT_USDC, 'USDT': INITIAL_DEPOSIT_USDT})
             _bbc[_curr] = _bbc.get(_curr, 0) - _actual_loss
             log.info('  LOSS: $-%.2f | %s', _actual_loss,
                      matched_active.get('match', bet_id[:12]) if matched_active else bet_id[:12])
         elif result in ('VOID', 'PUSH', 'HALF_WIN', 'HALF_LOSS', 'PARTIAL'):
             log.info('  %s: %s', result, bet_id[:12])
             _curr = matched_active.get('currency', 'USDC') if matched_active else 'USDC'
-            _bbc = state.setdefault('bankroll_by_currency', {'USDC': 39.98, 'USDT': 26.0})
-            # HALF_WIN: winLoss = net profit on winning half only.
-            # The pushed half-stake is also returned by the exchange.
-            # HALF_LOSS: winLoss = -stake/2 (correct, nothing extra to add).
-            # VOID/PUSH: full stake returned, wl=0 → add stake back.
+            _bbc = state.setdefault('bankroll_by_currency', {'USDC': INITIAL_DEPOSIT_USDC, 'USDT': INITIAL_DEPOSIT_USDT})
+            # HALF_WIN: only profit (wl) added -- stake never removed at placement.
+            # HALF_LOSS: winLoss = -stake/2 (stake reduction happens here).
+            # VOID/PUSH: stake was never deducted at placement -- no-op.
             if result == 'HALF_WIN' and wl > 0:
-                _net = wl + stake / 2.0  # profit + returned pushed half
-                state['bankroll'] += _net
-                state['total_pnl'] += wl    # only profit counts as P&L
+                # bankroll model: stake never removed at placement
+                # so only add profit (wl), not wl+stake/2
+                state['bankroll'] += wl
+                state['total_pnl'] += wl
                 state['daily_pnl'] += wl
-                _bbc[_curr] = round(_bbc.get(_curr, 0) + _net, 5)
+                _bbc[_curr] = round(_bbc.get(_curr, 0) + wl, 5)
             elif result in ('VOID', 'PUSH'):
-                # Full stake returned, no P&L change
-                state['bankroll'] += stake
-                _bbc[_curr] = round(_bbc.get(_curr, 0) + stake, 5)
+                # Stake was never removed at placement — returning it is a no-op
+                pass
             elif wl != 0:  # HALF_LOSS or PARTIAL
                 state['bankroll'] += wl
                 state['total_pnl'] += wl
@@ -2738,13 +2745,13 @@ def reconcile_bankroll(api, state):
             'checked': datetime.now().isoformat(),
         }
 
-        # Auto-correct bankroll if drift > $2
+        # Auto-correct bankroll if drift > $0.25
         INITIAL_DEPOSIT = 57.03
         all_settled_pnl = sum(float(b.get('winLoss', 0)) for b in bets if b.get('isSettled'))
         all_pending_stake = sum(float(b.get('stake', 0)) for b in bets if not b.get('isSettled'))
         correct_bankroll = INITIAL_DEPOSIT + all_settled_pnl + all_pending_stake + state.get('cumulative_void_returns', 0)
         drift = abs(state['bankroll'] - correct_bankroll)
-        if drift > 2.0:
+        if drift > 0.25:
             log.warning('RECONCILE: Auto-correcting bankroll $%.2f -> $%.2f (drift=$%.2f)',
                         state['bankroll'], correct_bankroll, drift)
             state['bankroll'] = round(correct_bankroll, 2)
@@ -2752,7 +2759,7 @@ def reconcile_bankroll(api, state):
             api_total_pnl = round(all_settled_pnl, 2)
             local_pnl = round(state.get('total_pnl', 0), 2)
             pnl_drift = abs(local_pnl - api_total_pnl)
-            if pnl_drift > 1.0:
+            if pnl_drift > 0.25:
                 log.warning('RECONCILE: total_pnl drift local=$%.2f vs api=$%.2f — correcting',
                             local_pnl, api_total_pnl)
                 state['total_pnl'] = api_total_pnl
@@ -2794,13 +2801,10 @@ def reconcile_bankroll(api, state):
                 age_h = (now - datetime.fromisoformat(p.get('placed', now.isoformat()))).total_seconds() / 3600
                 log.warning('PRUNE ghost bet (VOID+stake_returned): %s | %s | age=%.0fh | stake=$%.2f',
                             p.get('bet_id', '')[:12], p.get('match', ''), age_h, p.get('stake', 0))
-                # Return stake to bankroll (treat voided-by-exchange as VOID)
+                # Stake never removed at placement -- bankroll unchanged on ghost void.
+                # cumulative_void_returns compensates for ghost disappearing from API pending list.
                 stake_back = float(p.get('stake', 0))
-                state['bankroll'] = round(state['bankroll'] + stake_back, 5)
                 state['cumulative_void_returns'] = round(state.get('cumulative_void_returns', 0) + stake_back, 5)
-                curr = p.get('currency', 'USDC')
-                _bbc = state.setdefault('bankroll_by_currency', {})
-                _bbc[curr] = round(_bbc.get(curr, 0) + stake_back, 5)
             _pruned_ids = [p.get('bet_id', '') for p in pruned if p.get('bet_id')]
             _pids2 = list(set(state.get('all_processed_ids', []) + _pruned_ids))
             state['all_processed_ids'] = _pids2[-1000:]
@@ -4606,12 +4610,12 @@ def run_cycle(dry_run=False):
                 'soccer-england-premier-league', 'soccer-germany-bundesliga',
                 'soccer-italy-serie-a', 'soccer-spain-laliga',
                 'soccer-france-ligue-1', 'soccer-netherlands-eredivisie',
-                'soccer-portugal-primeira-liga', 'soccer-champions-league',
+                'soccer-portugal-primeira-liga', 'soccer-international-clubs-uefa-champions-league',
                 # New leagues (added 2026-05-11)
-                'soccer-england-championship', 'soccer-germany-bundesliga-2',
+                'soccer-england-championship', 'soccer-germany-2-bundesliga',
                 'soccer-spain-laliga-2', 'soccer-france-ligue-2',
                 'soccer-italy-serie-b', 'soccer-scotland-premiership',
-                'soccer-belgium-jupiler',
+                'soccer-belgium-first-division-a',
             ]
         ) if 'soccer' in c]
         _goal_picks = _scan_goals(api, state, comp_keys=_goals_comps, dry_run=dry_run)
@@ -4668,11 +4672,37 @@ def run_cycle(dry_run=False):
              placed, state['bankroll'])
     return state
 
+
+
+def _prune_odds_history():
+    """Delete rows older than 14 days from odds_history.db. Runs at startup."""
+    db_path = os.path.join(SCRIPT_DIR, ".oraculo_cache", "odds_history.db")
+    if not os.path.exists(db_path):
+        return
+    size_mb = os.path.getsize(db_path) / 1048576
+    if size_mb < 50:
+        return
+    try:
+        import sqlite3 as _sq
+        con = _sq.connect(db_path, timeout=30)
+        cur = con.cursor()
+        cur.execute("DELETE FROM odds_snapshots WHERE timestamp < datetime('now', '-14 days')")
+        deleted = cur.rowcount
+        con.commit()
+        con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        con.close()
+        if deleted:
+            new_mb = os.path.getsize(db_path) / 1048576
+            log.info('odds_history pruned: %d rows deleted, %.0f MB remaining', deleted, new_mb)
+    except Exception as _e:
+        log.warning('odds_history prune failed: %s', _e)
+
 # ---------------------------------------------------------------------------
 # 24/7 loop
 # ---------------------------------------------------------------------------
 def run_loop():
     """Run autonomous loop forever."""
+    _prune_odds_history()
     log.info('*' * 60)
     log.info('  ORACULO AUTONOMOUS RUNNER STARTED')
     log.info('  Scan interval: %ds | Result check: %ds', SCAN_INTERVAL, RESULT_INTERVAL)
@@ -4729,6 +4759,14 @@ def run_loop():
                 last_news_refresh = now_t
 
         # --- Auto-retrain Poisson/ELO models (weekly) ---
+        # Weekly odds_history prune (in case service runs for weeks without restart)
+        _PRUNE_INTERVAL = 86400 * 7  # 7 days
+        if not hasattr(run_loop, "_last_prune"):
+            run_loop._last_prune = now_t
+        elif now_t - run_loop._last_prune >= _PRUNE_INTERVAL:
+            _prune_odds_history()
+            run_loop._last_prune = now_t
+
         POISSON_RETRAIN_INTERVAL = 86400 * 7  # 7 days
         if not hasattr(scan_football, "_last_poisson_train"):
             scan_football._last_poisson_train = 0

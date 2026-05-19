@@ -119,6 +119,21 @@ def _parse_label(side_label):
     return 'unknown', None, None
 
 
+
+def _parse_goals_label(side_label):
+    lbl = (side_label or '').lower()
+    if not lbl.startswith('goals'):
+        return None
+    try:
+        period = '2h' if '2h' in lbl else ('1h' if '1h' in lbl else 'ft')
+        direction = 'over' if 'over' in lbl else 'under'
+        m = re.search(r'(over|under)\s+([\d.]+)', lbl)
+        if not m:
+            return None
+        return period, direction, float(m.group(2))
+    except Exception:
+        return None
+
 # ── Main resolver ─────────────────────────────────────────────────────────────
 
 def resolve_soccer_shadow(lookback_days=10, dry_run=False):
@@ -163,7 +178,7 @@ def resolve_soccer_shadow(lookback_days=10, dry_run=False):
     leagues = ['PL', 'BL1', 'FL1', 'SA', 'PD']
     for lg in leagues:
         try:
-            matches = download_league_csv(lg, season='2526')
+            matches = download_league_csv(lg, season_start=2025)
             for m in matches:
                 d = m.get('utc_date') or m.get('date', '')
                 try:
@@ -192,9 +207,36 @@ def resolve_soccer_shadow(lookback_days=10, dry_run=False):
         cb_home, cb_away = parts[0].strip(), parts[1].strip()
 
         # Parse market/outcome/line from side label
+        # Goals markets
+        goals_parsed = _parse_goals_label(side_str)
+        if goals_parsed is not None:
+            period, direction, line = goals_parsed
+            found_match = None
+            for m in recent_matches:
+                fd_h = m.get('home_team', m.get('home_team_csv', ''))
+                fd_a = m.get('away_team', m.get('away_team_csv', ''))
+                if _teams_match(cb_home, fd_h) and _teams_match(cb_away, fd_a):
+                    found_match = m
+                    break
+            if found_match is None:
+                continue
+            hs = int(found_match.get('home_score', 0) or 0)
+            as_ = int(found_match.get('away_score', 0) or 0)
+            ht_h = int(found_match.get('ht_home', 0) or 0)
+            ht_a = int(found_match.get('ht_away', 0) or 0)
+            actual = (hs + as_) if period == 'ft' else ((hs - ht_h) + (as_ - ht_a)) if period == '2h' else (ht_h + ht_a)
+            result = 'WIN' if (actual > line if direction == 'over' else actual <= line) else 'LOSS'
+            log.info('[Resolver] %s | %s | goals(%s)=%d line=%.1f -> %s',
+                     match_str[:35], side_str[:28], period.upper(), actual, line, result)
+            if not dry_run:
+                n = resolve_shadow_picks(match=match_str, side=side_str, result=result)
+                resolved_count += n
+            resolved_map.setdefault(match_str, {})[side_str] = result
+            continue
+
         market, outcome, line = _parse_label(side_str)
         if market not in ('booking_pts',):
-            continue  # for now only resolve booking_pts
+            continue
         if outcome is None or line is None:
             continue
 

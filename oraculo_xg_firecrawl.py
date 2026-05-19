@@ -11,6 +11,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 FC_XG_CACHE = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'xg_firecrawl.json')
 FC_API_KEY = os.environ.get('FIRECRAWL_API_KEY', '')
 XG_MAX_AGE = 86400  # 24h
+FIRECRAWL_CREDITS_EXHAUSTED = True  # set False when Firecrawl credits are renewed
 
 UNDERSTAT_URLS = {
     'PL':  'https://understat.com/league/EPL/2025',
@@ -76,12 +77,16 @@ def _fetch_league_xg(league, url):
                  list(teams.keys())[:3])
         return teams
     except Exception as e:
+        if 'Payment Required' in str(e) or 'Insufficient credits' in str(e):
+            raise
         log.warning('Firecrawl xG failed for %s: %s', league, e)
         return {}
 
 
 def load_xg_firecrawl(force_refresh=False):
     """Load xG data from Firecrawl/Understat. 24h cache."""
+    if FIRECRAWL_CREDITS_EXHAUSTED:
+        return {}
     os.makedirs(os.path.dirname(FC_XG_CACHE), exist_ok=True)
 
     if not force_refresh and os.path.exists(FC_XG_CACHE):
