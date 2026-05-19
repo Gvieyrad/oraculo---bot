@@ -118,6 +118,163 @@ def _fetch_closing_odds(match: str, sport: str, entry_ts: str) -> float:
         return 0.0
 
 
+
+# Short-lived cache for pre-placement sharp reference (5 min)
+_novig_cache: dict = {}
+_NOVIG_TTL = 300        # 5 minutes per match lookup
+_sports_cache: dict = {}  # {prefix: [(key, title), ...], ts: float}
+_SPORTS_TTL = 43200     # 12 hours for sports list
+
+
+def _get_active_sport_keys(sport: str) -> list:
+    """Return list of active Odds API sport keys for a given sport prefix."""
+    api_key = _get_api_key()
+    if not api_key:
+        return []
+    prefix = {'tennis': 'tennis', 'soccer': 'soccer', 'baseball': 'baseball',
+              'basketball': 'basketball'}.get(sport, '')
+    if not prefix:
+        return []
+    cached = _sports_cache.get(prefix)
+    if cached and (time.time() - cached['ts']) < _SPORTS_TTL:
+        return cached['keys']
+    try:
+        from urllib.request import urlopen, Request as _Req
+        url = 'https://api.the-odds-api.com/v4/sports?apiKey=%s' % api_key
+        req = _Req(url)
+        req.add_header('Accept', 'application/json')
+        resp = urlopen(req, timeout=12)
+        sports = json.loads(resp.read().decode('utf-8'))
+        keys = [s['key'] for s in sports
+                if s.get('key', '').startswith(prefix) and s.get('active', True)]
+        _sports_cache[prefix] = {'keys': keys, 'ts': time.time()}
+        log.debug('Odds API active %s keys: %s', prefix, keys)
+        return keys
+    except Exception as e:
+        log.debug('_get_active_sport_keys error: %s', e)
+        return []
+
+
+def _best_sport_key(sport: str, comp_key: str) -> str:
+    """Select the most likely Odds API sport key given a sport and Cloudbet comp_key."""
+    keys = _get_active_sport_keys(sport)
+    if not keys:
+        return ''
+    if not comp_key:
+        return keys[0] if keys else ''
+    # Score each key by word overlap with comp_key
+    comp_words = set(comp_key.lower().replace('-', '_').split('_'))
+    best, best_score = '', 0
+    for k in keys:
+        k_words = set(k.lower().split('_'))
+        score = len(comp_words & k_words)
+        if score > best_score:
+            best_score, best = score, k
+    return best or (keys[0] if keys else '')
+
+
+def get_novig_prob(match: str, sport: str, pick_label: str,
+                  comp_key: str = '') -> 'float | None':
+    """
+    Return Pinnacle no-vig probability for our pick direction.
+    match:      "PlayerA vs PlayerB"
+    sport:      'tennis', 'soccer', 'baseball', etc.
+    pick_label: label of our pick (e.g. "Winner: Nadal", "Home")
+    comp_key:   Cloudbet comp key used to resolve the tournament (optional)
+    Returns float or None if Pinnacle data unavailable.
+    """
+    api_key = _get_api_key()
+    if not api_key:
+        return None
+
+    sport_key = _best_sport_key(sport, comp_key)
+    if not sport_key:
+        return None
+
+    cache_key = '%s|%s' % (match, sport_key)
+    cached = _novig_cache.get(cache_key)
+    if cached and (time.time() - cached['ts']) < _NOVIG_TTL:
+        return cached.get('prob')
+
+    try:
+        from urllib.request import urlopen, Request as _Req
+        url = ('https://api.the-odds-api.com/v4/sports/%s/odds/'
+               '?apiKey=%s&regions=us,eu&markets=h2h&oddsFormat=decimal'
+               '&bookmakers=pinnacle' % (sport_key, api_key))
+        req = _Req(url)
+        req.add_header('Accept', 'application/json')
+        resp = urlopen(req, timeout=12)
+        events = json.loads(resp.read().decode('utf-8'))
+
+        parts = [p.strip().lower() for p in match.split(' vs ')]
+        if len(parts) < 2:
+            return None
+        home_q, away_q = parts[0], parts[1]
+        label_lower = pick_label.lower()
+
+        # Detect which side our pick is on
+        pick_is_home = None
+        for w in home_q.split():
+            if len(w) > 3 and w in label_lower:
+                pick_is_home = True
+                break
+        if pick_is_home is None:
+            for w in away_q.split():
+                if len(w) > 3 and w in label_lower:
+                    pick_is_home = False
+                    break
+        if pick_is_home is None:
+            if 'home' in label_lower:
+                pick_is_home = True
+            elif 'away' in label_lower:
+                pick_is_home = False
+        if pick_is_home is None:
+            _novig_cache[cache_key] = {'prob': None, 'ts': time.time()}
+            return None
+
+        for ev in events:
+            home = ev.get('home_team', '').lower()
+            away = ev.get('away_team', '').lower()
+            hm = any(w in home for w in home_q.split() if len(w) > 3)
+            am = any(w in away for w in away_q.split() if len(w) > 3)
+            if not (hm and am):
+                continue
+            for bk in ev.get('bookmakers', []):
+                if bk.get('key') != 'pinnacle':
+                    continue
+                for mkt in bk.get('markets', []):
+                    if mkt.get('key') != 'h2h':
+                        continue
+                    outcomes = mkt.get('outcomes', [])
+                    price_home = price_away = 0.0
+                    for out in outcomes:
+                        oname = out.get('name', '').lower()
+                        price = float(out.get('price', 0) or 0)
+                        if not price:
+                            continue
+                        is_home_out = any(w in oname for w in home_q.split() if len(w) > 3)
+                        is_away_out = any(w in oname for w in away_q.split() if len(w) > 3)
+                        if is_home_out:
+                            price_home = price
+                        elif is_away_out:
+                            price_away = price
+                    if price_home > 1.0 and price_away > 1.0:
+                        raw_h = 1.0 / price_home
+                        raw_a = 1.0 / price_away
+                        total = raw_h + raw_a
+                        if total <= 0:
+                            continue
+                        prob = round((raw_h / total if pick_is_home else raw_a / total), 4)
+                        _novig_cache[cache_key] = {'prob': prob, 'ts': time.time()}
+                        log.debug('Pinnacle novig %s [%s]: %.3f', match[:35],
+                                  'H' if pick_is_home else 'A', prob)
+                        return prob
+    except Exception as e:
+        log.debug('get_novig_prob error (%s): %s', match[:30], e)
+
+    _novig_cache[cache_key] = {'prob': None, 'ts': time.time()}
+    return None
+
 def compute_clv(entry_odds: float, closing_odds: float) -> float:
     """CLV = closing_odds / entry_odds - 1
     Positive = we got better odds than market closed at (we had edge)

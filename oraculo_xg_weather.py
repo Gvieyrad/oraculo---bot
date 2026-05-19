@@ -378,6 +378,87 @@ _US_TO_ORG = {
 _ORG_TO_US = {v: k for k, v in _US_TO_ORG.items()}
 
 
+
+
+# Weather forecast cache (1h TTL) for pre-match adjustments
+_forecast_cache: dict = {}
+_FORECAST_TTL = 3600
+
+
+def get_forecast_adjustment(home_team: str, match_cutoff_ts: str) -> float:
+    """
+    Return a probability multiplier for soccer over/under markets based on
+    forecast weather at the match venue. Uses Open-Meteo forecast API (free, no key).
+
+    Returns float in [0.82, 1.05]:
+      < 1.0 = bad weather reduces scoring (apply to over/btts_yes probability)
+      > 1.0 = ideal conditions slightly boost scoring (cap 1.05)
+    Falls back to 1.0 on any error.
+
+    Only meaningful for outdoor stadiums; call only for over/under markets.
+    """
+    try:
+        from datetime import datetime, timezone
+        dt_str = match_cutoff_ts[:10] if match_cutoff_ts else ''
+        if not dt_str:
+            return 1.0
+
+        cache_key = '%s_%s' % (home_team, dt_str)
+        cached = _forecast_cache.get(cache_key)
+        if cached and (time.time() - cached['ts']) < _FORECAST_TTL:
+            return cached['adj']
+
+        lat, lon = STADIUM_COORDS.get(home_team, DEFAULT_COORDS)
+
+        from urllib.request import Request, urlopen
+        url = (
+            'https://api.open-meteo.com/v1/forecast?'
+            'latitude=%.4f&longitude=%.4f'
+            '&daily=precipitation_sum,windspeed_10m_max,temperature_2m_max,temperature_2m_min'
+            '&start_date=%s&end_date=%s'
+            '&timezone=UTC'
+        ) % (lat, lon, dt_str, dt_str)
+
+        req = Request(url)
+        req.add_header('User-Agent', 'Oraculo/1.0')
+        resp = urlopen(req, timeout=8)
+        data = json.loads(resp.read())
+
+        daily = data.get('daily', {})
+        rain   = float((daily.get('precipitation_sum') or [0])[0] or 0)
+        wind   = float((daily.get('windspeed_10m_max') or [0])[0] or 0)
+        t_max  = float((daily.get('temperature_2m_max') or [20])[0] or 20)
+        t_min  = float((daily.get('temperature_2m_min') or [10])[0] or 10)
+
+        adj = 1.0
+        # Rain effect: heavy rain suppresses goals (tired legs, wet ball)
+        if rain > 10:
+            adj *= 0.87
+        elif rain > 5:
+            adj *= 0.92
+        elif rain > 2:
+            adj *= 0.96
+        # Wind effect
+        if wind > 60:
+            adj *= 0.90
+        elif wind > 45:
+            adj *= 0.94
+        elif wind > 30:
+            adj *= 0.97
+        # Cold: winter matches in southern Europe; slight suppressor
+        if t_max < 5:
+            adj *= 0.96
+        # Perfect conditions: slight boost (bounded)
+        adj = round(min(max(adj, 0.82), 1.05), 4)
+
+        _forecast_cache[cache_key] = {'adj': adj, 'ts': time.time()}
+        log.debug('Weather forecast %s %s: rain=%.1fmm wind=%.0fkm/h adj=%.3f',
+                  home_team, dt_str, rain, wind, adj)
+        return adj
+    except Exception as e:
+        log.debug('get_forecast_adjustment error (%s): %s', home_team, e)
+        return 1.0
+
 def build_xg_weather_features(match, xg_data):
     """
     Build xG + weather features for a match.

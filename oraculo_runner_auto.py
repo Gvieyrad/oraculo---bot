@@ -83,6 +83,7 @@ SOCCER_ENABLED = True          # Re-enabled: 86% WR on 14 real bets, +$185 PnL
 SOCCER_GOALS_ENABLED = False   # Goals Poisson model: ROI -26% to -35%, needs referee data
 MLB_ENABLED = False            # Paused: actual WR 36.3% vs implied 43.6% (91 bets), recalibrating
 TENNIS_MAX_EDGE = 0.18         # Cap: 0.20+ bucket is -7.8% ROI — model overestimates extreme edges
+SHARP_REF_ENABLED = True       # Pre-placement check: skip if model differs from Pinnacle no-vig by >10%
 CB_BASE = 'https://sports-api.cloudbet.com'
 # Initial deposits (known constants for bankroll reconciliation)
 INITIAL_DEPOSIT = 57.03        # Total initial deposit (USDC + USDT)
@@ -1031,6 +1032,21 @@ def scan_football(api, state, dry_run=False):
                         pass
                 if model_prob_over is None:
                     continue
+
+                # Weather adjustment (rain/wind suppress over/btts probability)
+                if mkt_key in ('over25', 'over15', 'btts_yes', 'btts_no'):
+                    try:
+                        from oraculo_xg_weather import get_forecast_adjustment as _wfadj
+                        _wadj = _wfadj(home, ev_cutoff)
+                        if _wadj != 1.0:
+                            if mkt_key in ('over25', 'over15', 'btts_yes'):
+                                model_prob_over = round(model_prob_over * _wadj, 4)
+                            else:  # under/btts_no: rain HELPS
+                                model_prob_over = round(min(model_prob_over / _wadj, 0.95), 4)
+                            log.debug('Weather adj %.3f for %s %s: p=%.3f',
+                                      _wadj, home, mkt_key, model_prob_over)
+                    except Exception:
+                        pass
 
                 mkt_data = markets.get(cb_mkt_key, {})
                 for outcome, params_filter in outcomes:
@@ -2381,6 +2397,29 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                 continue
         _orig_currency = api.currency
         api.currency = _bet_currency
+        # Sharp reference filter: compare model_prob vs Pinnacle no-vig probability
+        if SHARP_REF_ENABLED:
+            _mt_sharp = p.get('market_type', '') or ''
+            _sport_sharp = p.get('sport', '') or ''
+            # Only filter winner/moneyline markets (not set handicaps, BTTS, totals)
+            _apply_sharp = (_mt_sharp in ('tennis', 'tennis_team_win_set') or
+                            'result_1x2' in _mt_sharp or 'match_winner' in _mt_sharp or
+                            (_sport_sharp == 'soccer' and 'asian' in _mt_sharp))
+            if _apply_sharp:
+                try:
+                    from oraculo_clv import get_novig_prob as _get_nvp
+                    _pin_prob = _get_nvp(p['match'], _sport_sharp, p.get('label', ''), p.get('league', ''))
+                    if _pin_prob is not None:
+                        _model_p = float(p.get('model_prob') or 0.5)
+                        _discrepancy = abs(_model_p - _pin_prob)
+                        if _discrepancy > 0.10:
+                            log.info('  [SKIP/SHARP] %s model=%.1f%% pin_novig=%.1f%% diff=%.1f%% — discrepancy too large',
+                                     p['match'][:30], _model_p * 100, _pin_prob * 100, _discrepancy * 100)
+                            _rejected_keys.add(dedup_key)
+                            continue
+                        log.debug('  [SHARP OK] model=%.1f%% pin=%.1f%%', _model_p * 100, _pin_prob * 100)
+                except Exception as _se:
+                    log.debug('Sharp ref error: %s', _se)
         log.info('  Placing: %s | %s @%.3f | $%.2f %s', p['match'][:35], p['label'], p['price'], stake, _bet_currency)
         resp = api.place_straight(p['event_id'], p['market_url'], p['price'], stake)
         api.currency = _orig_currency
