@@ -2301,10 +2301,7 @@ def place_bets(api, state, picks, parlays, dry_run=False):
         if p.get('market_type') == 'tennis_exact_sets':
             log.info('  [SKIP] tennis_exact_sets disabled real WR=0%%: %s', p.get('match','')[:35])
             continue
-        # 4. tennis_winner_and_total (Games O/U): sin validacion, 1 loss: desactivado
-        if p.get('market_type') == 'tennis_winner_and_total':
-            log.info('  [SKIP] tennis_winner_and_total disabled: %s', p.get('match','')[:35])
-            continue
+        # 4. tennis_winner_and_total (Games O/U): capped at $1 per bet
         # 2. Match Winner: stake reducido al 50% vs Sets Under
         _stake_factor = 0.5 if _is_winner_mkt else 1.0
         # 5. Skip if model_prob is 0 or negative (model failed to compute)
@@ -2624,6 +2621,24 @@ def check_results(api, state):
             'match': matched_active.get('match', '') if matched_active else '',
         })
         _log_settlement(bet_id, result, wl)
+        if matched_active:
+            _write_bet_history(
+                bet_id=bet_id,
+                match=matched_active.get('match', ''),
+                league=matched_active.get('league', ''),
+                sport=matched_active.get('sport', ''),
+                label=matched_active.get('label', ''),
+                market_type=matched_active.get('market_type', ''),
+                placed_at=matched_active.get('placed', ''),
+                settled_at=datetime.now().isoformat(),
+                stake=float(matched_active.get('stake', 0) or 0),
+                price=float(matched_active.get('price', 0) or 0),
+                model_prob=float(matched_active.get('model_prob', 0) or 0),
+                edge=float(matched_active.get('edge', 0) or 0),
+                result=result,
+                pnl=float(wl),
+                currency=matched_active.get('currency', 'USDC'),
+            )
         # CLV Oracle: calcular CLV con Betfair/Pinnacle como referencia
         _clv_data = {}
         if _CLV_ORACLE_ENABLED and matched_active:
@@ -3429,6 +3444,46 @@ def _save_bet(state, bet_id, match, label, sport, odds, stake, edge=0,
     save_state(state)
     log.info('[_save_bet] Saved bet %s | %s | $%.2f', bet_id[:12], label[:25], stake)
     return True
+
+def _write_bet_history(bet_id, match, league, sport, label, market_type,
+                       placed_at, settled_at, stake, price, model_prob,
+                       edge, result, pnl, currency):
+    """Append a settled bet to bet_history table in oraculo.db."""
+    try:
+        import sqlite3 as _sq3
+        _db = os.path.join(SCRIPT_DIR, 'oraculo.db')
+        _con = _sq3.connect(_db, timeout=10)
+        _con.execute('''
+            CREATE TABLE IF NOT EXISTS bet_history (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                bet_id      TEXT UNIQUE,
+                match       TEXT,
+                league      TEXT,
+                sport       TEXT,
+                label       TEXT,
+                market_type TEXT,
+                placed_at   TEXT,
+                settled_at  TEXT,
+                stake       REAL,
+                price       REAL,
+                model_prob  REAL,
+                edge        REAL,
+                result      TEXT,
+                pnl         REAL,
+                currency    TEXT
+            )''')
+        _con.execute('''
+            INSERT OR IGNORE INTO bet_history
+            (bet_id,match,league,sport,label,market_type,placed_at,settled_at,
+             stake,price,model_prob,edge,result,pnl,currency)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+            (bet_id, match, league, sport, label, market_type, placed_at, settled_at,
+             stake, price, model_prob, edge, result, pnl, currency))
+        _con.commit()
+        _con.close()
+    except Exception as _e:
+        log.debug('bet_history write failed: %s', _e)
+
 
 def _log_settlement(bet_id, result, win_loss):
     """Update prediction log with result. Thread-safe write with lock."""
