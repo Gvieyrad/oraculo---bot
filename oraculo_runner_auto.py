@@ -81,6 +81,8 @@ TENNIS_PARLAY_STAKE_PCT = 0.05  # 5% of bankroll for tennis parlay
 STEAM_ENABLED = False          # Disable steam move betting (getting RESTRICTED by Cloudbet)
 SOCCER_ENABLED = True          # Re-enabled: 86% WR on 14 real bets, +$185 PnL
 SOCCER_GOALS_ENABLED = False   # Goals Poisson model: ROI -26% to -35%, needs referee data
+MLB_ENABLED = False            # Paused: actual WR 36.3% vs implied 43.6% (91 bets), recalibrating
+TENNIS_MAX_EDGE = 0.18         # Cap: 0.20+ bucket is -7.8% ROI — model overestimates extreme edges
 CB_BASE = 'https://sports-api.cloudbet.com'
 # Initial deposits (known constants for bankroll reconciliation)
 INITIAL_DEPOSIT = 57.03        # Total initial deposit (USDC + USDT)
@@ -1548,7 +1550,7 @@ def scan_tennis(api, state, dry_run=False):
                         log.debug('  [SKIP] Insufficient Elo data: %s (%d) vs %s (%d)',
                                   player, player_matches, opp, opponent_matches)
                         continue
-                    if edge > MIN_EDGE and prob > MIN_CONF and edge < 0.50 and prob < 0.92:
+                    if edge > MIN_EDGE and prob > MIN_CONF and edge <= TENNIS_MAX_EDGE and prob < 0.92:
                         picks.append({
                             'match': f'{home} vs {away}', 'league': comp_key,
                             'event_id': eid, 'market_url': murl,
@@ -4425,6 +4427,8 @@ def run_cycle(dry_run=False):
     tennis_picks = scan_tennis(api, state, dry_run)
     # 3c. Scan MLB
     try:
+        if not MLB_ENABLED:
+            raise ImportError('MLB_ENABLED=False — scan skipped (WR 36.3% < implied 43.6%)')
         from oraculo_mlb import scan_mlb, train_mlb_elo
         _mlb_elo = train_mlb_elo(days_back=45)
         if _mlb_elo and len(_mlb_elo.ratings) >= 20:
