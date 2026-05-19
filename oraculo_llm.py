@@ -15,8 +15,8 @@ import requests
 log = logging.getLogger('oraculo_llm')
 
 OLLAMA_URL = 'http://localhost:11434/api/generate'
-OLLAMA_MODEL = 'qwen2.5:3b'
-OLLAMA_TIMEOUT = 120  # seconds
+OLLAMA_MODEL = 'gemma4:latest'
+OLLAMA_TIMEOUT = 180  # seconds
 NEWS_CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 '.oraculo_cache', 'tennis_news.json')
 
