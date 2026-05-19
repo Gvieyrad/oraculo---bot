@@ -60,6 +60,9 @@ TEAM_CITY = {
     'Sport Boys': 'Callao',
     'Alianza Atletico': 'Sullana',
     'Carlos Mannucci': 'Trujillo',
+    'Carlos A. Mannucci': 'Trujillo',
+    'Academia Cantolao': 'Lima',
+    'Union Comercio': 'Moyobamba',
     'Cesar Vallejo': 'Trujillo',
     'Atletico Grau': 'Piura',
     'Juan Aurich': 'Piura',
@@ -92,14 +95,23 @@ def get_team_altitude(team_name):
     return 0
 
 
+_PERU_CACHE = None
+_PERU_CACHE_TS = 0.0
+
 def load_peru_matches():
-    """Load cached Peru matches."""
+    """Load cached Peru matches (in-memory cache, refreshed hourly)."""
+    import time as _t
+    global _PERU_CACHE, _PERU_CACHE_TS
+    if _PERU_CACHE is not None and _t.time() - _PERU_CACHE_TS < 3600:
+        return _PERU_CACHE
     cache_file = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'csv', 'PER_all.json')
     if not os.path.exists(cache_file):
         log.warning('No Peru data cached. Run API-Football download first.')
         return []
     with open(cache_file, 'r') as f:
-        return json.load(f)
+        _PERU_CACHE = json.load(f)
+        _PERU_CACHE_TS = _t.time()
+    return _PERU_CACHE
 
 
 def build_peru_features(match, context):

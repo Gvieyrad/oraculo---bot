@@ -961,6 +961,7 @@ def scan_football(api, state, dry_run=False):
 
                 # Get model prediction
                 model_prob_over = None
+                _peru_ml_ok = False
                 if mp:
                     try:
                         preds = mp.predict_match(home, away)
@@ -968,6 +969,31 @@ def scan_football(api, state, dry_run=False):
                             model_prob_over = preds[mkt_key].get('prob_yes')
                     except Exception:
                         pass
+                # Peru Liga 1: dedicated ML model with altitude + form features
+                if league == 'PER' and mkt_key in ('over25', 'btts_yes', 'btts_no'):
+                    try:
+                        from oraculo_peru import predict_peru, load_peru_matches, TEAM_CITY as _PC
+                        _peru_ctx = load_peru_matches()
+                        _venue = next(
+                            (c for t, c in _PC.items()
+                             if t.lower() in home.lower() or home.lower() in t.lower()), '')
+                        _res = predict_peru(
+                            {'home_team': home, 'away_team': away, 'venue_city': _venue},
+                            _peru_ctx)
+                        if _res:
+                            if mkt_key == 'over25':
+                                _p = _res.get('over25', {}).get('prob_yes')
+                            elif mkt_key == 'btts_yes':
+                                _p = _res.get('btts', {}).get('prob_yes')
+                            else:
+                                _p = _res.get('btts', {}).get('prob_no')
+                            if _p is not None:
+                                model_prob_over = round(float(_p), 4)
+                                _peru_ml_ok = True
+                                log.debug('PER ML %s %s vs %s: p=%.3f',
+                                          mkt_key, home, away, model_prob_over)
+                    except Exception as _e:
+                        log.debug('PER ML failed: %s', _e)
                 # Fallback to Poisson for over25
                 if model_prob_over is None and mkt_key == 'over25' and poisson:
                     try:
@@ -975,24 +1001,24 @@ def scan_football(api, state, dry_run=False):
                         model_prob_over = p_mkts.get('over25', 0.5)
                     except Exception:
                         pass
-                # Peru altitude adjustment: +4-12% over25 probability based on venue elevation
-                # Research: high altitude (3000m+) increases goals ~10-15% (fatigue, lower oxygen)
-                if league == 'PER' and model_prob_over is not None:
+                # Altitude multiplier: only when ML model unavailable (Poisson fallback path)
+                if league == 'PER' and not _peru_ml_ok and model_prob_over is not None:
                     try:
                         from oraculo_peru import TEAM_CITY as _PC, ALTITUDE as _PA
-                        _hcity = next((c for t, c in _PC.items()
-                                       if t.lower() in home.lower() or home.lower() in t.lower()), '')
+                        _hcity = next(
+                            (c for t, c in _PC.items()
+                             if t.lower() in home.lower() or home.lower() in t.lower()), '')
                         _valt = _PA.get(_hcity, 0)
                         _mult = (1.12 if _valt > 3500 else
                                  1.08 if _valt > 2800 else
                                  1.04 if _valt > 2000 else 1.0)
                         if _mult > 1.0:
                             model_prob_over = round(min(model_prob_over * _mult, 0.88), 4)
-                            log.debug('PER altitude @%.0fm (%s): x%.2f -> p=%.3f',
+                            log.debug('PER altitude fallback @%.0fm (%s): x%.2f -> p=%.3f',
                                       _valt, _hcity, _mult, model_prob_over)
                     except Exception:
                         pass
-                # BTTS: P(home>=1)*P(away>=1) — bookmakers less sharp here
+                # BTTS: P(home>=1)*P(away>=1) -- bookmakers less sharp here
                 if model_prob_over is None and mkt_key in ('btts_yes', 'btts_no') and poisson:
                     try:
                         from math import exp
