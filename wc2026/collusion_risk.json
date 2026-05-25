@@ -1,0 +1,290 @@
+{
+  "A": {
+    "teams": [
+      "Mexico",
+      "South Africa",
+      "Republic of Korea",
+      "Czech Republic"
+    ],
+    "round3_game1": [
+      "Mexico",
+      "Czech Republic"
+    ],
+    "round3_game2": [
+      "South Africa",
+      "Republic of Korea"
+    ],
+    "p_disgrace_setup": 0.0177,
+    "p_draw_t1t2_natural": 0.321,
+    "p_draw_t1t2_adjusted": 0.326,
+    "draw_boost_t1t2": 0.005,
+    "xg_t1t2": [
+      1.05,
+      0.78
+    ]
+  },
+  "B": {
+    "teams": [
+      "Canada",
+      "Bosnia & Herzegovina",
+      "Qatar",
+      "Switzerland"
+    ],
+    "round3_game1": [
+      "Canada",
+      "Switzerland"
+    ],
+    "round3_game2": [
+      "Bosnia & Herzegovina",
+      "Qatar"
+    ],
+    "p_disgrace_setup": 0.0258,
+    "p_draw_t1t2_natural": 0.271,
+    "p_draw_t1t2_adjusted": 0.279,
+    "draw_boost_t1t2": 0.008,
+    "xg_t1t2": [
+      1.43,
+      0.73
+    ]
+  },
+  "C": {
+    "teams": [
+      "Brazil",
+      "Morocco",
+      "Haiti",
+      "Scotland"
+    ],
+    "round3_game1": [
+      "Brazil",
+      "Scotland"
+    ],
+    "round3_game2": [
+      "Morocco",
+      "Haiti"
+    ],
+    "p_disgrace_setup": 0.1218,
+    "p_draw_t1t2_natural": 0.345,
+    "p_draw_t1t2_adjusted": 0.381,
+    "draw_boost_t1t2": 0.036,
+    "xg_t1t2": [
+      0.56,
+      1.0
+    ]
+  },
+  "D": {
+    "teams": [
+      "USA",
+      "Paraguay",
+      "Australia",
+      "Turkey"
+    ],
+    "round3_game1": [
+      "USA",
+      "Turkey"
+    ],
+    "round3_game2": [
+      "Paraguay",
+      "Australia"
+    ],
+    "p_disgrace_setup": 0.0032,
+    "p_draw_t1t2_natural": 0.317,
+    "p_draw_t1t2_adjusted": 0.318,
+    "draw_boost_t1t2": 0.001,
+    "xg_t1t2": [
+      0.98,
+      0.93
+    ]
+  },
+  "E": {
+    "teams": [
+      "Germany",
+      "Curacao",
+      "Ivory Coast",
+      "Ecuador"
+    ],
+    "round3_game1": [
+      "Germany",
+      "Ecuador"
+    ],
+    "round3_game2": [
+      "Curacao",
+      "Ivory Coast"
+    ],
+    "p_disgrace_setup": 0.0031,
+    "p_draw_t1t2_natural": 0.231,
+    "p_draw_t1t2_adjusted": 0.232,
+    "draw_boost_t1t2": 0.001,
+    "xg_t1t2": [
+      1.8,
+      1.18
+    ]
+  },
+  "F": {
+    "teams": [
+      "Netherlands",
+      "Japan",
+      "Sweden",
+      "Tunisia"
+    ],
+    "round3_game1": [
+      "Netherlands",
+      "Tunisia"
+    ],
+    "round3_game2": [
+      "Japan",
+      "Sweden"
+    ],
+    "p_disgrace_setup": 0.1048,
+    "p_draw_t1t2_natural": 0.292,
+    "p_draw_t1t2_adjusted": 0.325,
+    "draw_boost_t1t2": 0.033,
+    "xg_t1t2": [
+      0.93,
+      1.21
+    ]
+  },
+  "G": {
+    "teams": [
+      "Belgium",
+      "Egypt",
+      "Iran",
+      "New Zealand"
+    ],
+    "round3_game1": [
+      "Belgium",
+      "New Zealand"
+    ],
+    "round3_game2": [
+      "Egypt",
+      "Iran"
+    ],
+    "p_disgrace_setup": 0.0226,
+    "p_draw_t1t2_natural": 0.303,
+    "p_draw_t1t2_adjusted": 0.31,
+    "draw_boost_t1t2": 0.007,
+    "xg_t1t2": [
+      1.11,
+      0.94
+    ]
+  },
+  "H": {
+    "teams": [
+      "Spain",
+      "Cape Verde",
+      "Saudi Arabia",
+      "Uruguay"
+    ],
+    "round3_game1": [
+      "Spain",
+      "Uruguay"
+    ],
+    "round3_game2": [
+      "Cape Verde",
+      "Saudi Arabia"
+    ],
+    "p_disgrace_setup": 0.0314,
+    "p_draw_t1t2_natural": 0.211,
+    "p_draw_t1t2_adjusted": 0.222,
+    "draw_boost_t1t2": 0.011,
+    "xg_t1t2": [
+      1.87,
+      0.63
+    ]
+  },
+  "I": {
+    "teams": [
+      "France",
+      "Senegal",
+      "Iraq",
+      "Norway"
+    ],
+    "round3_game1": [
+      "France",
+      "Norway"
+    ],
+    "round3_game2": [
+      "Senegal",
+      "Iraq"
+    ],
+    "p_disgrace_setup": 0.0571,
+    "p_draw_t1t2_natural": 0.292,
+    "p_draw_t1t2_adjusted": 0.31,
+    "draw_boost_t1t2": 0.018,
+    "xg_t1t2": [
+      0.94,
+      1.21
+    ]
+  },
+  "J": {
+    "teams": [
+      "Argentina",
+      "Algeria",
+      "Austria",
+      "Jordan"
+    ],
+    "round3_game1": [
+      "Argentina",
+      "Jordan"
+    ],
+    "round3_game2": [
+      "Algeria",
+      "Austria"
+    ],
+    "p_disgrace_setup": 0.0936,
+    "p_draw_t1t2_natural": 0.307,
+    "p_draw_t1t2_adjusted": 0.336,
+    "draw_boost_t1t2": 0.029,
+    "xg_t1t2": [
+      1.19,
+      0.66
+    ]
+  },
+  "K": {
+    "teams": [
+      "Portugal",
+      "DR Congo",
+      "Uzbekistan",
+      "Colombia"
+    ],
+    "round3_game1": [
+      "Portugal",
+      "Colombia"
+    ],
+    "round3_game2": [
+      "DR Congo",
+      "Uzbekistan"
+    ],
+    "p_disgrace_setup": 0.0204,
+    "p_draw_t1t2_natural": 0.352,
+    "p_draw_t1t2_adjusted": 0.358,
+    "draw_boost_t1t2": 0.006,
+    "xg_t1t2": [
+      0.84,
+      0.76
+    ]
+  },
+  "L": {
+    "teams": [
+      "England",
+      "Croatia",
+      "Ghana",
+      "Panama"
+    ],
+    "round3_game1": [
+      "England",
+      "Panama"
+    ],
+    "round3_game2": [
+      "Croatia",
+      "Ghana"
+    ],
+    "p_disgrace_setup": 0.119,
+    "p_draw_t1t2_natural": 0.314,
+    "p_draw_t1t2_adjusted": 0.351,
+    "draw_boost_t1t2": 0.037,
+    "xg_t1t2": [
+      1.11,
+      0.76
+    ]
+  }
+}

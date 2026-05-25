@@ -981,6 +981,117 @@ def _poisson_over(lam, k_max=10):
     return round(1.0 - p_le, 4)
 
 
+
+# Referee goal-rate cache: comp_key → {ref_name: {ft_goals, h2_goals, n}, _league_ft, _league_h2, ts}
+_REF_GOALS_CACHE = {}
+_REF_GOALS_TTL   = 43200  # 12 hours
+
+
+def _build_referee_goal_stats(comp_key: str) -> dict:
+    """
+    Compute per-referee goals/match stats from football-data.co.uk CSV.
+    Returns dict: {ref_name: {'ft': avg_ft_goals, 'h2': avg_h2_goals, 'n': n_matches},
+                   '_league_ft': float, '_league_h2': float}
+    """
+    import time as _t, csv as _csv, io as _io
+
+    now = _t.time()
+    cached = _REF_GOALS_CACHE.get(comp_key)
+    if cached and now - cached.get('ts', 0) < _REF_GOALS_TTL:
+        return cached
+
+    suffixes = _LEAGUE_CSV_SUFFIXES.get(comp_key, ())
+    rows = []
+    for suf in suffixes:
+        try:
+            resp = requests.get(_CSV_BASE + suf, timeout=15)
+            resp.raise_for_status()
+            parsed = [r for r in _csv.DictReader(_io.StringIO(resp.text))
+                      if r.get('HomeTeam') and r.get('FTHG') and r.get('Referee')]
+            if len(parsed) >= 15:
+                rows = parsed
+                break
+        except Exception:
+            pass
+
+    result = {'ts': now, '_league_ft': 2.6, '_league_h2': 1.17}
+    if not rows:
+        _REF_GOALS_CACHE[comp_key] = result
+        return result
+
+    ref_stats = {}
+    total_ft = total_h2 = total_n = 0
+    for r in rows:
+        ref = (r.get('Referee') or '').strip()
+        if not ref:
+            continue
+        try:
+            fthg = float(r.get('FTHG') or 0)
+            ftag = float(r.get('FTAG') or 0)
+            hthg = float(r.get('HTHG') or fthg / 2)
+            htag = float(r.get('HTAG') or ftag / 2)
+        except (ValueError, TypeError):
+            continue
+        ft_goals = fthg + ftag
+        h2_goals = (fthg - hthg) + (ftag - htag)
+        ref_l = ref.lower()
+        if ref_l not in ref_stats:
+            ref_stats[ref_l] = {'ft_sum': 0.0, 'h2_sum': 0.0, 'n': 0}
+        ref_stats[ref_l]['ft_sum'] += ft_goals
+        ref_stats[ref_l]['h2_sum'] += h2_goals
+        ref_stats[ref_l]['n'] += 1
+        total_ft += ft_goals
+        total_h2 += h2_goals
+        total_n  += 1
+
+    if total_n > 0:
+        result['_league_ft'] = round(total_ft / total_n, 3)
+        result['_league_h2'] = round(total_h2 / total_n, 3)
+    for ref_l, st in ref_stats.items():
+        if st['n'] >= 5:
+            result[ref_l] = {
+                'ft':  round(st['ft_sum'] / st['n'], 3),
+                'h2':  round(st['h2_sum'] / st['n'], 3),
+                'n':   st['n'],
+            }
+
+    _REF_GOALS_CACHE[comp_key] = result
+    log.debug('Referee goal stats: %d refs for %s | lg_ft=%.2f lg_h2=%.2f',
+              len(ref_stats), comp_key, result['_league_ft'], result['_league_h2'])
+    return result
+
+
+def _get_ref_goals_mult(referee: str, comp_key: str, period: str = 'ft') -> float:
+    """
+    Return a goals multiplier for xg adjustment based on referee history.
+    period: 'ft' (full-time) or 'h2' (second-half)
+    Multiplier = ref_avg / league_avg, capped to [0.88, 1.12].
+    Returns 1.0 if referee unknown or insufficient data.
+    """
+    if not referee:
+        return 1.0
+    stats = _build_referee_goal_stats(comp_key)
+    ref_l = referee.lower()
+    # Fuzzy match: try substring
+    ref_key = None
+    for key in stats:
+        if key.startswith('_'):
+            continue
+        if key in ref_l or ref_l in key or any(w in ref_l for w in key.split() if len(w) > 3):
+            ref_key = key
+            break
+    if not ref_key:
+        return 1.0
+    ref_data = stats.get(ref_key, {})
+    if ref_data.get('n', 0) < 5:
+        return 1.0
+    league_avg = stats.get('_league_' + period, 0)
+    ref_avg    = ref_data.get(period, 0)
+    if not league_avg:
+        return 1.0
+    mult = ref_avg / league_avg
+    return round(min(max(mult, 0.88), 1.12), 4)
+
 def scan_soccer_goals(api, state, comp_keys=None, dry_run=False,
                       min_edge=0.06, min_conf=0.58):
     """
@@ -1014,8 +1125,42 @@ def scan_soccer_goals(api, state, comp_keys=None, dry_run=False,
             if not home or not away:
                 continue
 
-            # xG: prefer CSV form, fallback to odds proxy
-            if csv_form:
+            # Referee goal-rate multiplier (improves xg calibration)
+            _league_code = CB_TO_LEAGUE.get(comp_key, '_')
+            _referee = _fetch_referee(home, away, _league_code) or ''
+            _ref_mult_ft = _get_ref_goals_mult(_referee, comp_key, 'ft')
+            _ref_mult_h2 = _get_ref_goals_mult(_referee, comp_key, 'h2')
+
+            # xG: WC 2026 Dixon-Coles model → CSV form → odds proxy
+            if comp_key == 'soccer-international-world-cup':
+                # Use Dixon-Coles + ELO international model (Phase 2)
+                try:
+                    import sys as _sys
+                    if '/home/noc/oraculo_v2' not in _sys.path:
+                        _sys.path.insert(0, '/home/noc/oraculo_v2')
+                    import oraculo_wc_model as _wc_m
+                    home_xg, away_xg, _h_concerns, _a_concerns = _wc_m.get_player_adjusted_xg(home, away)
+                    trust = 0.9   # DC+ELO model on 5y international results
+                    n_samp = 50   # treated as high-sample source
+                    if _h_concerns or _a_concerns:
+                        log.info('WC [intel] %s vs %s concerns: H=%s A=%s xG %.2f-%.2f',
+                                 home, away, _h_concerns, _a_concerns, home_xg, away_xg)
+                    # Collusion boost: Group-3 simultaneous final games
+                    # When setup materialises, under-probability increases significantly
+                    _collusion_boost = _wc_m.collusion_draw_boost(home, away)
+                    if _collusion_boost > 0.05:
+                        # Reduce total_xg proportionally to collusion draw boost
+                        # More draws → fewer goals → under more likely
+                        # A +12% draw boost ~ -0.25 expected goals in total
+                        _xg_reduction = _collusion_boost * 2.0  # empirical scale
+                        home_xg = max(home_xg * (1.0 - _xg_reduction * 0.5), 0.5)
+                        away_xg = max(away_xg * (1.0 - _xg_reduction * 0.5), 0.5)
+                        log.info("WC [collusion-%s-vs-%s]: boost=+%.1f%% xG %.2f-%.2f",
+                                 home, away, _collusion_boost*100, home_xg, away_xg)
+                except Exception as _wc_e:
+                    log.warning('WC DC model failed %s vs %s: %s', home, away, _wc_e)
+                    home_xg = 1.2; away_xg = 1.1; trust = 0.4; n_samp = 0
+            elif csv_form:
                 home_xg, away_xg, n_samp = _xg_from_csv(home, away, csv_form)
                 # Blend with base if thin sample (< 3 home/away games each)
                 trust = min(1.0, n_samp / 6.0)
@@ -1027,8 +1172,8 @@ def scan_soccer_goals(api, state, comp_keys=None, dry_run=False,
                 trust = 0.5  # less trust in odds proxy
                 n_samp = 0
 
-            total_xg = home_xg + away_xg
-            xg_2h    = total_xg * 0.45  # 2H is ~45% of total goals
+            total_xg = (home_xg + away_xg) * _ref_mult_ft
+            xg_2h    = total_xg * 0.45 * (_ref_mult_h2 / max(_ref_mult_ft, 0.01))
 
             # Poisson probs — blend model with league prior
             p_o25_m  = _poisson_over(total_xg, k_max=3)
@@ -1048,8 +1193,9 @@ def scan_soccer_goals(api, state, comp_keys=None, dry_run=False,
             match_s = '{} vs {}'.format(home, away)
 
             # Market candidates: (mkt_key, period_label, line, prob_over, prob_under, min_odds)
+            # FT O/U BLOCKED: N=1 real bet (LOSS, xG 2.1) — insufficient data to calibrate FT model
+            # Revisit when N>=10 FT bets resolved. Only 2H markets active.
             _candidates = [
-                ('soccer.total_goals',                    'FT',  2.5, p_o25,    p_u25_ft, 1.50),
                 ('soccer.total_goals_period_second_half', '2H',  2.5, p_o25_2h, p_u25_2h, 1.25),
                 ('soccer.total_goals_period_second_half', '2H',  1.5, None,     p_u15_2h, 1.15),
             ]
@@ -1096,6 +1242,8 @@ def scan_soccer_goals(api, state, comp_keys=None, dry_run=False,
                         picks.append({
                             'match':       match_s,
                             'league':      comp_key,
+                            '_referee':    _referee,
+                            '_ref_mult':   _ref_mult_ft,
                             'event_id':    eid,
                             'market_url':  murl,
                             'price':       price,
@@ -1110,7 +1258,93 @@ def scan_soccer_goals(api, state, comp_keys=None, dry_run=False,
                             '_xg_away':    round(away_xg, 2),
                             '_csv_form':   bool(csv_form),
                             '_n_samp':     n_samp,
+                            'cutoff_time': ev.get('cutoffTime', ''),
                         })
+
+    # ── WC 2026 1X2 market scanning ──────────────────────────────────────────
+    # Uses penaltyblog DC model probs; only for WC competition key
+    _WC_KEY = 'soccer-international-world-cup'
+    if _WC_KEY in (comp_keys or []):
+        try:
+            import sys as _sys2
+            if '/home/noc/oraculo_v2' not in _sys2.path:
+                _sys2.path.insert(0, '/home/noc/oraculo_v2')
+            if '/home/noc/.local/lib/python3.12/site-packages' not in _sys2.path:
+                _sys2.path.insert(0, '/home/noc/.local/lib/python3.12/site-packages')
+            import oraculo_wc_model as _wc_1x2
+        except Exception as _e:
+            _wc_1x2 = None
+            log.warning('WC 1X2: could not import model: %s', _e)
+
+        if _wc_1x2:
+            # Re-fetch WC events for 1X2 scan
+            _wc_evts = api.get_odds(_WC_KEY) or []
+            for _ev in (_wc_evts or []):
+                if not _ev or _ev.get('type') == 'EVENT_TYPE_OUTRIGHT':
+                    continue
+                _h = (_ev.get('home') or {}).get('name', '')
+                _a = (_ev.get('away') or {}).get('name', '')
+                if not _h or not _a:
+                    continue
+                _mkts = _ev.get('markets', {})
+                _ml = _mkts.get('soccer.match_odds', {})
+                if not _ml:
+                    continue
+                # Get model probabilities
+                try:
+                    _res = _wc_1x2.predict_match(_h, _a, neutral=True)
+                    _ph_m = _res['p_home']
+                    _pd_m = _res['p_draw']
+                    _pa_m = _res['p_away']
+                except Exception as _e2:
+                    log.debug('WC 1X2 predict failed %s vs %s: %s', _h, _a, _e2)
+                    continue
+
+                _match_s_1x2 = '{} vs {}'.format(_h, _a)
+                _eid_1x2 = str(_ev.get('id', ''))
+
+                for _sv_k, _sv_v in _ml.get('submarkets', {}).items():
+                    for _sel in _sv_v.get('selections', []):
+                        if _sel.get('status') not in ('SELECTION_ENABLED', None, ''):
+                            continue
+                        _price = float(_sel.get('price', 0) or 0)
+                        _murl  = _sel.get('marketUrl', '')
+                        _oc    = _sel.get('outcome', '')
+                        if _price < 1.20 or not _murl or _oc not in ('home', 'draw', 'away'):
+                            continue
+
+                        _p_model = {'home': _ph_m, 'draw': _pd_m, 'away': _pa_m}.get(_oc, 0)
+                        _implied = 1.0 / _price
+                        _edge_1x2 = _p_model - _implied
+                        # Higher bar for 1X2: need 8% edge (more uncertain market)
+                        _min_edge_1x2 = max(min_edge, 0.08)
+
+                        if _edge_1x2 < _min_edge_1x2 or _edge_1x2 > 0.35:
+                            continue
+                        if _p_model < 0.45:  # skip long shots (<45% confidence)
+                            continue
+
+                        picks.append({
+                            'match':         _match_s_1x2,
+                            'league':        _WC_KEY,
+                            '_referee':      '',
+                            '_ref_mult':     1.0,
+                            'event_id':      _eid_1x2,
+                            'market_url':    _murl,
+                            'price':         _price,
+                            'label':         'WC 1X2 {} (DC {:.0f}%)'.format(_oc.title(), _p_model*100),
+                            'model_prob':    round(_p_model, 4),
+                            'raw_model_prob': round(_p_model, 4),
+                            'edge':          round(_edge_1x2, 4),
+                            'sport':         'soccer',
+                            'market_type':   'wc_1x2',
+                            '_xg_home':      _res.get('xg_home', 0),
+                            '_xg_away':      _res.get('xg_away', 0),
+                            '_csv_form':     False,
+                            '_n_samp':       50,
+                        })
+            log.info('WC 1X2: %d picks added', sum(1 for p in picks if p.get('market_type') == 'wc_1x2'))
+    # ────────────────────────────────────────────────────────────────────────────
 
     picks.sort(key=lambda p: p['edge'], reverse=True)
     log.info('Soccer goals: %d picks found across %d competitions', len(picks), len(comp_keys))
