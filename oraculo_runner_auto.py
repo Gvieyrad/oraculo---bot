@@ -2099,7 +2099,8 @@ def scan_tennis(api, state, dry_run=False):
                         else:
                             continue
                         _edge = _prob * _price - 1.0
-                        if _edge > MIN_EDGE and _prob > 0.45 and _edge < 0.35:
+                        # Cap odds 2.50: Sibila 22.2% WR -63 on odds>2.50 (9 picks)
+                        if _edge > MIN_EDGE and _prob > 0.45 and _edge < 0.35 and _price <= 2.50:
                             picks.append({
                                 'match': match_s, 'league': comp_key,
                                 'event_id': eid, 'market_url': _murl,
@@ -2139,7 +2140,8 @@ def scan_tennis(api, state, dry_run=False):
                         else:
                             continue
                         _edge = _prob * _price - 1.0
-                        if _edge > MIN_EDGE and 0.50 < _prob < 0.93 and _edge < 0.35:
+                        # Cap odds 1.80: Sibila 46.7% WR -5 on odds>1.79 (15 picks)
+                        if _edge > MIN_EDGE and 0.50 < _prob < 0.93 and _edge < 0.35 and _price <= 1.80:
                             _player = home if _team == 'home' else away
                             picks.append({
                                 'match': match_s, 'league': comp_key,
