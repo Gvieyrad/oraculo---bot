@@ -4841,6 +4841,19 @@ def run_cycle(dry_run=False):
                          and float(p.get('model_prob') or 0) >= 0.55]
             log.info('MLB: %d candidatos totales, %d pasan pre-filtro v5 (prob>=60%%)',
                      len(_all_mlb), len(mlb_picks))
+            # De-correlate: keep best-edge pick per (event_id, market_type)
+            # Prevents Kelly inflation from 4+ correlated F5 picks per game
+            if mlb_picks:
+                _mlb_game_best = {}
+                for _p in mlb_picks:
+                    _k = (_p.get('event_id',''), _p.get('market_type',''))
+                    if _k not in _mlb_game_best or float(_p.get('edge',0)) > float(_mlb_game_best[_k].get('edge',0)):
+                        _mlb_game_best[_k] = _p
+                _n_before_decorr = len(mlb_picks)
+                mlb_picks = list(_mlb_game_best.values())
+                if _n_before_decorr != len(mlb_picks):
+                    log.info('MLB [de-corr]: %d -> %d picks (best-edge per game/market)',
+                             _n_before_decorr, len(mlb_picks))
             # Dead-man switch: reset AutoTune si 3+ ciclos sin picks MLB
             if len(mlb_picks) == 0:
                 state['_mlb_zero_cycles'] = state.get('_mlb_zero_cycles', 0) + 1
