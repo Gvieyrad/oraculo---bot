@@ -521,6 +521,10 @@ def scan_mlb(api, state, elo=None, dry_run=False, min_edge=0.06, min_conf=0.50):
                 implied = 1.0 / price
                 edge    = prob - implied
 
+                # Block F5 Over dome: Sibila WR=0% on O4-O5.5 in domes (outdoor 100% WR)
+                if outcome == 'over' and _w_info == 'dome':
+                    log.debug('  MLB F5 Over dome blocked: model unreliable in closed stadiums')
+                    continue
                 if edge > min_edge and prob >= conf_thr and edge < 0.35:
                     picks.append({
                         'match':       f'{cb_home} vs {cb_away}',

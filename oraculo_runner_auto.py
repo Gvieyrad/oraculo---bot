@@ -1790,6 +1790,14 @@ def scan_tennis(api, state, dry_run=False):
                         log.debug('  [SKIP] Insufficient Elo data: %s (%d) vs %s (%d)',
                                   player, player_matches, opp, opponent_matches)
                         continue
+                    # Block ATP1000: Sibila 43.4% WR -$186 (83 picks) — model loses on big tournaments
+                    if 'madrid' in comp_key or 'rome' in comp_key or 'atp1000' in comp_key or 'masters' in comp_key:
+                        log.info('  [SKIP] ATP1000 blocked (%s): WR=43.4%% Sibila', comp_key[:35])
+                        continue
+                    # Cap odds 2.10: Sibila 29.6% WR -$199 on odds>2.10 (54 picks)
+                    if float(price) > 2.10:
+                        log.info('  [SKIP] odds cap @%.2f>2.10 (WR=29.6%% Sibila)', float(price))
+                        continue
                     if edge > MIN_EDGE and _edge_va > 0 and prob > TENNIS_MIN_CONF and edge <= TENNIS_MAX_EDGE and prob < 0.92:
                         picks.append({
                             'match': f'{home} vs {away}', 'league': comp_key,
