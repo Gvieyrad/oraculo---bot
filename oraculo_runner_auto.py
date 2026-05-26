@@ -1118,7 +1118,7 @@ def scan_football(api, state, dry_run=False):
         }
         INTL_MARKETS = ['ft_result', 'over25']
         BLACKLIST_TEAMS = ['Ukraine']  # Skip teams with war/displacement context
-        cutoff_intl = (datetime.now(timezone.utc) + timedelta(hours=96)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        cutoff_intl = (datetime.now(timezone.utc) + timedelta(hours=36)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
         for intl_league, comp_key in INTL_COMPS.items():
             try:
