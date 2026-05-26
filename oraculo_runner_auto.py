@@ -1605,7 +1605,8 @@ def scan_tennis(api, state, dry_run=False):
                             and 'simulated' not in ck
                             and 'srl' not in ck
                             and 'itf' not in ck           # low-quality Elo data
-                            and 'international' not in ck  # UTR events
+                            and 'international' not in ck  # UTR/team events
+                            and 'utr' not in ck            # UTR events not under international prefix
                             and 'federation' not in ck    # team tennis
                             and 'monte-carlo' not in ck): # RESTRICTED for sharp accounts
                         tennis_comps.append(ck)
@@ -1800,8 +1801,8 @@ def scan_tennis(api, state, dry_run=False):
                         log.debug('  [SKIP] Insufficient Elo data: %s (%d) vs %s (%d)',
                                   player, player_matches, opp, opponent_matches)
                         continue
-                    # Block ATP1000: Sibila 43.4% WR -$186 (83 picks) — model loses on big tournaments
-                    if 'madrid' in comp_key or 'rome' in comp_key or 'atp1000' in comp_key or 'masters' in comp_key:
+                    # Block ATP1000+Hamburg: Sibila — ATP1000 43.4% WR -$186 (83 picks), Hamburg 54.5% WR -$198 (22 picks)
+                    if 'madrid' in comp_key or 'rome' in comp_key or 'hamburg' in comp_key or 'atp1000' in comp_key or 'masters' in comp_key:
                         log.info('  [SKIP] ATP1000 blocked (%s): WR=43.4%% Sibila', comp_key[:35])
                         continue
                     # Cap odds 2.10: Sibila 29.6% WR -$199 on odds>2.10 (54 picks)
