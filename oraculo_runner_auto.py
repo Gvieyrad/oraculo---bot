@@ -5084,7 +5084,7 @@ def run_cycle(dry_run=False):
         _goals_comps = [c for c in (
             state.get('_soccer_comps') or [
                 'soccer-england-premier-league', 'soccer-germany-bundesliga',
-                # 'soccer-italy-serie-a',  # DISABLED: -3.4% ROI Sibila (41 bets)
+                'soccer-italy-serie-a',  # re-enabled 2026-05-26: shadow WR 80% (10 clean picks); prev -3.4% was pre-dedup contamination
                 'soccer-spain-laliga',
                 'soccer-france-ligue-1', 'soccer-netherlands-eredivisie',
                 'soccer-portugal-primeira-liga', 'soccer-international-clubs-uefa-champions-league',

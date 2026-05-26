@@ -1223,6 +1223,9 @@ def scan_soccer_goals(api, state, comp_keys=None, dry_run=False,
                         # Under 1.5 2H: only under side
                         if _tgt_line == 1.5 and outcome == 'over':
                             continue
+                        # Block PL Under 1.5: Sibila WR 16.7% vs 84.6% elsewhere (xG underestimates PL 2H scoring)
+                        if _tgt_line == 1.5 and 'premier' in comp_key:
+                            continue
 
                         prob = _p_under if outcome == 'under' else _p_over
                         if prob is None:
