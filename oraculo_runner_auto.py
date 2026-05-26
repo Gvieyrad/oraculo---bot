@@ -5023,11 +5023,12 @@ def run_cycle(dry_run=False):
                         log.info('MLB [over-odds-skip @%.2f<1.75]: odds insuficientes', _odds)
                         continue
 
-                # Filtro 3 v5: UNDER full-game — DESACTIVADO (ROI -10.6% OOS, 1218 juegos)
-                # F5 Under permitido: mlb_f5_total WR=58% ROI=+10.8% en Sibila (84 bets)
+                # Filtro 3 v5: UNDER desactivado (full-game Y F5)
+                # F5 Under bloqueado 2026-05-26: Sibila limpia WR=40.3% ROI=-24.1% (77 picks, 20 juegos)
+                # Dato anterior 58% WR era pre-dedup — contaminado
                 _mkt_type = str(_mp.get('market_type',''))
-                if _is_under and not _is_ml and _mkt_type != 'mlb_f5_total':
-                    log.info('MLB [under-disabled]: Under full-game desactivado en v5 (ROI -10.6%% OOS)')
+                if _is_under and not _is_ml:
+                    log.info('MLB [under-disabled]: Under full-game y F5 desactivado (ROI -24.1%% Sibila limpia)')
                     continue
 
                 # Filtro 4: solo F5 — full-game ML/total desactivado
