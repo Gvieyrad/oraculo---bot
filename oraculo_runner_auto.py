@@ -5147,23 +5147,23 @@ def run_cycle(dry_run=False):
                            or (p.get('league') in _CONMEBOL_COMPS
                                and p.get('edge', 0) >= 0.14
                                and p.get('conf', 0) >= 0.72)]
-                # Skip picks with kickoff >6h away (prevents capital lock-up on pre-match)
+                # Skip picks with kickoff >48h away (allows next-day matches, prevents weeks-long capital lock-up)
                 from datetime import datetime as _dt, timezone as _tz, timedelta as _td
                 _now_utc = _dt.now(_tz.utc)
-                def _kicks_within_6h(p):
+                def _kicks_within_48h(p):
                     ct = p.get('cutoff_time', '')
                     if not ct:
                         return True
                     try:
                         _ko = _dt.fromisoformat(ct.replace('Z', '+00:00'))
                         _delta = (_ko - _now_utc).total_seconds()
-                        if _delta > 6 * 3600:
+                        if _delta > 48 * 3600:
                             log.debug('[Soccer Goals] skip far-future match (%.0fh): %s', _delta/3600, p.get('match','?'))
                             return False
                         return True
                     except Exception:
                         return True
-                _gp_csv = [p for p in _gp_csv if _kicks_within_6h(p)]
+                _gp_csv = [p for p in _gp_csv if _kicks_within_48h(p)]
                 if _gp_csv:
                     global MAX_TOTAL_EXPOSURE
                     _saved_exp = MAX_TOTAL_EXPOSURE
