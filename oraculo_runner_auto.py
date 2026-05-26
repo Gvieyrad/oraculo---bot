@@ -1613,6 +1613,10 @@ def scan_tennis(api, state, dry_run=False):
         pass  # Fall back to hardcoded list
 
     for comp_key in tennis_comps:
+        # Block WTA: Sibila 62.1% WR break-even (29 picks) — shadow-only until 50+ clean picks
+        if 'wta' in comp_key:
+            log.debug('  [SKIP] WTA blocked (shadow-only): %s', comp_key)
+            continue
         events = api.get_odds(comp_key)
         if not events:
             continue
