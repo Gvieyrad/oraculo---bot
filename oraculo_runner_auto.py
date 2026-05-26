@@ -1363,6 +1363,19 @@ def scan_tennis(api, state, dry_run=False):
     log.info('=== SCANNING TENNIS MARKETS ===')
     picks = []
 
+    # Load dynamic filters from oraculo_filters.json
+    try:
+        import json as _json
+        _fpath = os.path.join(SCRIPT_DIR, 'oraculo_filters.json')
+        with open(_fpath) as _ff:
+            _dyn_filters = _json.load(_ff)
+        _dyn_tennis_blocks = set(_dyn_filters.get('tennis', {}).get('blocked_comp_substrings', []))
+        _dyn_tennis_odds  = _dyn_filters.get('tennis', {}).get('max_odds', {})
+    except Exception as _fe:
+        log.warning('Could not load oraculo_filters.json: %s', _fe)
+        _dyn_tennis_blocks = set()
+        _dyn_tennis_odds   = {}
+
     # Surface map by competition key substring
     COMP_SURFACE = {
         'monte-carlo': 'clay', 'barcelona': 'clay', 'madrid': 'clay',
@@ -1614,6 +1627,11 @@ def scan_tennis(api, state, dry_run=False):
         pass  # Fall back to hardcoded list
 
     for comp_key in tennis_comps:
+        # Dynamic AutoAnalyzer blocks (from oraculo_filters.json)
+        if any(b in comp_key for b in _dyn_tennis_blocks if b != 'wta'):
+            log.info('  [SKIP] AutoAnalyzer block (%s): %s', 
+                     next(b for b in _dyn_tennis_blocks if b in comp_key and b != 'wta'), comp_key[:40])
+            continue
         # Block WTA: Sibila 62.1% WR break-even (29 picks) — shadow-only until 50+ clean picks
         if 'wta' in comp_key:
             log.debug('  [SKIP] WTA blocked (shadow-only): %s', comp_key)
@@ -1806,7 +1824,8 @@ def scan_tennis(api, state, dry_run=False):
                         log.info('  [SKIP] ATP1000 blocked (%s): WR=43.4%% Sibila', comp_key[:35])
                         continue
                     # Cap odds 2.10: Sibila 29.6% WR -$199 on odds>2.10 (54 picks)
-                    if float(price) > 2.10:
+                    _max_odds_winner = _dyn_tennis_odds.get('tennis_winner', 2.10)
+                    if float(price) > _max_odds_winner:
                         log.info('  [SKIP] odds cap @%.2f>2.10 (WR=29.6%% Sibila)', float(price))
                         continue
                     if edge > MIN_EDGE and _edge_va > 0 and prob > TENNIS_MIN_CONF and edge <= TENNIS_MAX_EDGE and prob < 0.92:

@@ -1,0 +1,53 @@
+{
+  "_meta": {
+    "version": 1,
+    "description": "Dynamic filter config for Oraculo. Managed by oraculo_auto_analyzer.py. Do not edit by hand.",
+    "last_updated": "2026-05-26",
+    "updated_by": "manual_init"
+  },
+  "tennis": {
+    "blocked_comp_substrings": [
+      "wta"
+    ],
+    "blocked_comp_substrings_reason": {
+      "wta": "Sibila 62.1% WR break-even (29 picks) — shadow-only until 50+ clean picks"
+    },
+    "max_odds": {
+      "tennis_winner": 2.1,
+      "tennis_winner_and_total": 2.5,
+      "tennis_team_win_set": 1.8
+    },
+    "max_odds_reason": {
+      "tennis_winner": "Sibila 29.6% WR -$199 on odds>2.10 (54 picks)",
+      "tennis_winner_and_total": "Sibila 22.2% WR -$163 on odds>2.50 (9 picks)",
+      "tennis_team_win_set": "Sibila 46.7% WR -$75 on odds>1.79 (15 picks)"
+    }
+  },
+  "baseball": {
+    "blocked_markets": [
+      "mlb_full_ml",
+      "mlb_full_total"
+    ],
+    "blocked_markets_reason": {
+      "mlb_full_ml": "ROI -10.3% real / -6.2% Sibila (91 bets)",
+      "mlb_full_total": "ROI -10.3% real / -6.2% Sibila"
+    },
+    "blocked_conditions": [
+      "mlb_f5_total_under",
+      "mlb_f5_over_dome"
+    ],
+    "blocked_conditions_reason": {
+      "mlb_f5_total_under": "Sibila WR=40.3% ROI=-24.1% (77 picks)",
+      "mlb_f5_over_dome": "Sibila WR=0% in domes"
+    }
+  },
+  "soccer": {
+    "blocked_league_line": [],
+    "blocked_league_line_reason": {}
+  },
+  "auto_analyzer": {
+    "min_picks_to_block": 30,
+    "p_value_threshold": 0.05,
+    "auto_blocked": []
+  }
+}
