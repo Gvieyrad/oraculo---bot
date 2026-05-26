@@ -1617,6 +1617,12 @@ def scan_tennis(api, state, dry_run=False):
         if not events:
             continue
         log.info('  %s: %d events', comp_key, len(events))
+        # Record odds snapshots for CLV tracking
+        try:
+            from oraculo_odds_monitor import record_odds as _rec_tn
+            _rec_tn(api, events)
+        except Exception:
+            pass
 
         # Filter: only events within 48h
         cutoff_limit_tn = (datetime.now(timezone.utc) + timedelta(hours=168)).strftime('%Y-%m-%dT%H:%M:%SZ')

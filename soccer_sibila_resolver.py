@@ -220,8 +220,10 @@ def resolve_all_pending(dry_run=False):
         side    = str(col(row, 'side')    or '')
         league  = str(col(row, 'league')  or '')
         ts      = str(col(row, 'ts')      or '')[:10]
-        odds    = float(col(row, 'odds')  or 1.5)
-        stake   = float(col(row, 'shadow_stake') or col(row, 'stake') or 10.0)
+        odds       = float(col(row, 'odds')  or 1.5)
+        stake      = float(col(row, 'shadow_stake') or col(row, 'stake') or 10.0)
+        event_id   = str(col(row, 'event_id') or '')
+        market_url = str(col(row, 'market_url') or '')
 
         # Parse market
         market_kind, direction, line = _parse_market(side)
@@ -286,16 +288,25 @@ def resolve_all_pending(dry_run=False):
 
         if not dry_run:
             now = datetime.utcnow().isoformat()
-            if has_updated_at:
-                conn.execute(
-                    "UPDATE sibila_picks SET result=?, pnl=?, resolved_ts=? WHERE id=?",
-                    (result, pnl, now, pick_id)
-                )
-            else:
-                conn.execute(
-                    "UPDATE sibila_picks SET result=?, pnl=? WHERE id=?",
-                    (result, pnl, pick_id)
-                )
+            closing_odds = None
+            if event_id and market_url:
+                try:
+                    import sys as _sys, os as _os
+                    _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+                    from oraculo_odds_monitor import get_closing_odds as _gco
+                    closing_odds = _gco(event_id, market_url)
+                except Exception:
+                    pass
+            clv = None
+            if closing_odds and closing_odds > 1 and odds > 1:
+                clv = round(closing_odds / odds - 1.0, 4)
+            conn.execute(
+                "UPDATE sibila_picks "
+                "SET result=?, pnl=?, resolved_ts=?, "
+                "closing_odds=COALESCE(closing_odds,?), clv=COALESCE(clv,?) "
+                "WHERE id=?",
+                (result, pnl, now, closing_odds, clv, pick_id)
+            )
             conn.commit()
             resolved += 1
 
