@@ -5109,7 +5109,7 @@ def run_cycle(dry_run=False):
                 'soccer-international-clubs-copa-sudamericana',
             ]
         ) if 'soccer' in c or 'international' in c]
-        _goal_picks = _scan_goals(api, state, comp_keys=_goals_comps, dry_run=dry_run, min_edge=0.12, min_conf=0.68)
+        _goal_picks = _scan_goals(api, state, comp_keys=_goals_comps, dry_run=dry_run, min_edge=0.12, min_conf=0.70)
         if _goal_picks:
             log.info('[Soccer Goals] %d picks found', len(_goal_picks))
             if _SIBILA_ENABLED:
