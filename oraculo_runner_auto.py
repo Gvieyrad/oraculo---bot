@@ -52,6 +52,7 @@ SCAN_INTERVAL = 3600        # 1 hour between market scans
 RESULT_INTERVAL = 1800      # 30 min between result checks
 MIN_EDGE = 0.08             # 8% minimum edge — subido de 5%: modelo sobre-estima edge (13.6% declarado vs -7% ROI real)
 MIN_CONF = 0.60             # 60% minimum confidence
+TENNIS_MIN_CONF = 0.72       # 2026-05-26: all tennis segments negative below 72%; raised from 60%
 MAX_DAILY_PCT = 0.40        # 40% of bankroll per day
 MAX_PER_BET = 0.05          # 5% per bet
 KELLY_FRAC = 0.25           # Quarter Kelly (global fallback)
@@ -1789,7 +1790,7 @@ def scan_tennis(api, state, dry_run=False):
                         log.debug('  [SKIP] Insufficient Elo data: %s (%d) vs %s (%d)',
                                   player, player_matches, opp, opponent_matches)
                         continue
-                    if edge > MIN_EDGE and _edge_va > 0 and prob > MIN_CONF and edge <= TENNIS_MAX_EDGE and prob < 0.92:
+                    if edge > MIN_EDGE and _edge_va > 0 and prob > TENNIS_MIN_CONF and edge <= TENNIS_MAX_EDGE and prob < 0.92:
                         picks.append({
                             'match': f'{home} vs {away}', 'league': comp_key,
                             'event_id': eid, 'market_url': murl,
@@ -2011,7 +2012,8 @@ def scan_tennis(api, state, dry_run=False):
                 mkts = ev.get('markets', {})
 
                 # 2.1: tennis.exact_sets
-                es_mkt = mkts.get('tennis.exact_sets', {})
+                # DISABLED 2026-05-26: ROI -64% on exact_sets market
+                es_mkt = {}  # disabled
                 for _sub_k, _sub_v in es_mkt.get('submarkets', {}).items():
                     for sel in (_sub_v.get('selections') or []):
                         if sel.get('status') not in ('SELECTION_ENABLED', None, ''):
@@ -3079,6 +3081,19 @@ def check_results(api, state):
                  settled, state['daily_pnl'], state['bankroll'])
     else:
         log.info('No new settlements')
+    # CLV semaphore check (every cycle)
+    try:
+        from oraculo_sibila import clv_report as _clv_report
+        _clv = _clv_report(window=20, min_picks=5)
+        for _alert in _clv.get("alerts", []):
+            log.warning("[CLV ALERT] %s — CLV below -3%%, model may have lost edge", _alert)
+            try:
+                _send_telegram("*[CLV ALERTA]* " + _alert + " — revisar calibracion del scanner")
+            except Exception:
+                pass
+    except Exception as _e:
+        log.debug("CLV report error: %s", _e)
+
         # Update CLV for settled bets (non-blocking)
         if _CLV_ENABLED:
             try:

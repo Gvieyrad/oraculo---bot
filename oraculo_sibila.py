@@ -727,6 +727,51 @@ def format_telegram(days: int = 30) -> str:
     return '\n'.join(lines)
 
 
+
+
+def clv_report(window: int = 20, min_picks: int = 5) -> dict:
+    """
+    CLV semaphore: returns CLV avg per market/sport over last `window` resolved picks.
+    Status: green (>+3%), yellow (-3% to +3%), red (<-3%).
+    """
+    conn = _get_conn()
+    conn.row_factory = __import__("sqlite3").Row
+    rows = conn.execute("""
+        SELECT COALESCE(sport,"?") as sp,
+               COALESCE(market,"?") as mkt,
+               COUNT(*) as n,
+               ROUND(AVG(clv)*100, 2) as avg_clv,
+               ROUND(AVG(edge)*100, 1) as avg_edge,
+               SUM(CASE WHEN result="WIN" THEN 1 ELSE 0 END) as wins,
+               ROUND(SUM(pnl)/NULLIF(SUM(ABS(shadow_stake)),0)*100,1) as roi
+        FROM (
+            SELECT * FROM sibila_picks
+            WHERE clv IS NOT NULL AND result IS NOT NULL AND is_duplicate = 0
+            ORDER BY ts DESC LIMIT ?
+        ) sub
+        GROUP BY sp, mkt
+        HAVING n >= ?
+        ORDER BY n DESC
+    """, (window * 10, min_picks)).fetchall()
+    conn.close()
+
+    result = []
+    alerts = []
+    for r in rows:
+        clv = r["avg_clv"]
+        status = "green" if clv and clv > 3 else ("red" if clv and clv < -3 else "yellow")
+        entry = {
+            "sport": r["sp"], "market": r["mkt"], "n": r["n"],
+            "avg_clv": clv, "avg_edge": r["avg_edge"],
+            "wr": round(r["wins"]/r["n"]*100,1) if r["n"] else 0,
+            "roi": r["roi"], "status": status,
+        }
+        result.append(entry)
+        if status == "red":
+            alerts.append("%s/%s CLV=%+.1f%% (n=%d)" % (r["sp"], r["mkt"], clv or 0, r["n"]))
+
+    return {"scanners": result, "alerts": alerts, "window": window}
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)
     s = get_stats(days=90)
