@@ -194,6 +194,87 @@ def _eval_result(row, market_kind, direction, line):
 
     return None, None
 
+
+# --- WC resolver via ESPN (no API key needed) ----------------------------
+_ESPN_CACHE = {}
+
+def _fetch_espn_wc_results(date_str):
+    if date_str in _ESPN_CACHE:
+        return _ESPN_CACHE[date_str]
+    date_compact = date_str.replace("-", "")
+    try:
+        r = requests.get(
+            "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/scoreboard",
+            params={"dates": date_compact}, timeout=15)
+        r.raise_for_status()
+        events = r.json().get("events", [])
+    except Exception as e:
+        log.debug("ESPN scoreboard failed %s: %s", date_str, e)
+        _ESPN_CACHE[date_str] = []
+        return []
+    results = []
+    for ev in events:
+        comp = ev.get("competitions", [{}])[0]
+        status_name = comp.get("status", {}).get("type", {}).get("name", "")
+        if status_name not in ("STATUS_FULL_TIME", "STATUS_FINAL"):
+            continue
+        competitors = comp.get("competitors", [])
+        if len(competitors) < 2:
+            continue
+        home_c = next((c for c in competitors if c.get("homeAway") == "home"), competitors[0])
+        away_c = next((c for c in competitors if c.get("homeAway") == "away"), competitors[1])
+        try:
+            ft_home = int(float(home_c.get("score", 0) or 0))
+            ft_away = int(float(away_c.get("score", 0) or 0))
+        except Exception:
+            continue
+        ht_home = ht_away = 0
+        ev_id = ev.get("id", "")
+        if ev_id:
+            try:
+                r2 = requests.get(
+                    "https://site.api.espn.com/apis/site/v2/sports/soccer/fifa.world/summary",
+                    params={"event": ev_id}, timeout=10)
+                if r2.ok:
+                    hcomps = (r2.json().get("header", {})
+                              .get("competitions", [{}])[0]
+                              .get("competitors", []))
+                    for hc in hcomps:
+                        ls = hc.get("linescores", [])
+                        ha = hc.get("homeAway", "")
+                        if ls:
+                            try:
+                                p1 = int(float(ls[0].get("displayValue", 0) or 0))
+                            except Exception:
+                                p1 = 0
+                            if ha == "home":
+                                ht_home = p1
+                            elif ha == "away":
+                                ht_away = p1
+            except Exception as e2:
+                log.debug("ESPN summary failed %s: %s", ev_id, e2)
+        results.append({
+            "home": home_c.get("team", {}).get("displayName", ""),
+            "away": away_c.get("team", {}).get("displayName", ""),
+            "fthg": ft_home, "ftag": ft_away,
+            "hthg": ht_home, "htag": ht_away,
+        })
+    _ESPN_CACHE[date_str] = results
+    return results
+
+
+def _find_in_espn_wc(home, away, date_str):
+    from datetime import datetime as _dt, timedelta as _td
+    try:
+        tgt = _dt.strptime(date_str[:10], "%Y-%m-%d")
+    except Exception:
+        return None
+    for delta in [0, 1, -1]:
+        check = (tgt + _td(days=delta)).strftime("%Y-%m-%d")
+        for m in _fetch_espn_wc_results(check):
+            if _sim(home, m["home"]) >= 0.5 and _sim(away, m["away"]) >= 0.5:
+                return m
+    return None
 def resolve_all_pending(dry_run=False):
     conn = sqlite3.connect(SIBILA_DB)
     cols = [r[1] for r in conn.execute('PRAGMA table_info(sibila_picks)').fetchall()]
@@ -250,6 +331,50 @@ def resolve_all_pending(dry_run=False):
         if not away:
             log.warning(f'  Cannot parse teams: {match}')
             not_found += 1
+            continue
+
+        # World Cup: resolve via ESPN (football-data.co.uk has no WC data)
+        if 'world-cup' in league or 'international-world-cup' in league:
+            espn_m = _find_in_espn_wc(home, away, ts)
+            if espn_m is None:
+                log.info(f'  WC pending (no result yet): {home} vs {away} ({ts})')
+                not_found += 1
+                continue
+            wc_row = {
+                'FTHG': str(espn_m['fthg']), 'FTAG': str(espn_m['ftag']),
+                'HTHG': str(espn_m['hthg']), 'HTAG': str(espn_m['htag']),
+            }
+            won, detail = _eval_result(wc_row, market_kind, direction, line)
+            if won is None:
+                log.warning(f'  WC no eval for {market_kind}: {home} vs {away}')
+                not_found += 1
+                continue
+            result = 'WIN' if won else 'LOSS'
+            pnl    = (odds - 1) * stake if won else -stake
+            log.info(f'  WC {result} | {home} vs {away} | {side[:30]} | {detail} | ${pnl:+.2f}')
+            if not dry_run:
+                now = datetime.utcnow().isoformat()
+                closing_odds = None
+                if event_id and market_url:
+                    try:
+                        import sys as _sys, os as _os
+                        _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+                        from oraculo_odds_monitor import get_closing_odds as _gco
+                        closing_odds = _gco(event_id, market_url)
+                    except Exception:
+                        pass
+                clv = None
+                if closing_odds and closing_odds > 1 and odds > 1:
+                    clv = round(closing_odds / odds - 1.0, 4)
+                conn.execute(
+                    'UPDATE sibila_picks '
+                    'SET result=?, pnl=?, resolved_ts=?, '
+                    'closing_odds=COALESCE(closing_odds,?), clv=COALESCE(clv,?) '
+                    'WHERE id=?',
+                    (result, pnl, now, closing_odds, clv, pick_id)
+                )
+                conn.commit()
+                resolved += 1
             continue
 
         urls = _league_urls(league)
