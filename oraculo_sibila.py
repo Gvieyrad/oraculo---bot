@@ -250,6 +250,10 @@ def record_pick(pick: dict, placed: bool = False, real_stake: float = None, bet_
         edge       = float(pick.get('edge') or 0)
         prob_model = float(pick.get('raw_model_prob_uncal') or pick.get('raw_model_prob') or pick.get('model_prob') or 0)
         prob_book  = round(1.0 / odds, 4) if odds > 1 else 0.0
+        # Normalize to vig-adjusted edge so _kelly_stake (prob=1/odds+edge) recovers prob_model correctly.
+        # Scanners using classical Kelly (prob*odds-1) would otherwise inflate shadow stakes.
+        if prob_model > 0 and odds > 1:
+            edge = round(prob_model - 1.0 / odds, 4)
         conf       = float(pick.get('confidence') or prob_model)
         sport      = (pick.get('sport') or 'tennis').lower()
         surface    = (pick.get('surface') or '').lower() or None
