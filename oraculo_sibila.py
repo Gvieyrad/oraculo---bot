@@ -103,6 +103,13 @@ def _init_db():
         conn.execute("INSERT INTO sibila_meta VALUES ('virtual_bankroll', ?)",
                      (str(VIRTUAL_BANKROLL_START),))
     conn.commit()
+    # Schema migration: add event_id + market_url if not present
+    for _col_def in ('event_id TEXT DEFAULT ""',
+                     'market_url TEXT DEFAULT ""'):
+        try:
+            conn.execute('ALTER TABLE sibila_picks ADD COLUMN ' + _col_def)
+        except Exception:
+            pass  # column already exists
     conn.close()
 
 
@@ -306,8 +313,9 @@ def record_pick(pick: dict, placed: bool = False, real_stake: float = None, bet_
                prob_model, prob_book, edge, confidence, odds,
                shadow_stake, shadow_br_before,
                placed, real_stake, bet_id, market_type,
-               realistic_stake, realistic_br_before)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               realistic_stake, realistic_br_before,
+               event_id, market_url)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             datetime.now().isoformat(),
             sport,
@@ -330,6 +338,8 @@ def record_pick(pick: dict, placed: bool = False, real_stake: float = None, bet_
             pick.get('market_type') or '',
             realistic_stake,
             realistic_br_before,
+            pick.get('event_id') or '',
+            pick.get('market_url') or '',
         ))
         conn.commit()
         conn.close()

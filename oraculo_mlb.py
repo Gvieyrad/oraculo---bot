@@ -338,6 +338,13 @@ def scan_mlb(api, state, elo=None, dry_run=False, min_edge=0.06, min_conf=0.50):
         log.info('  MLB: no Cloudbet events')
         return picks
 
+    # Record odds snapshots for CLV tracking (feeds odds_history.db)
+    try:
+        from oraculo_odds_monitor import record_odds as _rec_mlb_odds
+        _rec_mlb_odds(api, cb_events)
+    except Exception:
+        pass
+
     # Ensure OPS data available (fallback if train_mlb_elo used cache path)
     if not getattr(scan_mlb, '_team_ops', None):
         scan_mlb._team_ops = _fetch_team_ops()
