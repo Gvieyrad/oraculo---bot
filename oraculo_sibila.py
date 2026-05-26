@@ -127,7 +127,9 @@ def _kelly_stake(edge, odds, bankroll):
     """Quarter Kelly, capped at MAX_BET_PCT of bankroll."""
     if not edge or edge <= 0 or not odds or odds <= 1:
         return 0.0
-    full_kelly = edge / (odds - 1.0)
+    prob = (1.0 / odds) + edge
+    b = odds - 1.0
+    full_kelly = max((b * prob - (1.0 - prob)) / b, 0.0)
     stake = full_kelly * KELLY_FRAC * bankroll
     return round(min(stake, MAX_BET_PCT * bankroll), 2)
 
@@ -212,6 +214,8 @@ def _classify_level(pick):
 def _classify_market(label, sport):
     """Normalize market label to clean category."""
     lbl = (label or '').lower()
+    if 'exact' in lbl and 'set' in lbl:
+        return 'tennis_exact_sets'
     if 'under' in lbl and 'set' in lbl:
         return 'sets_under'
     if 'over' in lbl and 'set' in lbl:
@@ -263,7 +267,7 @@ def record_pick(pick: dict, placed: bool = False, real_stake: float = None, bet_
         # Dedup: skip if same pick already recorded in the last 2h (scanner runs hourly)
         _recent = conn.execute(
             "SELECT id FROM sibila_picks WHERE match=? AND COALESCE(market,'')=? "
-            "AND COALESCE(side,'')=? AND ts >= datetime('now', '-2 hours') LIMIT 1",
+            "AND COALESCE(side,'')=? AND result IS NULL LIMIT 1",
             (match_val, market_val or '', side_val or '')).fetchone()
         if _recent:
             conn.close()
@@ -332,8 +336,11 @@ def mark_placed(match: str, label: str, bet_id: str, real_stake: float):
         conn = _get_conn()
         conn.execute("""
             UPDATE sibila_picks SET placed=1, bet_id=?, real_stake=?
-            WHERE match=? AND side=? AND result IS NULL
-            ORDER BY ts DESC LIMIT 1
+            WHERE id = (
+                SELECT id FROM sibila_picks
+                WHERE match=? AND side=? AND result IS NULL
+                ORDER BY ts DESC LIMIT 1
+            )
         """, (bet_id, real_stake, match, label))
         conn.commit()
         conn.close()
@@ -376,6 +383,7 @@ def resolve_shadow_picks(match: str, side: str = None, result: str = None,
         total_pnl = 0.0
 
         total_realistic_pnl = 0.0
+        primary_id = min(r['id'] for r in rows)  # only first pick contributes to bankroll
         for row in rows:
             odds  = row['odds'] or 1.0
             stake = row['shadow_stake'] or 0.0
@@ -410,7 +418,8 @@ def resolve_shadow_picks(match: str, side: str = None, result: str = None,
                 "closing_odds=COALESCE(closing_odds, ?), clv=COALESCE(clv, ?) "
                 "WHERE id=?",
                 (result_norm, pnl, r_pnl, now, closing_odds, clv, row['id']))
-            total_pnl += pnl
+            if row['id'] == primary_id:
+                total_pnl += pnl
             resolved += 1
 
         # update virtual bankroll so future stakes are sized correctly
@@ -505,8 +514,8 @@ def resolve_pick(bet_id: str = None, match: str = None, label: str = None,
         if closing_odds and closing_odds > 1 and odds > 1:
             clv = round(closing_odds / odds - 1.0, 4)
 
-        vbr_before = row['shadow_br_before'] or _get_virtual_bankroll()
-        new_br = vbr_before + pnl
+        cur_vbr = _get_virtual_bankroll()
+        new_br = max(cur_vbr + pnl, 1.0)
         _set_virtual_bankroll(new_br)
 
         conn.execute("""
