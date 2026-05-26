@@ -2719,23 +2719,8 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                 p['portfolio_adj']  = _port_result['stake_adj']
                 p['portfolio_corr'] = _port_result.get('corr_penalty', 0)
                 p['portfolio_capped'] = _port_result.get('capped', False)
-            # Portfolio Kelly: ajustar stake por correlacion con bets abiertas
-            if _PORTFOLIO_ENABLED:
-                _port_result = _PORTFOLIO.get_adjusted_stake(p, base_stake=stake)
-                if _port_result.get('skip'):
-                    log.info('  [Portfolio] SKIP: %s', _port_result.get('reason',''))
-                    continue
-                stake = _port_result['stake_adj']
-                p['portfolio_adj']  = _port_result['stake_adj']
-                p['portfolio_corr'] = _port_result.get('corr_penalty', 0)
-                p['portfolio_capped'] = _port_result.get('capped', False)
             if _SIBILA_ENABLED:
                 _sibila_placed(p['match'], p['label'], bet_id, stake)
-            # RLM boost: si sharp money confirma nuestro pick -> +20% stake
-            if _RLM_ENABLED and p.get('rlm_signal') and p.get('rlm_score', 0) >= 0.5:
-                _rlm_boost = min(stake * 1.20, stake + 20)  # max +20 unidades
-                log.info('  [RLM] Stake boost %.2f->%.2f (score=%.2f)', stake, _rlm_boost, p.get('rlm_score',0))
-                stake = round(_rlm_boost, 2)
             # RLM boost: si sharp money confirma nuestro pick -> +20% stake
             if _RLM_ENABLED and p.get('rlm_signal') and p.get('rlm_score', 0) >= 0.5:
                 _rlm_boost = min(stake * 1.20, stake + 20)  # max +20 unidades

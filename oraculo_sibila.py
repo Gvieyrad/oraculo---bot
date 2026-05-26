@@ -82,7 +82,12 @@ def _init_db():
         resolved_ts      TEXT,
         placed           INTEGER DEFAULT 0,
         real_stake       REAL,
-        bet_id           TEXT
+        bet_id           TEXT,
+        market_type      TEXT DEFAULT '',
+        realistic_stake  REAL,
+        realistic_br_before REAL,
+        realistic_pnl    REAL,
+        is_duplicate     INTEGER DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS ix_sibila_ts     ON sibila_picks(ts);
     CREATE INDEX IF NOT EXISTS ix_sibila_sport  ON sibila_picks(sport);
@@ -512,7 +517,9 @@ def resolve_pick(bet_id: str = None, match: str = None, label: str = None,
                 r_pnl = 0.0
             if r_pnl != 0:
                 cur_r = _get_realistic_bankroll()
-                _set_realistic_bankroll(max(cur_r + r_pnl, 1.0))
+                r_pnl_pending = r_pnl  # applied after commit
+        else:
+                r_pnl_pending = None
 
         clv = None
         if closing_odds and closing_odds > 1 and odds > 1:
@@ -520,7 +527,6 @@ def resolve_pick(bet_id: str = None, match: str = None, label: str = None,
 
         cur_vbr = _get_virtual_bankroll()
         new_br = max(cur_vbr + pnl, 1.0)
-        _set_virtual_bankroll(new_br)
 
         conn.execute("""
             UPDATE sibila_picks
@@ -530,6 +536,11 @@ def resolve_pick(bet_id: str = None, match: str = None, label: str = None,
         """, (result_norm, pnl, r_pnl, datetime.now().isoformat(), closing_odds, clv, rid))
         conn.commit()
         conn.close()
+        # Update bankrolls AFTER commit so DB stays consistent on failure
+        _set_virtual_bankroll(new_br)
+        if r_pnl_pending is not None:
+            cur_r = _get_realistic_bankroll()
+            _set_realistic_bankroll(max(cur_r + r_pnl_pending, 1.0))
         log.debug('Sibila resolved id=%d: %s -> %s pnl=$%.2f vbr=$%.2f',
                   rid, (match or bet_id or '?')[:30], result_norm, pnl, new_br)
     except Exception as e:
@@ -545,7 +556,7 @@ def get_stats(days: int = 30) -> dict:
     cutoff    = (datetime.now() - timedelta(days=days)).isoformat()
     conn      = _get_conn()
     all_picks = [dict(r) for r in conn.execute(
-        "SELECT * FROM sibila_picks WHERE ts >= ?", (cutoff,)).fetchall()]
+        "SELECT * FROM sibila_picks WHERE ts >= ? AND is_duplicate=0", (cutoff,)).fetchall()]
     conn.close()
 
     if not all_picks:
