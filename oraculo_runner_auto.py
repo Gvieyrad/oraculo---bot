@@ -5352,6 +5352,7 @@ def run_loop():
     last_soccer_resolve = 0
     last_mlb_resolve = 0
     last_tennis_resolve = 0
+    last_wnba_resolve   = 0
     last_tennis_update = 0
     TENNIS_UPDATE_INTERVAL = 86400  # Once per day
     NEWS_REFRESH_INTERVAL = 7200   # Refresh tennis news every 2 hours
@@ -5493,6 +5494,17 @@ def run_loop():
                     except Exception as _tr_e:
                         log.debug('Tennis resolve error: %s', _tr_e)
                     last_tennis_resolve = now
+                if now - last_wnba_resolve >= 3600:
+                    try:
+                        import sqlite3 as _sq3
+                        _wconn = _sq3.connect(os.path.join(SCRIPT_DIR, 'sibila.db'))
+                        _n_wres = _wnba_resolve_shadows(_wconn)
+                        _wconn.close()
+                        if _n_wres:
+                            log.info('WNBA shadow resolver: %d resolved', _n_wres)
+                    except Exception as _wr_e:
+                        log.debug('WNBA resolve error: %s', _wr_e)
+                    last_wnba_resolve = now
                 if settled or True:  # always save to persist closing_odds
                     sync_obsidian(state)
                     save_state(state)
