@@ -85,11 +85,11 @@ def _find_wnba_result(home: str, away: str, date_str: str):
 def resolve_wnba_pending(conn: sqlite3.Connection, dry_run: bool = False) -> int:
     """Resolve pending WNBA picks in sibila.db. Returns count resolved."""
     rows = conn.execute("""
-        SELECT id, side, odds, stake, real_stake, placed_at, event_id, market_url
+        SELECT id, side, odds, shadow_stake, real_stake, ts, event_id, market_url
         FROM sibila_picks
         WHERE sport='basketball' AND league='basketball-usa-wnba'
           AND result IS NULL
-        ORDER BY placed_at
+        ORDER BY ts
     """).fetchall()
 
     if not rows:
