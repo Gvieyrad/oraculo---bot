@@ -2629,6 +2629,10 @@ def place_bets(api, state, picks, parlays, dry_run=False):
     for p in picks[:MAX_BETS_PER_SCAN]:
         if straight_remaining < MIN_STAKE:
             break
+        # Skip shadow-only picks (WNBA, NHL until validated)
+        if p.get('shadow'):
+            log.debug('  [SKIP-SHADOW] %s', p.get('label', ''))
+            continue
         # Skip previously rejected combos
         dedup_key = f"{p['event_id']}|{p.get('market_url', '')}|{p['label']}"
         if dedup_key in _rejected_keys:
