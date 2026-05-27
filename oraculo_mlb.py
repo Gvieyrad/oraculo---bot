@@ -501,6 +501,16 @@ def scan_mlb(api, state, elo=None, dry_run=False, min_edge=0.06, min_conf=0.50):
                 except Exception:
                     continue
 
+                # Line-floor brake: only bet proven winning segments (Sibila data)
+                # Over 3.5-5.5: WR=27-38% (losers). Over 6.0+: WR=59-80% (winners)
+                # Under 3.0-3.5: WR=25-35% (losers). Under 4.0-5.5: WR=55-67% (winners)
+                if outcome == 'over' and line < 6.0:
+                    log.debug('  MLB F5 Over line=%.1f < 6.0 floor — skip (low-Over WR<40%%)', line)
+                    continue
+                if outcome == 'under' and (line < 4.0 or line > 5.5):
+                    log.debug('  MLB F5 Under line=%.1f outside 4.0-5.5 window — skip', line)
+                    continue
+
                 # ML model prediction (calibrated LogisticRegression per line)
                 prob = None
                 if _HAS_F5_MODEL:
