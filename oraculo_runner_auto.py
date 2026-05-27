@@ -2704,7 +2704,12 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                                sport=p.get('sport', ''))
         stake = round(stake * _stake_factor, 2)
         if stake <= 0:
-            continue
+            if p.get('_max_stake'):
+                # Validation bet: force _max_stake even if portfolio is full
+                stake = p['_max_stake']
+                log.debug('_max_stake forced: PortfolioKelly=0, using $%.2f validation stake', stake)
+            else:
+                continue
         # Hard cap per pick (applied BEFORE dead-zone so cap is respected)
         if p.get('_max_stake'):
             stake = min(stake, p['_max_stake'])
