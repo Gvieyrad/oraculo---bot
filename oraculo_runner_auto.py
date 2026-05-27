@@ -3637,8 +3637,10 @@ try:
     try:
         from wnba_sibila_resolver import resolve_wnba_pending as _wnba_resolve_shadows
         from nhl_sibila_resolver import resolve_nhl_pending as _nhl_resolve_shadows
+        from nba_sibila_resolver import resolve_nba_pending as _nba_resolve_shadows
     except ImportError:
         def _wnba_resolve_shadows(*a, **kw): return 0
+        def _nba_resolve_shadows(*a, **kw): return 0
     _SIBILA_ENABLED = True
 except ImportError:
     _SIBILA_ENABLED = False
@@ -5391,6 +5393,7 @@ def run_loop():
     last_wnba_resolve       = 0
     last_exposure_rebalance = 0
     last_nhl_resolve        = 0
+    last_nba_resolve        = 0
     last_tennis_update = 0
     TENNIS_UPDATE_INTERVAL = 86400  # Once per day
     NEWS_REFRESH_INTERVAL = 7200   # Refresh tennis news every 2 hours
@@ -5554,6 +5557,17 @@ def run_loop():
                     except Exception as _nr_e:
                         log.debug('NHL resolve error: %s', _nr_e)
                     last_nhl_resolve = now
+                if now - last_nba_resolve >= 3600:
+                    try:
+                        import sqlite3 as _sq3b
+                        _bconn = _sq3b.connect(os.path.join(SCRIPT_DIR, 'sibila.db'))
+                        _n_bres = _nba_resolve_shadows(_bconn)
+                        _bconn.close()
+                        if _n_bres:
+                            log.info('NBA shadow resolver: %d resolved', _n_bres)
+                    except Exception as _br_e:
+                        log.debug('NBA resolve error: %s', _br_e)
+                    last_nba_resolve = now
                 # Auto-rebalance: lower exposure cap when pending bets drop below 30% of bankroll
                 if now - last_exposure_rebalance >= 3600:
                     try:
