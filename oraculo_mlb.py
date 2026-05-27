@@ -479,6 +479,11 @@ def scan_mlb(api, state, elo=None, dry_run=False, min_edge=0.06, min_conf=0.50):
         ops_combined = (home_ops + away_ops) / 2 - _LEAGUE_AVG_OPS
         avg_fip = (hp_fip + ap_fip) / 2
         _weather_adj, _w_info = get_mlb_weather_adj(home_elo, _game_time)
+        # Hard ERA/FIP filter: both starters terrible -> skip Over bets (unpredictable high-run games)
+        # avg_fip > 5.2 with known starters = market already pricing in chaos, our edge evaporates
+        _skip_overs = (avg_fip > 5.2
+                       and hp_name not in ('?', '')
+                       and ap_name not in ('?', ''))
         log.debug('  MLB weather: %s %s', home_elo[:15], _w_info)
 
         for sv in tot5.get('submarkets', {}).values():
@@ -529,6 +534,9 @@ def scan_mlb(api, state, elo=None, dry_run=False, min_edge=0.06, min_conf=0.50):
                 edge    = prob - implied
 
                 # Block F5 Over dome: Sibila WR=0% on O4-O5.5 in domes (outdoor 100% WR)
+                if outcome == 'over' and _skip_overs:
+                    log.debug('  MLB [skip-f5-over]: avg_fip=%.2f > 5.2 — bad pitching matchup', avg_fip)
+                    continue
                 if outcome == 'over' and _w_info == 'dome':
                     log.debug('  MLB F5 Over dome blocked: model unreliable in closed stadiums')
                     continue
@@ -573,6 +581,9 @@ def scan_mlb(api, state, elo=None, dry_run=False, min_edge=0.06, min_conf=0.50):
                 except Exception:
                     continue
 
+                if outcome == 'over' and _skip_overs:
+                    log.debug('  MLB [skip-9inn-over]: avg_fip=%.2f > 5.2 — bad pitching', avg_fip)
+                    continue
                 if outcome == 'over':
                     fip_sig9 = (avg_fip  - 4.2) * 0.04 + bullpen_var
                     ops_sig9 = ops_combined * 0.70

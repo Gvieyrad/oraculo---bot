@@ -2251,6 +2251,37 @@ def scan_tennis(api, state, dry_run=False):
                 picks.extend(_wnba_picks)
     except Exception as e:
         log.debug('WNBA scan error: %s', e)
+
+    # --- NHL SCANNING ---
+    # NHL regular season Oct-Apr. Uses hockey.1x2 market. Shadow=True until 40+ picks validated.
+    _nhl_active = False
+    try:
+        _rnhl = requests.get(CB_BASE + '/pub/v2/odds/competitions/hockey-usa-nhl',
+                             headers={'Authorization': f'Bearer {api.api_key}'}, timeout=5)
+        if _rnhl.status_code == 200:
+            for _nev in _rnhl.json().get('events', []):
+                if (_nev or {}).get('type') != 'EVENT_TYPE_OUTRIGHT' and 'hockey.1x2' in (_nev or {}).get('markets', {}):
+                    _nhl_active = True
+                    break
+    except Exception:
+        pass
+    try:
+        from oraculo_nhl import train_nhl_elo, scan_nhl
+        _nhl_elo = train_nhl_elo()
+        if _nhl_active and _nhl_elo and len(_nhl_elo.ratings) >= 28:
+            _nhl_picks = scan_nhl(api, state, _nhl_elo, shadow=True)
+            if _nhl_picks:
+                log.info('[NHL] %d picks (SHADOW):', len(_nhl_picks))
+                for _np in _nhl_picks:
+                    log.info('  [NHL] %s | %s | edge=%.1f%% conf=%.0f%% @%.3f',
+                             _np['match'][:35], _np['label'], _np['edge']*100,
+                             _np['model_prob']*100, _np['price'])
+                if _SIBILA_ENABLED:
+                    for _np in _nhl_picks:
+                        _sibila_record(_np)
+                picks.extend(_nhl_picks)
+    except Exception as e:
+        log.debug('NHL scan error: %s', e)
     return picks
 
 # ---------------------------------------------------------------------------
@@ -3601,6 +3632,7 @@ try:
         def _tennis_resolve_shadows(**kw): return (0, 0, 0)
     try:
         from wnba_sibila_resolver import resolve_wnba_pending as _wnba_resolve_shadows
+        from nhl_sibila_resolver import resolve_nhl_pending as _nhl_resolve_shadows
     except ImportError:
         def _wnba_resolve_shadows(*a, **kw): return 0
     _SIBILA_ENABLED = True
@@ -5352,7 +5384,9 @@ def run_loop():
     last_soccer_resolve = 0
     last_mlb_resolve = 0
     last_tennis_resolve = 0
-    last_wnba_resolve   = 0
+    last_wnba_resolve       = 0
+    last_exposure_rebalance = 0
+    last_nhl_resolve        = 0
     last_tennis_update = 0
     TENNIS_UPDATE_INTERVAL = 86400  # Once per day
     NEWS_REFRESH_INTERVAL = 7200   # Refresh tennis news every 2 hours
@@ -5505,6 +5539,39 @@ def run_loop():
                     except Exception as _wr_e:
                         log.debug('WNBA resolve error: %s', _wr_e)
                     last_wnba_resolve = now
+                if now - last_nhl_resolve >= 3600:
+                    try:
+                        import sqlite3 as _sq3n
+                        _nconn = _sq3n.connect(os.path.join(SCRIPT_DIR, 'sibila.db'))
+                        _n_nres = _nhl_resolve_shadows(_nconn)
+                        _nconn.close()
+                        if _n_nres:
+                            log.info('NHL shadow resolver: %d resolved', _n_nres)
+                    except Exception as _nr_e:
+                        log.debug('NHL resolve error: %s', _nr_e)
+                    last_nhl_resolve = now
+                # Auto-rebalance: lower exposure cap when pending bets drop below 30% of bankroll
+                if now - last_exposure_rebalance >= 3600:
+                    try:
+                        _br   = float(state.get('bankroll', 200))
+                        _pend = sum(b.get('stake', 0) for b in state.get('active_bets', []))
+                        _pend_pct = _pend / _br if _br > 0 else 0
+                        _cur_exp  = float(state.get('persisted_max_exposure', MAX_TOTAL_EXPOSURE))
+                        # If pending < 30% of bankroll AND current cap > 0.35, step down toward 0.35
+                        if _pend_pct < 0.30 and _cur_exp > 0.36:
+                            _new_exp = round(max(0.35, _cur_exp - 0.05), 2)
+                            state['persisted_max_exposure'] = _new_exp
+                            MAX_TOTAL_EXPOSURE = _new_exp
+                            log.info('AUTO-REBALANCE: exposure %.0f%%->%.0f%% (pending=%.0f%% of BR, BR=$%.2f)',
+                                     _cur_exp*100, _new_exp*100, _pend_pct*100, _br)
+                        # If exposure < 0.35 and we have very little pending, lock at 0.35
+                        elif _cur_exp < 0.34:
+                            state['persisted_max_exposure'] = 0.35
+                            MAX_TOTAL_EXPOSURE = 0.35
+                            log.info('AUTO-REBALANCE: exposure floor enforced at 35%%')
+                    except Exception as _rb_e:
+                        log.debug('Auto-rebalance error: %s', _rb_e)
+                    last_exposure_rebalance = now
                 if settled or True:  # always save to persist closing_odds
                     sync_obsidian(state)
                     save_state(state)
