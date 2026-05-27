@@ -2219,6 +2219,38 @@ def scan_tennis(api, state, dry_run=False):
                 picks.extend(_nba_picks)
     except Exception as e:
         log.debug('NBA scan error: %s', e)
+
+    # --- WNBA SCANNING ---
+    # WNBA season May-Sep. Uses basketball.1x2 market. Shadow=True until 40+ picks validated.
+    _wnba_active = False
+    try:
+        _rwnba = requests.get(CB_BASE + '/pub/v2/odds/competitions/basketball-usa-wnba',
+                              headers={'Authorization': f'Bearer {api.api_key}'}, timeout=5)
+        if _rwnba.status_code == 200:
+            for _wev in _rwnba.json().get('events', []):
+                if (_wev or {}).get('type') != 'EVENT_TYPE_OUTRIGHT' and 'basketball.1x2' in (_wev or {}).get('markets', {}):
+                    _wnba_active = True
+                    break
+    except Exception:
+        pass
+    try:
+        from oraculo_wnba import train_wnba_elo, scan_wnba
+        _wnba_elo = train_wnba_elo()
+        if _wnba_active and _wnba_elo and len(_wnba_elo.ratings) >= 8:
+            _wnba_picks = scan_wnba(api, state, _wnba_elo, shadow=True)
+            if _wnba_picks:
+                log.info('[WNBA] %d picks (SHADOW):', len(_wnba_picks))
+                for _wp in _wnba_picks:
+                    log.info('  [WNBA] %s | %s | edge=%.1f%% conf=%.0f%% @%.3f',
+                             _wp['match'][:35], _wp['label'], _wp['edge']*100,
+                             _wp['model_prob']*100, _wp['price'])
+                if _SIBILA_ENABLED:
+                    for _wp in _wnba_picks:
+                        _sibila_record(_wp)
+                # shadow=True so these never reach place_bets
+                picks.extend(_wnba_picks)
+    except Exception as e:
+        log.debug('WNBA scan error: %s', e)
     return picks
 
 # ---------------------------------------------------------------------------
@@ -3567,6 +3599,10 @@ try:
         from tennis_sibila_resolver import resolve_all_pending as _tennis_resolve_shadows
     except ImportError:
         def _tennis_resolve_shadows(**kw): return (0, 0, 0)
+    try:
+        from wnba_sibila_resolver import resolve_wnba_pending as _wnba_resolve_shadows
+    except ImportError:
+        def _wnba_resolve_shadows(*a, **kw): return 0
     _SIBILA_ENABLED = True
 except ImportError:
     _SIBILA_ENABLED = False
