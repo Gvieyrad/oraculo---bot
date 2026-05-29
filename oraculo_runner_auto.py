@@ -3013,10 +3013,11 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                       model_prob=p.get('model_prob', 0),
                       market_type=p.get('market_type', ''))
             log.info('  [OK] Bet placed: %s | ID: %s', p['label'], bet_id[:12])
-            _wa_sport = {'soccer': '⚽', 'tennis': '🎾', 'baseball': '⚾'}.get(p.get('sport', 'soccer'), '🎰')
+            _wa_sport = '🏆 WC' if p.get('_wc_phase_c') else {'soccer': '⚽', 'tennis': '🎾', 'baseball': '⚾'}.get(p.get('sport', 'soccer'), '🎰')
             send_whatsapp(
                 f"{_wa_sport} APUESTA: {p['match'][:35]}\n"
-                f"{p['label']} @{p['price']:.2f} | Edge {p['edge']*100:.0f}% | ${stake:.2f}"
+                f"{p['label']} @{p['price']:.2f} | Edge {p['edge']*100:.0f}%\n"
+                f"Apostado: ${stake:.2f} | Ganancia: +${stake*(p['price']-1):.2f}"
             )
             match_bets_this_cycle[p['match']] = match_bets_this_cycle.get(p['match'], 0) + 1
             active_matches[p['match']] = active_matches.get(p['match'], 0) + stake
@@ -3068,10 +3069,11 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                           model_prob=p.get('model_prob', 0),
                           market_type=p.get('market_type', ''))
                 log.info('  [OK] Bet placed (retry %s): %s | ID: %s', _retry_curr, p['label'], bet_id[:12])
-                _wa_sport_r = {'soccer': '⚽', 'tennis': '🎾', 'baseball': '⚾'}.get(p.get('sport', 'soccer'), '🎰')
+                _wa_sport_r = '🏆 WC' if p.get('_wc_phase_c') else {'soccer': '⚽', 'tennis': '🎾', 'baseball': '⚾'}.get(p.get('sport', 'soccer'), '🎰')
                 send_whatsapp(
                     f"{_wa_sport_r} APUESTA: {p['match'][:35]}\n"
-                    f"{p['label']} @{p['price']:.2f} | Edge {p['edge']*100:.0f}% | ${stake:.2f}"
+                    f"{p['label']} @{p['price']:.2f} | Edge {p['edge']*100:.0f}%\n"
+                    f"Apostado: ${stake:.2f} | Ganancia: +${stake*(p['price']-1):.2f}"
                 )
                 match_bets_this_cycle[p['match']] = match_bets_this_cycle.get(p['match'], 0) + 1
                 active_matches[p['match']] = active_matches.get(p['match'], 0) + stake
@@ -3141,7 +3143,8 @@ def place_bets(api, state, picks, parlays, dry_run=False):
             log.info('  [OK] Parlay placed: %s', bet_id[:12])
             send_whatsapp(
                 f"🎰 PARLAY: {par['label'][:60]}\n"
-                f"@{par['combined_odds']:.2f} | Edge {par['edge']*100:.0f}% | ${stake:.2f}"
+                f"@{par['combined_odds']:.2f} | Edge {par['edge']*100:.0f}%\n"
+                f"Apostado: ${stake:.2f} | Ganancia: +${stake*(par['combined_odds']-1):.2f}"
             )
         time.sleep(2.0)  # Respect rate limit
 
@@ -3486,31 +3489,17 @@ def reconcile_bankroll(api, state):
                 log.warning('RECONCILE: total_pnl drift local=$%.2f vs api=$%.2f — correcting',
                             local_pnl, api_total_pnl)
                 state['total_pnl'] = api_total_pnl
-        # Always sync per-currency split (regardless of total drift)
-        # Bug fix: old formula used inconsistent per-currency initial constants (extra_deposits gap=3)
-        # which inflated bankroll_by_currency.USDC and broke WC_RESERVE gating.
-        # New approach: derive per-currency portfolio value from API pending only;
-        # free wallet = correct_bankroll (total) minus all pending, split by currency pending.
-        _bbc = state.setdefault('bankroll_by_currency', {})
+        # bankroll_by_currency is maintained by settlement code (WIN/LOSS adjustments).
+        # Reconciler does NOT overwrite it — the per-currency formula requires per-currency
+        # initial deposit constants that are structurally inconsistent with the total.
+        # Only log for diagnostics.
+        _bbc = state.get('bankroll_by_currency', {})
         for curr in ('USDC', 'USDT'):
             c_pending = sum(float(b.get('stake', 0)) for b in bets
                            if not b.get('isSettled') and b.get('currency') == curr)
-            c_settled = sum(float(b.get('winLoss', 0)) for b in bets
-                           if b.get('isSettled') and b.get('currency') == curr)
-            # Per-currency wallet = what the total reconciler says minus OTHER currency pending
-            # (wallet = free balance + this currency's pending stakes)
-            other_pending = sum(float(b.get('stake', 0)) for b in bets
-                               if not b.get('isSettled') and b.get('currency') != curr)
-            # Clamp: never let bbc go below pending (can't have less than at-risk)
-            c_wallet = round(correct_bankroll - other_pending, 2)
-            c_wallet = max(c_wallet, round(c_pending, 2))
-            # Only update if the computed value is plausible (within 40% of current)
-            _current = _bbc.get(curr, c_wallet)
-            if _current == 0 or abs(c_wallet - _current) / max(_current, 1) < 0.40:
-                _bbc[curr] = c_wallet
-            else:
-                log.debug('RECONCILE: bbc[%s] drift too large (%.2f->%.2f), keeping current',
-                          curr, _current, c_wallet)
+            c_free = _bbc.get(curr, 0) - c_pending
+            log.debug('RECONCILE bbc[%s]: wallet=%.2f pending=%.2f free=%.2f',
+                      curr, _bbc.get(curr, 0), c_pending, c_free)
 
         # --- Ghost bet pruning: remove local bets that API no longer knows about ---
         # Cloudbet silently voids markets (e.g. tennis.exact_sets) returning 404 with no history entry.
@@ -4770,7 +4759,8 @@ def process_manual_bets(api, state):
                 match_name, pick, price, stake))
             send_whatsapp(
                 f'⚽ APUESTA MANUAL: {match_name[:35]}\n'
-                f'{pick} @{price:.2f} | ${stake:.2f}'
+                f'{pick} @{price:.2f}\n'
+                f'Apostado: ${stake:.2f} | Ganancia: +${stake*(price-1):.2f}'
             )
             processed.append({**bet, 'status': 'PLACED', 'bet_id': bet_id,
                             'price': price, 'ts': datetime.now().isoformat()})
@@ -4855,7 +4845,7 @@ def process_manual_bets(api, state):
                 send_telegram('Manual parlay placed: {} @${:.2f}'.format(label, stake))
                 send_whatsapp(
                     f'🎰 PARLAY MANUAL: {label[:60]}\n'
-                    f'${stake:.2f}'
+                    f'Apostado: ${stake:.2f}'
                 )
                 placed += 1
             else:
