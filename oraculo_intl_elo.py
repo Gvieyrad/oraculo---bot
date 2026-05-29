@@ -13,12 +13,22 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(SCRIPT_DIR, 'models', 'intl_elo_state.pkl')
 DATA_PATH  = os.path.join(SCRIPT_DIR, 'models', 'intl_results.csv')
 
-TOURNAMENT_K = {
-    'FIFA World Cup': 60, 'UEFA Euro': 55, 'Copa America': 55,
-    'Africa Cup of Nations': 50, 'Asian Cup': 50, 'CONCACAF Gold Cup': 50,
-    'UEFA Nations League': 45, 'Confederations Cup': 45,
-    'WC Qualification': 40, 'Qualification': 35, 'Friendly': 20,
-}
+# Ordered: specific patterns must appear before general ones
+TOURNAMENT_K = [
+    ('world cup qualif', 40),  # WC qualification before WC itself
+    ('wc qualif', 40),
+    ('fifa world cup', 60),
+    ('uefa euro qualif', 35),  # Euro qual before Euro itself
+    ('uefa euro', 55),
+    ('copa am', 55),           # matches Copa América + Copa America
+    ('african cup', 50),       # matches African Cup of Nations
+    ('asian cup', 50),
+    ('gold cup', 50),          # CONCACAF Gold Cup
+    ('nations league', 45),    # UEFA + CONCACAF Nations Leagues
+    ('confederations cup', 45),
+    ('qualif', 35),            # all other qualifiers
+    ('friendly', 20),
+]
 DEFAULT_K = 30
 INITIAL_ELO = 1500.0
 
@@ -55,9 +65,9 @@ def _goal_weight(gd):
     return 1.75 + (gd - 3) * 0.1 if gd >= 3 else 1.0
 
 def _k_factor(tournament):
-    t = str(tournament)
-    for key, k in TOURNAMENT_K.items():
-        if key.lower() in t.lower():
+    t = str(tournament).lower()
+    for key, k in TOURNAMENT_K:  # ordered list — first match wins
+        if key in t:
             return k
     return DEFAULT_K
 

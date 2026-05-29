@@ -462,15 +462,22 @@ def _get_params(team_name):
 # log-loss improvement: +2.8% (1.0051 → 0.9769)
 _PB_MODEL_PATH = '/home/noc/oraculo_v2/wc2026/pb_model.pkl'
 _pb_model_cache = [None]
+_pb_model_mtime = [0.0]
 
 def _get_pb_model():
-    if _pb_model_cache[0] is None:
+    import os as _os3
+    try:
+        _mtime = _os3.path.getmtime(_PB_MODEL_PATH)
+    except Exception:
+        _mtime = 0.0
+    if _pb_model_cache[0] is None or _mtime > _pb_model_mtime[0]:
         import sys as _sys
         _noc_lib = '/home/noc/.local/lib/python3.12/site-packages'
         if _noc_lib not in _sys.path:
             _sys.path.insert(0, _noc_lib)
         import penaltyblog as _pb
         _pb_model_cache[0] = _pb.models.DixonColesGoalModel.load(_PB_MODEL_PATH)
+        _pb_model_mtime[0] = _mtime
     return _pb_model_cache[0]
 
 _PB_NAME_MAP = {
@@ -587,6 +594,22 @@ def predict_match(home_team, away_team, neutral=True):
         p_h, p_d, p_a = p_h/_n2, p_d/_n2, p_a/_n2
         xg_a = round(xg_a * (1.0 - alt_penalty), 3)
 
+    # Injury factors: missing key attackers shift win prob toward draw/opponent
+    # Formula: each % of attack_factor lost transfers 40% of that gap from p_win
+    _pf2 = _load_player_factors()
+    _h_atk2 = _pf2.get(home_team, {}).get('attack_factor', 1.0)
+    _a_atk2 = _pf2.get(away_team, {}).get('attack_factor', 1.0)
+    if _h_atk2 < 0.99:
+        _sh = (1.0 - _h_atk2) * p_h * 0.40
+        p_h = max(0.05, p_h - _sh)
+        p_d += _sh * 0.50; p_a += _sh * 0.50
+    if _a_atk2 < 0.99:
+        _sh = (1.0 - _a_atk2) * p_a * 0.40
+        p_a = max(0.05, p_a - _sh)
+        p_d += _sh * 0.50; p_h += _sh * 0.50
+    _n3 = p_h + p_d + p_a
+    p_h, p_d, p_a = p_h/_n3, p_d/_n3, p_a/_n3
+
     return {
         'p_home': round(p_h, 4),
         'p_draw': round(p_d, 4),
@@ -639,13 +662,25 @@ def collusion_draw_boost(home_team, away_team):
 
 
 # ── Player intelligence integration ──────────────────────────────────────────
+_player_factors_cache = [None]
+_player_factors_mtime = [0.0]
+
 def _load_player_factors():
     import json as _j, os as _o
     pf = _o.path.join(_o.path.dirname(_o.path.abspath(__file__)), 'wc2026/wc_player_factors.json')
     try:
-        return _j.load(open(pf))
+        _mt = _o.path.getmtime(pf)
     except Exception:
-        return {}
+        _mt = 0.0
+    if _player_factors_cache[0] is not None and _mt <= _player_factors_mtime[0]:
+        return _player_factors_cache[0]
+    try:
+        _player_factors_cache[0] = _j.load(open(pf))
+        _player_factors_mtime[0] = _mt
+    except Exception:
+        if _player_factors_cache[0] is None:
+            _player_factors_cache[0] = {}
+    return _player_factors_cache[0]
 
 def get_player_adjusted_xg(home_team, away_team, neutral=True):
     home_xg, away_xg = get_wc_team_xg(home_team, away_team, neutral)
