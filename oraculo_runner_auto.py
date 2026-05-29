@@ -2972,11 +2972,20 @@ def place_bets(api, state, picks, parlays, dry_run=False):
             _usdc_effective = _usdc_total - _usdc_pending
             _is_wc_pick = (p.get('cutoff_time', '') or '') >= '2026-06-01' or p.get('league') == 'FIFA_WC'
             if not _is_wc_pick and _usdc_effective - stake < _wc_reserve:
-                log.info('[WC_RESERVE] Skip: avail=%.2f stake=%.2f reserve=%.2f %s',
-                         _usdc_effective, stake, _wc_reserve, p.get('label', '')[:20])
-                api.currency = _orig_currency
-                _rejected_keys.add(dedup_key)
-                continue
+                # Bug fix: try USDT fallback before skipping (don't blacklist — funding constraint ≠ bad pick)
+                _usdt_total = state.get('bankroll_by_currency', {}).get('USDT', 0)
+                _usdt_pending = sum(b.get('stake', 0) for b in state.get('active_bets', [])
+                                    if b.get('currency', '') == 'USDT')
+                if _usdt_total - _usdt_pending >= stake:
+                    log.info('[WC_RESERVE] USDC blocked (avail=%.2f<reserve=%.2f) — switching to USDT for %s',
+                             _usdc_effective, _wc_reserve, p.get('label', '')[:20])
+                    _bet_currency = 'USDT'
+                    api.currency = 'USDT'
+                else:
+                    log.info('[WC_RESERVE] Skip: avail_usdc=%.2f avail_usdt=%.2f stake=%.2f reserve=%.2f %s',
+                             _usdc_effective, _usdt_total - _usdt_pending, stake, _wc_reserve, p.get('label', '')[:20])
+                    api.currency = _orig_currency
+                    continue  # no _rejected_keys — retry next cycle
         log.info('  Placing: %s | %s @%.3f | $%.2f %s', p['match'][:35], p['label'], p['price'], stake, _bet_currency)
         resp = api.place_straight(p['event_id'], p['market_url'], p['price'], stake)
         api.currency = _orig_currency
@@ -3004,6 +3013,11 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                       model_prob=p.get('model_prob', 0),
                       market_type=p.get('market_type', ''))
             log.info('  [OK] Bet placed: %s | ID: %s', p['label'], bet_id[:12])
+            _wa_sport = {'soccer': '⚽', 'tennis': '🎾', 'baseball': '⚾'}.get(p.get('sport', 'soccer'), '🎰')
+            send_whatsapp(
+                f"{_wa_sport} APUESTA: {p['match'][:35]}\n"
+                f"{p['label']} @{p['price']:.2f} | Edge {p['edge']*100:.0f}% | ${stake:.2f}"
+            )
             match_bets_this_cycle[p['match']] = match_bets_this_cycle.get(p['match'], 0) + 1
             active_matches[p['match']] = active_matches.get(p['match'], 0) + stake
             if p.get('event_id',''):
@@ -3328,6 +3342,11 @@ def check_results(api, state):
                 f'{_tg_label}{_tg_prob_str}\n'
                 f'Bankroll: ${state["bankroll"]:.2f} | Today: ${state["daily_pnl"]:+.2f}'
             )
+            send_whatsapp(
+                f"{_tg_emoji} {result}: ${_tg_pnl:+.2f} | {_tg_match}\n"
+                f"{_tg_label}{_tg_prob_str}\n"
+                f"BK: ${state['bankroll']:.2f} | Dia: ${state['daily_pnl']:+.2f}"
+            )
         except Exception as _tg_err:
             log.debug('Telegram settlement notification failed: %s', _tg_err)
         # Learn tennis results for Elo update
@@ -3458,16 +3477,16 @@ def reconcile_bankroll(api, state):
                 log.warning('RECONCILE: total_pnl drift local=$%.2f vs api=$%.2f — correcting',
                             local_pnl, api_total_pnl)
                 state['total_pnl'] = api_total_pnl
-            # Also fix per-currency
-            for curr in ('USDC', 'USDT'):
-                c_settled = sum(float(b.get('winLoss', 0)) for b in bets
-                               if b.get('isSettled') and b.get('currency') == curr)
-                c_pending = sum(float(b.get('stake', 0)) for b in bets
-                               if not b.get('isSettled') and b.get('currency') == curr)
-                c_initial = (INITIAL_DEPOSIT_USDC + state.get('extra_deposits_usdc', 0)) if curr == 'USDC' else (INITIAL_DEPOSIT_USDT + state.get('extra_deposits_usdt', 0))
-                c_correct = c_initial + c_settled + c_pending
-                _bbc = state.setdefault('bankroll_by_currency', {})
-                _bbc[curr] = round(c_correct, 2)
+        # Always sync per-currency split (regardless of total drift) — bug fix: was gated by drift>0.25
+        for curr in ('USDC', 'USDT'):
+            c_settled = sum(float(b.get('winLoss', 0)) for b in bets
+                           if b.get('isSettled') and b.get('currency') == curr)
+            c_pending = sum(float(b.get('stake', 0)) for b in bets
+                           if not b.get('isSettled') and b.get('currency') == curr)
+            c_initial = (INITIAL_DEPOSIT_USDC + state.get('extra_deposits_usdc', 0)) if curr == 'USDC' else (INITIAL_DEPOSIT_USDT + state.get('extra_deposits_usdt', 0))
+            c_correct = c_initial + c_settled + c_pending
+            _bbc = state.setdefault('bankroll_by_currency', {})
+            _bbc[curr] = round(c_correct, 2)
 
         # --- Ghost bet pruning: remove local bets that API no longer knows about ---
         # Cloudbet silently voids markets (e.g. tennis.exact_sets) returning 404 with no history entry.
@@ -3690,6 +3709,18 @@ def send_telegram(msg):
     except Exception:
         pass
 
+def send_whatsapp(msg):
+    """Send alert to WhatsApp group via Baileys :3001. Fire-and-forget."""
+    try:
+        import requests as _wq
+        plain = msg.replace("*", "")
+        _wq.post(
+            "http://127.0.0.1:3001/send",
+            json={"chatId": "120363427170639397@g.us", "message": plain},
+            timeout=5)
+    except Exception:
+        pass
+
 def check_alerts(state):
     """Send Telegram alerts for important events."""
     # Alert on loss streak
@@ -3706,6 +3737,7 @@ def check_alerts(state):
     cb_was = state.get('_cb_active', False)
     if cb_now and not cb_was:
         send_telegram(f'CIRCUIT BREAKER: Bankroll ${state["bankroll"]:.2f} < ${CIRCUIT_BREAKER:.2f}. Betting STOPPED.')
+        send_whatsapp(f'🚨 CIRCUIT BREAKER: BK ${state["bankroll"]:.2f} — apuestas PAUSADAS')
         state['_cb_active'] = True
     elif not cb_now and cb_was:
         send_telegram(f'RECOVERED: Bankroll ${state["bankroll"]:.2f} >= ${CIRCUIT_BREAKER:.2f}. Betting RESUMED.')
@@ -3729,6 +3761,11 @@ def check_alerts(state):
                           f'Bankroll: ${state["bankroll"]:.2f}\n'
                           f'Record: {wins}W/{losses}L\n'
                           f'Active: {len(state.get("active_bets", []))} bets')
+            send_whatsapp(
+                '📊 Oraculo resumen del dia\n'
+                + f'P&L: ${yesterday_pnl:+.2f} | BK: ${state["bankroll"]:.2f}\n'
+                + f'Record: {wins}W/{losses}L | Pendientes: {len(state.get("active_bets", []))}'
+            )
 
 # ---------------------------------------------------------------------------
 # Prediction tracking (for backtest validation)
