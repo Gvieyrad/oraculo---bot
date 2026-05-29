@@ -2056,6 +2056,7 @@ def scan_tennis(api, state, dry_run=False):
                             '_gbc_prob': round(_gbc_ph, 4) if _gbc_ph is not None else None,
                             '_elo_prob': round(_elo_prob_pre, 4),
                             '_edge_va': _edge_va, '_vig': round(_overround - 1.0, 4),
+                            'surface': _surf,
                             '_max_stake': 2.00,
                             '_features': {'elo_diff':round(_eh-_ea,3),'form_a':round(_form_ph,3),'form_b':round(_form_pa,3),'h2h_rate':round(_h2h_rate4,3)},
                         })
@@ -2388,6 +2389,7 @@ def scan_tennis(api, state, dry_run=False):
                                 'edge': round(_edge, 4),
                                 'sport': 'tennis',
                                 'market_type': 'tennis_team_win_set',
+                                'surface': _surf_p2,
                                 '_max_stake': 3.00,
                             })
                             _p2_picks_added += 1
@@ -3034,7 +3036,7 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                       model_prob=p.get('model_prob', 0),
                       market_type=p.get('market_type', ''))
             log.info('  [OK] Bet placed: %s | ID: %s', p['label'], bet_id[:12])
-            send_whatsapp(_wa_bet_msg(p, stake))
+            send_whatsapp(_wa_bet_msg(p, stake, state['daily_pnl']))
             match_bets_this_cycle[p['match']] = match_bets_this_cycle.get(p['match'], 0) + 1
             active_matches[p['match']] = active_matches.get(p['match'], 0) + stake
             if p.get('event_id',''):
@@ -3085,7 +3087,7 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                           model_prob=p.get('model_prob', 0),
                           market_type=p.get('market_type', ''))
                 log.info('  [OK] Bet placed (retry %s): %s | ID: %s', _retry_curr, p['label'], bet_id[:12])
-                send_whatsapp(_wa_bet_msg(p, stake))
+                send_whatsapp(_wa_bet_msg(p, stake, state['daily_pnl']))
                 match_bets_this_cycle[p['match']] = match_bets_this_cycle.get(p['match'], 0) + 1
                 active_matches[p['match']] = active_matches.get(p['match'], 0) + stake
                 if p.get('event_id',''):
@@ -3156,7 +3158,8 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                 f"🎰 Parlay ✅ ({par['n_legs']} picks)\n"
                 f"{par['label'][:60]}\n"
                 f"💰 Odds: {par['combined_odds']:.2f} | Edge: +{par['edge']*100:.1f}%\n"
-                f"💵 Apostado: ${stake:.2f} | Ganancia est: +${stake*(par['combined_odds']-1):.2f}"
+                f"💵 Apostado: ${stake:.2f} | Ganancia est: +${stake*(par['combined_odds']-1):.2f}\n"
+                f"📊 Dia: {'+' if state['daily_pnl'] >= 0 else '-'}${abs(state['daily_pnl']):.2f}"
             )
         time.sleep(2.0)  # Respect rate limit
 
@@ -3736,7 +3739,7 @@ def send_telegram(msg):
     except Exception:
         pass
 
-def _wa_bet_msg(p, stake):
+def _wa_bet_msg(p, stake, daily_pnl=None):
     """Build WA notification card — one field per line, matches reference format."""
     sport = p.get('sport', 'soccer')
     sport_icons = {'soccer': '⚽ Futbol', 'tennis': '🎾 Tennis', 'baseball': '⚾ Beisbol'}
@@ -3774,6 +3777,9 @@ def _wa_bet_msg(p, stake):
         f'💵 Apostado: ${stake:.2f}',
         f'📊 Ganancia est: +${ev:.2f} (retorno: ${stake+ev:.2f})',
     ]
+    if daily_pnl is not None:
+        _ds = '+' if daily_pnl >= 0 else '-'
+        lines.append(f'📊 Dia: {_ds}${abs(daily_pnl):.2f}')
     return '\n'.join(lines)
 
 def send_whatsapp(msg):
@@ -4817,7 +4823,8 @@ def process_manual_bets(api, state):
                 f'{match_name[:50]}\n'
                 f'📌 {pick}\n'
                 f'💰 Odds: {price:.2f}\n'
-                f'💵 Apostado: ${stake:.2f} | Ganancia est: +${stake*(price-1):.2f}'
+                f'💵 Apostado: ${stake:.2f} | Ganancia est: +${stake*(price-1):.2f}\n'
+                f'📊 Dia: {"+" if state["daily_pnl"] >= 0 else "-"}${abs(state["daily_pnl"]):.2f}'
             )
             processed.append({**bet, 'status': 'PLACED', 'bet_id': bet_id,
                             'price': price, 'ts': datetime.now().isoformat()})
@@ -4904,7 +4911,8 @@ def process_manual_bets(api, state):
                 send_whatsapp(
                     f'🎰 Parlay Manual ✅\n'
                     f'{label[:60]}\n'
-                    f'💵 Apostado: ${stake:.2f}'
+                    f'💵 Apostado: ${stake:.2f}\n'
+                    f'📊 Dia: {"+" if state["daily_pnl"] >= 0 else "-"}${abs(state["daily_pnl"]):.2f}'
                 )
                 placed += 1
             else:
