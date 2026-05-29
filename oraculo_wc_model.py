@@ -480,6 +480,41 @@ _PB_NAME_MAP = {
     'Bosnia & Herzegovina': 'Bosnia and Herzegovina',
 }
 
+
+# -- Altitude correction for high-elevation WC venues --------
+ALTITUDE_VENUES = {
+    'Mexico City': 0.12,  # Azteca 2240m
+    'Guadalupe':   0.07,  # Akron ~1500m (Estadio Akron = Zapopan)
+    'Zapopan':     0.07,  # Estadio Akron ~1500m (same venue, alternate city name in CSV)
+}
+_ALT_NAME_NORM = {'South Korea': 'Republic of Korea', 'United States': 'USA'}
+_WC_ALTITUDE_CACHE = None
+
+def _build_altitude_lookup():
+    import csv as _csv, os as _os2
+    cache = {}
+    _p = _os2.path.join(_os2.path.dirname(_os2.path.abspath(__file__)), 'wc2026/intl_results_5y.csv')
+    try:
+        for row in _csv.DictReader(open(_p)):
+            if 'World Cup' not in row.get('tournament', ''): continue
+            if row.get('home_score', 'NA') != 'NA': continue
+            city = row.get('city', '')
+            pen  = ALTITUDE_VENUES.get(city, 0.0)
+            if pen == 0.0: continue
+            h = _ALT_NAME_NORM.get(row['home_team'], row['home_team'])
+            a = _ALT_NAME_NORM.get(row['away_team'], row['away_team'])
+            cache[(h, a)] = pen
+            cache[(row['home_team'], row['away_team'])] = pen
+    except Exception:
+        pass
+    return cache
+
+def get_altitude_away_penalty(home_team, away_team):
+    global _WC_ALTITUDE_CACHE
+    if _WC_ALTITUDE_CACHE is None:
+        _WC_ALTITUDE_CACHE = _build_altitude_lookup()
+    return _WC_ALTITUDE_CACHE.get((home_team, away_team), 0.0)
+
 def predict_match(home_team, away_team, neutral=True):
     """Predict 1X2 + xG. Uses penaltyblog DC model with ELO nudge."""
     h = _PB_NAME_MAP.get(home_team, home_team)
@@ -505,11 +540,28 @@ def predict_match(home_team, away_team, neutral=True):
                 'p_away': round(p_a/norm, 4), 'xg_home': 1.3, 'xg_away': 1.1}
 
     if neutral:
-        # Neutral venue: remove ~30% of home advantage, preserve draw probability
-        ha = p_h - p_a
-        adj = ha * 0.30
-        p_h -= adj
-        p_a += adj
+        # Neutral venue: symmetric average of both directions removes home advantage
+        # correctly for all match quality levels (old linear fix over-corrected for
+        # extreme mismatches, e.g. Brazil 67% vs Haiti when true neutral is 91%)
+        try:
+            grid_rev = pb.predict(a, h)
+            p_h = (p_h + float(grid_rev.away_win)) / 2
+            p_d = (p_d + float(grid_rev.draw)) / 2
+            p_a = (p_a + float(grid_rev.home_win)) / 2
+            xg_h = (xg_h + float(grid_rev.away_goal_expectation)) / 2
+            xg_a = (xg_a + float(grid_rev.home_goal_expectation)) / 2
+        except Exception:
+            ha = p_h - p_a
+            p_h -= ha * 0.30
+            p_a += ha * 0.30
+        norm = p_h + p_d + p_a
+        p_h, p_d, p_a = p_h/norm, p_d/norm, p_a/norm
+
+    # Host venue boost — wires VENUE_BOOST dict (was defined but never applied)
+    host_boost = VENUE_BOOST.get(home_team, 0.0)
+    if host_boost:
+        p_h = min(0.92, p_h + host_boost)
+        p_a = max(0.04, p_a - host_boost * 0.7)
         norm = p_h + p_d + p_a
         p_h, p_d, p_a = p_h/norm, p_d/norm, p_a/norm
 
@@ -522,10 +574,23 @@ def predict_match(home_team, away_team, neutral=True):
     p_d = max(0.04, 1.0 - p_h - p_a)
 
     norm = p_h + p_d + p_a
+    p_h, p_d, p_a = p_h/norm, p_d/norm, p_a/norm
+
+    # Altitude: away loses ~12% xG in Mexico City (2240m), ~7% in Guadalupe/Zapopan (Akron 1500m)
+    alt_penalty = get_altitude_away_penalty(home_team, away_team)
+    if alt_penalty > 0:
+        shift = p_a * alt_penalty
+        p_a -= shift
+        p_h += shift * 0.60
+        p_d += shift * 0.40
+        _n2 = p_h + p_d + p_a
+        p_h, p_d, p_a = p_h/_n2, p_d/_n2, p_a/_n2
+        xg_a = round(xg_a * (1.0 - alt_penalty), 3)
+
     return {
-        'p_home': round(p_h/norm, 4),
-        'p_draw': round(p_d/norm, 4),
-        'p_away': round(p_a/norm, 4),
+        'p_home': round(p_h, 4),
+        'p_draw': round(p_d, 4),
+        'p_away': round(p_a, 4),
         'xg_home': round(xg_h, 3),
         'xg_away': round(xg_a, 3),
     }
@@ -595,4 +660,7 @@ def get_player_adjusted_xg(home_team, away_team, neutral=True):
     away_xg_adj = max(0.40, min(4.0, away_xg * a_atk * (2.0 - h_def)))
     home_concerns = [c['player'] for c in h_data.get('concerns', [])]
     away_concerns = [c['player'] for c in a_data.get('concerns', [])]
+    _alt = get_altitude_away_penalty(home_team, away_team)
+    if _alt > 0:
+        away_xg_adj = max(0.30, away_xg_adj * (1.0 - _alt))
     return round(home_xg_adj, 3), round(away_xg_adj, 3), home_concerns, away_concerns

@@ -20,6 +20,44 @@ _NBA_STARS = {
 }
 
 
+def _get_nba_rest_days(team: str, results: list) -> int:
+    """Return days since team's last game. Returns 99 if no recent games found."""
+    today = datetime.utcnow().date()
+    team_lower = team.lower()
+    game_dates = []
+    for g in results:
+        if (team_lower in g.get('home', '').lower() or
+                team_lower in g.get('away', '').lower()):
+            try:
+                game_dates.append(datetime.strptime(g['date'], '%Y-%m-%d').date())
+            except Exception:
+                pass
+    if not game_dates:
+        return 99
+    past = [d for d in game_dates if d < today]
+    if not past:
+        return 99
+    past.sort()
+    return (today - past[-1]).days
+
+
+def _get_nba_schedule_density(team: str, results: list) -> int:
+    """Return number of games played in last 4 days (B2B or 3-in-4 detection)."""
+    today = datetime.utcnow().date()
+    team_lower = team.lower()
+    count = 0
+    for g in results:
+        if (team_lower in g.get('home', '').lower() or
+                team_lower in g.get('away', '').lower()):
+            try:
+                gd = datetime.strptime(g['date'], '%Y-%m-%d').date()
+                if 0 < (today - gd).days <= 4:
+                    count += 1
+            except Exception:
+                pass
+    return count
+
+
 def _fetch_nba_injury_adj(home_elo, away_elo):
     import requests as _req
     try:
@@ -311,6 +349,12 @@ def scan_nba(api, state, elo=None, dry_run=False, shadow=True):
         log.warning('NBA Elo not ready (%d teams)', len(elo.ratings))
         return []
 
+    # Fetch results for rest-days calculation (6h cache, low overhead)
+    try:
+        _nba_results = fetch_nba_results()
+    except Exception:
+        _nba_results = []
+
     events = api.get_odds('basketball-usa-nba')
     if not events:
         return []
@@ -374,6 +418,36 @@ def scan_nba(api, state, elo=None, dry_run=False, shadow=True):
             prob_away = 1.0 - prob_home
         except Exception as _ie:
             log.debug('NBA injury adj error: %s', _ie)
+
+        # Rest days / schedule density adjustment
+        try:
+            _h_rest = _get_nba_rest_days(home, _nba_results)
+            _a_rest = _get_nba_rest_days(away, _nba_results)
+            _h_dens = _get_nba_schedule_density(home, _nba_results)
+            _a_dens = _get_nba_schedule_density(away, _nba_results)
+            _rest_adj = 0.0
+            _rest_notes = []
+            # B2B penalty: played yesterday (rest=1) or today (rest=0)
+            if _h_rest <= 1:
+                _rest_adj -= 0.04
+                _rest_notes.append(f'{home} B2B')
+            if _a_rest <= 1:
+                _rest_adj += 0.04
+                _rest_notes.append(f'{away} B2B')
+            # 3-in-4 penalty (heavier load)
+            if _h_dens >= 3:
+                _rest_adj -= 0.07
+                _rest_notes.append(f'{home} 3-in-4')
+            if _a_dens >= 3:
+                _rest_adj += 0.07
+                _rest_notes.append(f'{away} 3-in-4')
+            if _rest_adj != 0:
+                log.info('NBA [rest-adj]: %s vs %s | %s | adj=%+.1f%%',
+                         home, away, ', '.join(_rest_notes), _rest_adj * 100)
+                prob_home = min(0.93, max(0.07, prob_home + _rest_adj))
+                prob_away = 1.0 - prob_home
+        except Exception as _re:
+            log.debug('NBA rest adj error: %s', _re)
 
         for sel in ft_sub.get('selections', []):
             outcome = sel.get('outcome', '')

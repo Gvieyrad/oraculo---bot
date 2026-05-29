@@ -36,10 +36,14 @@ MODELS_DIR = os.path.join(SCRIPT_DIR, 'models')
 
 # Jeff Sackmann ATP data URLs
 SACKMANN_URLS = {
-    'atp_2024': 'https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2024.csv',
-    'atp_2023': 'https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2023.csv',
     'atp_2022': 'https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2022.csv',
+    'atp_2023': 'https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2023.csv',
+    'atp_2024': 'https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2024.csv',
     'atp_2025': 'https://raw.githubusercontent.com/JeffSackmann/tennis_atp/master/atp_matches_2025.csv',
+    'wta_2022': 'https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master/wta_matches_2022.csv',
+    'wta_2023': 'https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master/wta_matches_2023.csv',
+    'wta_2024': 'https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master/wta_matches_2024.csv',
+    'wta_2025': 'https://raw.githubusercontent.com/JeffSackmann/tennis_wta/master/wta_matches_2025.csv',
 }
 
 # Cloudbet tennis competition keys
@@ -111,6 +115,57 @@ def download_atp_data(years=None):
         log.info('ATP %d: %d matches', year, len(matches))
 
         # Cache
+        with open(cache_file, 'w') as f:
+            json.dump(matches, f)
+
+        all_matches.extend(matches)
+
+    all_matches.sort(key=lambda m: m.get('date', ''))
+    return all_matches
+
+
+def download_wta_data(years=None):
+    """Download WTA match data from Jeff Sackmann's GitHub."""
+    if years is None:
+        years = [2022, 2023, 2024, 2025]
+
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    all_matches = []
+
+    for year in years:
+        cache_file = os.path.join(CACHE_DIR, f'wta_{year}.json')
+
+        import time
+        if os.path.exists(cache_file):
+            age = time.time() - os.path.getmtime(cache_file)
+            if age < 7 * 86400:
+                try:
+                    with open(cache_file, 'r') as f:
+                        matches = json.load(f)
+                    all_matches.extend(matches)
+                    log.info('WTA %d cache: %d matches', year, len(matches))
+                    continue
+                except Exception:
+                    pass
+
+        url = SACKMANN_URLS.get(f'wta_{year}')
+        if not url:
+            continue
+
+        log.info('Downloading WTA %d...', year)
+        try:
+            from urllib.request import Request, urlopen
+            req = Request(url)
+            req.add_header('User-Agent', 'Oraculo/1.0')
+            resp = urlopen(req, timeout=30)
+            raw = resp.read().decode('utf-8', errors='replace')
+        except Exception as e:
+            log.error('Failed to download WTA %d: %s', year, e)
+            continue
+
+        matches = _parse_atp_csv(raw)  # WTA CSV has same column format
+        log.info('WTA %d: %d matches', year, len(matches))
+
         with open(cache_file, 'w') as f:
             json.dump(matches, f)
 

@@ -21,6 +21,11 @@ TOURNAMENT_K = {
 }
 DEFAULT_K = 30
 INITIAL_ELO = 1500.0
+
+# WC Platt calibration — trained on 320 matches (WC 2006-2022)
+# Corrects systematic Over-prediction bias (raw mean 76.4% vs real 47.2%)
+WC_PLATT_A = 0.0749
+WC_PLATT_B = -0.2431
 MIN_MATCHES = 5
 RECENT_YEARS = 8
 
@@ -156,6 +161,26 @@ class IntlElo:
             if i+j <= line
         )
         return max(0.0, min(1.0, 1.0 - p_under))
+
+    def prob_over_wc(self, home, away, line=2.5, neutral=True):
+        """prob_over with Platt calibration for FIFA World Cup O/U 2.5."""
+        p_raw = self.prob_over(home, away, line, neutral)
+        logit_raw = math.log(max(p_raw, 1e-6) / max(1 - p_raw, 1e-6))
+        p_cal = 1 / (1 + math.exp(-(WC_PLATT_A * logit_raw + WC_PLATT_B)))
+        return max(0.0, min(1.0, p_cal))
+
+    def predict_match_wc(self, home, away, neutral=True):
+        """DC model (Dixon-Coles) for WC; returns (ph, pd, pa, xg_h, xg_a).
+        Uses neutral fix + altitude + player factors from oraculo_wc_model.
+        Falls back to ELO if DC model unavailable."""
+        try:
+            from oraculo_wc_model import predict_match as _wcp
+            r = _wcp(home, away, neutral)
+            return r['p_home'], r['p_draw'], r['p_away'], r['xg_home'], r['xg_away']
+        except Exception:
+            ph, pd, pa = self.predict_match(home, away, neutral)
+            xh, xa = self.expected_goals(home, away, neutral)
+            return ph, pd, pa, xh, xa
 
     def top_teams(self, n=20):
         q = {t: r for t, r in self.ratings.items() if self.matches.get(t,0) >= MIN_MATCHES}

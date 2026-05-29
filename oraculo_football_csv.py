@@ -424,3 +424,190 @@ if __name__ == '__main__':
         print(f'\n{matches[-1]["home_team"]} averages:')
         for k, v in stats.items():
             print(f'  {k}: {v:.1f}')
+
+# ── New leagues (football-data.co.uk/new/) ────────────────────────────────────
+NEW_LEAGUE_CODES = {
+    'ARG': 'Argentina Liga Profesional',
+    'BRA': 'Brasil Serie A',
+    'RUS': 'Russia Premier League',
+    'JPN': 'Japan J1 League',
+}
+
+_NEW_TEAM_MAP = {
+    # Argentina
+    'River Plate': 'River Plate',
+    'Boca Juniors': 'Boca Juniors',
+    'Racing Club': 'Racing Club',
+    'Independiente': 'Independiente',
+    'San Lorenzo': 'San Lorenzo',
+    'Huracan': 'Huracan',
+    'Lanus': 'Lanus',
+    'Belgrano': 'Belgrano',
+    'Talleres': 'Talleres',
+    'Estudiantes': 'Estudiantes',
+    'Defensa y Justicia': 'Defensa y Justicia',
+    'Atletico Tucuman': 'Atletico Tucuman',
+    'Tigre': 'Tigre',
+    'Godoy Cruz': 'Godoy Cruz',
+    "Newell's Old Boys": "Newell's",
+    'Rosario Central': 'Rosario Central',
+    'Arsenal de Sarandi': 'Arsenal Sarandi',
+    'Banfield': 'Banfield',
+    'Colon': 'Colon',
+    'Gimnasia LP': 'Gimnasia LP',
+    'Platense': 'Platense',
+    'Velez Sarsfield': 'Velez',
+    'Sarmiento': 'Sarmiento',
+    'Union': 'Union Santa Fe',
+    'Argentinos Juniors': 'Argentinos',
+    'Central Cordoba': 'Central Cordoba',
+    'Barracas Central': 'Barracas',
+    'Instituto': 'Instituto',
+    'Riestra': 'Riestra',
+    # Brasil
+    'Flamengo': 'Flamengo',
+    'Fluminense': 'Fluminense',
+    'Palmeiras': 'Palmeiras',
+    'Atletico Mineiro': 'Atletico Mineiro',
+    'Sao Paulo': 'Sao Paulo',
+    'Corinthians': 'Corinthians',
+    'Gremio': 'Gremio',
+    'Internacional': 'Internacional',
+    'Santos': 'Santos',
+    'Vasco da Gama': 'Vasco',
+    'Atletico PR': 'Athletico Paranaense',
+    'Athletico Paranaense': 'Athletico Paranaense',
+    'Botafogo': 'Botafogo',
+    'Bahia': 'Bahia',
+    'Fortaleza': 'Fortaleza',
+    'Bragantino': 'Bragantino',
+    'Cruzeiro': 'Cruzeiro',
+    'Vitoria': 'Vitoria',
+    'Atletico Goianiense': 'Atletico GO',
+    'Cuiaba': 'Cuiaba',
+    'Ceara': 'Ceara',
+    'Juventude': 'Juventude',
+    'Mirassol': 'Mirassol',
+    'Coritiba': 'Coritiba',
+    'America MG': 'America MG',
+    'Criciuma': 'Criciuma',
+    'Sport Recife': 'Sport Recife',
+    # Rusia
+    'Spartak Moscow': 'Spartak Moscow',
+    'CSKA Moscow': 'CSKA Moscow',
+    'Lokomotiv Moscow': 'Lokomotiv',
+    'Zenit': 'Zenit',
+    'Krasnodar': 'Krasnodar',
+    'Dynamo Moscow': 'Dynamo Moscow',
+    'Rostov': 'Rostov',
+    'Rubin Kazan': 'Rubin Kazan',
+    'Akhmat Grozny': 'Akhmat',
+    'CSKA Moskva': 'CSKA Moscow',
+    'Spartak Moskva': 'Spartak Moscow',
+    'Lokomotiv Moskva': 'Lokomotiv',
+    'FK Krasnodar': 'Krasnodar',
+    'Dynamo Moskva': 'Dynamo Moscow',
+    'Torpedo Moscow': 'Torpedo Moscow',
+    'Ural': 'Ural',
+    'Sochi': 'Sochi',
+    'Khimki': 'Khimki',
+    'Nizhny Novgorod': 'Nizhny Novgorod',
+    'Krylya Sovetov': 'Krylya Sovetov',
+    'FK Ufa': 'Ufa',
+    'Arsenal Tula': 'Arsenal Tula',
+    # Japan J1
+    'Cerezo Osaka': 'Cerezo Osaka',
+    'Gamba Osaka': 'Gamba Osaka',
+    'Vissel Kobe': 'Vissel Kobe',
+    'Urawa Reds': 'Urawa Reds',
+    'Kashima Antlers': 'Kashima',
+    'Kawasaki Frontale': 'Kawasaki',
+    'Yokohama F Marinos': 'Yokohama FM',
+    'Yokohama Marinos': 'Yokohama FM',
+    'Nagoya Grampus': 'Nagoya',
+    'Sanfrecce Hiroshima': 'Hiroshima',
+    'FC Tokyo': 'FC Tokyo',
+    'Consadole Sapporo': 'Sapporo',
+    'Shonan Bellmare': 'Shonan',
+    'Sagan Tosu': 'Sagan Tosu',
+    'Vegalta Sendai': 'Sendai',
+    'Jubilo Iwata': 'Jubilo',
+    'Avispa Fukuoka': 'Fukuoka',
+    'Albirex Niigata': 'Niigata',
+    'Kashiwa Reysol': 'Kashiwa',
+    'Shimizu S-Pulse': 'Shimizu',
+    'Kyoto Sanga': 'Kyoto',
+    'Tokyo Verdy': 'Tokyo Verdy',
+    'Machida Zelvia': 'Machida',
+}
+
+
+def download_new_league_csv(code, force=False):
+    if code not in NEW_LEAGUE_CODES:
+        log.warning('Unknown new league code: %s', code)
+        return []
+
+    cache_file = os.path.join(_ensure_cache(), f'new_{code}.json')
+
+    if not force and os.path.exists(cache_file):
+        age = time.time() - os.path.getmtime(cache_file)
+        if age < 43200:
+            try:
+                with open(cache_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                pass
+
+    url = f'https://www.football-data.co.uk/new/{code}.csv'
+    log.info('Downloading new league %s from %s', code, url)
+
+    try:
+        from urllib.request import Request, urlopen
+        req = Request(url)
+        req.add_header('User-Agent', 'Mozilla/5.0 Oraculo/1.0')
+        resp = urlopen(req, timeout=30)
+        raw = resp.read().decode('utf-8', errors='replace')
+    except Exception as e:
+        log.error('Failed to download %s: %s', url, e)
+        return []
+
+    matches = _parse_new_league_csv(raw, code)
+    log.info('Parsed %d matches from %s', len(matches), code)
+
+    try:
+        with open(cache_file, 'w', encoding='utf-8') as f:
+            json.dump(matches, f, ensure_ascii=False)
+    except Exception as e:
+        log.warning('Cache write failed: %s', e)
+
+    return matches
+
+
+def _parse_new_league_csv(raw_text, league_code):
+    # new/ CSVs use: Home, Away, HG, AG  (not HomeTeam/FTHG/FTAG)
+    matches = []
+    reader = csv.DictReader(StringIO(raw_text))
+    for row in reader:
+        try:
+            home_raw = row.get('Home', row.get('HomeTeam', '')).strip()
+            away_raw = row.get('Away', row.get('AwayTeam', '')).strip()
+            if not home_raw or not away_raw:
+                continue
+            hg = row.get('HG', row.get('FTHG', '')).strip()
+            ag = row.get('AG', row.get('FTAG', '')).strip()
+            if not hg or not ag:
+                continue
+            home = _NEW_TEAM_MAP.get(home_raw, home_raw)
+            away = _NEW_TEAM_MAP.get(away_raw, away_raw)
+            date_iso = _parse_date(row.get('Date', '').strip())
+            matches.append({
+                'home':       home,
+                'away':       away,
+                'home_goals': int(hg),
+                'away_goals': int(ag),
+                'date':       date_iso,
+                'league':     league_code,
+            })
+        except Exception as e:
+            log.debug('Skip row: %s', e)
+    return matches

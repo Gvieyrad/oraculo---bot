@@ -280,7 +280,18 @@ def record_pick(pick: dict, placed: bool = False, real_stake: float = None, bet_
 
         conn = _get_conn()
 
-        # Dedup: skip if same pick already recorded in the last 2h (scanner runs hourly)
+        # Dedup 1: event_id check (24h window) — prevents re-logging same game after resolver clears it
+        _eid = pick.get('event_id') or ''
+        if _eid:
+            _eid_seen = conn.execute(
+                "SELECT id FROM sibila_picks WHERE event_id=? AND sport=? "
+                "AND ts >= datetime('now', '-24 hours') LIMIT 1",
+                (_eid, sport)).fetchone()
+            if _eid_seen:
+                conn.close()
+                return
+
+        # Dedup 2: match+market+side pending check (fallback for picks without event_id)
         _recent = conn.execute(
             "SELECT id FROM sibila_picks WHERE match=? AND COALESCE(market,'')=? "
             "AND COALESCE(side,'')=? AND result IS NULL LIMIT 1",

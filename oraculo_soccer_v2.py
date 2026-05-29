@@ -1324,7 +1324,7 @@ def scan_soccer_goals(api, state, comp_keys=None, dry_run=False,
 
                         if _edge_1x2 < _min_edge_1x2 or _edge_1x2 > 0.35:
                             continue
-                        if _p_model < 0.45:  # skip long shots (<45% confidence)
+                        if _p_model < 0.50:  # skip long shots (<50% confidence)
                             continue
 
                         picks.append({

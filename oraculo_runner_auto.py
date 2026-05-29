@@ -90,7 +90,7 @@ MLB_MIN_EDGE = 0.15              # 2026-05-22: raised from 0.08 global — ROI -
 WC_ENABLED = True
 WC_MIN_EDGE = 0.10    # 10% — conservative; result_1x2 historical ROI -28.2%
 WC_MIN_CONF = 0.55    # 55% — DC model 60.9% accuracy
-WC_STAKE_PCT = 0.01   # fixed 1% of wc_reserve per bet
+WC_STAKE_PCT = 0.02   # fixed 2% of wc_reserve per bet
 WC_START_DATE = '2026-06-12'
 TENNIS_MAX_EDGE = 0.18         # Cap: 0.20+ bucket is -7.8% ROI — model overestimates extreme edges
 TENNIS_PLATT_A = 1.044   # 2026-05-22: Platt calibration fitted on 124 Sibila picks (15% overestim corrected)
@@ -224,13 +224,28 @@ class CloudbetAPI:
         })
 
     def get_odds(self, comp_key):
-        """Fetch events+odds for a competition (v2 Bearer)."""
-        try:
-            r = self.v2.get(f'{CB_BASE}/pub/v2/odds/competitions/{comp_key}', timeout=15)
-            if r.status_code == 200:
-                return r.json().get('events', [])
-        except Exception as e:
-            log.debug('Odds fetch failed %s: %s', comp_key, e)
+        """Fetch events+odds for a competition (v2 Bearer). Retries on 429/5xx."""
+        for attempt in range(3):
+            try:
+                r = self.v2.get(f'{CB_BASE}/pub/v2/odds/competitions/{comp_key}', timeout=15)
+                if r.status_code == 200:
+                    return r.json().get('events', [])
+                if r.status_code == 429:
+                    wait = 2 ** (attempt + 2)  # 4s, 8s, 16s
+                    log.warning('Odds 429 rate-limit %s — backoff %ds', comp_key, wait)
+                    time.sleep(wait)
+                    continue
+                if r.status_code >= 500:
+                    wait = 2 ** (attempt + 1)  # 2s, 4s, 8s
+                    log.warning('Odds %d server error %s — backoff %ds',
+                                r.status_code, comp_key, wait)
+                    time.sleep(wait)
+                    continue
+                log.debug('Odds HTTP %d for %s', r.status_code, comp_key)
+                return []
+            except Exception as e:
+                log.debug('Odds fetch failed %s: %s', comp_key, e)
+                time.sleep(2 ** attempt)
         return []
 
     def place_straight(self, event_id, market_url, price, stake):
@@ -1120,6 +1135,15 @@ def scan_football(api, state, dry_run=False):
         BLACKLIST_TEAMS = ['Ukraine']  # Skip teams with war/displacement context
         cutoff_intl = (datetime.now(timezone.utc) + timedelta(hours=36)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
+        # Pre-load WC round-3 collusion risk (loaded once, checked per match)
+        _wc_collusion = {}
+        try:
+            import json as _wc_json
+            _col_path = os.path.join(SCRIPT_DIR, 'wc2026/collusion_risk.json')
+            _wc_collusion = _wc_json.load(open(_col_path))
+        except Exception:
+            pass
+
         for intl_league, comp_key in INTL_COMPS.items():
             try:
                 events = api.get_odds(comp_key)
@@ -1155,6 +1179,11 @@ def scan_football(api, state, dry_run=False):
                         if out in ('home', 'draw', 'away') and price > 1.1:
                             odds_1x2[out] = (price, murl)
 
+                # WC knockout detection: if draw not offered (R16/QF/SF/F), re-normalise
+                _wc_knockout = False
+                if intl_league == 'FIFA_WC' and 'draw' not in odds_1x2:
+                    _wc_knockout = True
+
                 # Get Over/Under 2.5 odds
                 ou_mkt = markets.get('soccer.total_goals', {})
                 odds_ou = {}
@@ -1167,19 +1196,100 @@ def scan_football(api, state, dry_run=False):
                         if '2.5' in param and price > 1.1:
                             odds_ou[out] = (price, murl)
 
+                # Get BTTS odds (WC: already live on Cloudbet since May 27)
+                odds_btts = {}
+                if intl_league == 'FIFA_WC':
+                    _btts_mkt = markets.get('soccer.both_teams_to_score', {})
+                    for _sv in _btts_mkt.get('submarkets', {}).values():
+                        for _s in _sv.get('selections', []):
+                            _out = _s.get('outcome', '')
+                            _pr  = float(_s.get('price', 0) or 0)
+                            _mu  = _s.get('marketUrl', '')
+                            if _out in ('yes', 'no') and _pr > 1.1:
+                                odds_btts[_out] = (_pr, _mu)
+
+                # Get 2H goals O/U 1.5 odds (live since May 27)
+                odds_2h = {}
+                if intl_league == 'FIFA_WC':
+                    _h2_mkt = markets.get('soccer.total_goals_period_second_half', {})
+                    for _sv in _h2_mkt.get('submarkets', {}).values():
+                        for _s in _sv.get('selections', []):
+                            _param = str(_s.get('params', ''))
+                            _out   = _s.get('outcome', '')
+                            _pr    = float(_s.get('price', 0) or 0)
+                            _mu    = _s.get('marketUrl', '')
+                            if '1.5' in _param and _pr > 1.1:
+                                odds_2h[_out] = (_pr, _mu)
+
                 # Compute model probabilities
+                import math as _m
                 try:
-                    ph, pd, pa = intl_elo.predict_match(home, away, neutral)
-                    # WC Platt calibration: corrects systematic 76% Over bias → real 47%
-                    if intl_league == 'FIFA_WC' and hasattr(intl_elo, 'prob_over_wc'):
-                        p_o25 = intl_elo.prob_over_wc(home, away, 2.5, neutral)
+                    _is_wc = intl_league == 'FIFA_WC'
+                    if _is_wc and hasattr(intl_elo, 'predict_match_wc'):
+                        # DC model (neutral fix + altitude + player factors)
+                        ph, pd, pa, _xg_h, _xg_a = intl_elo.predict_match_wc(home, away, True)
+                        # Knockout: no draw in 90min — collapse pd into ph/pa proportionally
+                        if _wc_knockout and pd > 0:
+                            _renorm = 1.0 / (ph + pa) if (ph + pa) > 0 else 1.0
+                            ph, pa, pd = ph * _renorm, pa * _renorm, 0.0
+                        _xg_h *= 1.043  # WC xG calib: DC underestimates by 4.3% vs WC 2022
+                        _xg_a *= 1.043
+                        # O/U 2.5 from DC xG Poisson (unified model — no ELO fallback)
+                        _pu25 = sum(
+                            _m.exp(-_xg_h) * _xg_h**_i / _m.factorial(_i) *
+                            _m.exp(-_xg_a) * _xg_a**_j / _m.factorial(_j)
+                            for _i in range(4) for _j in range(4) if _i + _j <= 2
+                        )
+                        p_o25 = max(0.0, min(1.0, 1.0 - _pu25))
+                        # BTTS from player-adjusted DC xG (injury factors applied, 66.7% WR in club soccer)
+                        try:
+                            from oraculo_wc_model import get_player_adjusted_xg as _paxg
+                            _padj = _paxg(home, away)
+                            _xg_h_adj, _xg_a_adj = float(_padj[0]), float(_padj[1])
+                        except Exception:
+                            _xg_h_adj, _xg_a_adj = _xg_h, _xg_a
+                        p_btts_yes = max(0.0, min(1.0, (1 - _m.exp(-_xg_h_adj)) * (1 - _m.exp(-_xg_a_adj))))
+                        p_btts_no  = 1.0 - p_btts_yes
+                        # 2H goals: ~45% of player-adjusted xG
+                        _xh2, _xa2 = _xg_h_adj * 0.45, _xg_a_adj * 0.45
+                        _pu15_2h = sum(
+                            _m.exp(-_xh2) * _xh2**i / _m.factorial(i) *
+                            _m.exp(-_xa2) * _xa2**j / _m.factorial(j)
+                            for i in range(2) for j in range(2) if i + j <= 1
+                        )
+                        p_o15_2h = max(0.0, min(1.0, 1.0 - _pu15_2h))
+                        p_u15_2h = 1.0 - p_o15_2h
                     else:
-                        p_o25 = intl_elo.prob_over(home, away, 2.5, neutral)
+                        ph, pd, pa = intl_elo.predict_match(home, away, neutral)
+                        _is_wc = intl_league == 'FIFA_WC'
+                        if _is_wc and hasattr(intl_elo, 'prob_over_wc'):
+                            p_o25 = intl_elo.prob_over_wc(home, away, 2.5, neutral)
+                        else:
+                            p_o25 = intl_elo.prob_over(home, away, 2.5, neutral)
+                        p_btts_yes = p_btts_no = None
+                        p_o15_2h = p_u15_2h = None
+                        _xg_h = _xg_a = 0.0
                     p_u25 = 1 - p_o25
                 except Exception:
                     continue
 
                 match_label = f'{home} vs {away}'
+
+                # WC round-3 collusion guard (disgrace risk >= 8% → skip 1X2 + BTTS-Yes)
+                _skip_1x2 = False
+                _skip_btts_yes = False
+                if intl_league == 'FIFA_WC' and _wc_collusion:
+                    _ev_teams = {home, away}
+                    for _cgv in _wc_collusion.values():
+                        if ((_ev_teams == set(_cgv.get('round3_game1', []))) or
+                                (_ev_teams == set(_cgv.get('round3_game2', [])))):
+                            _pdis = _cgv.get('p_disgrace_setup', 0)
+                            if _pdis >= 0.08:
+                                _skip_1x2 = True
+                                _skip_btts_yes = True
+                                log.info('WC collusion guard %s p_disgrace=%.3f — 1X2+BTTS-Yes skipped',
+                                         match_label, _pdis)
+                            break
 
                 # 1X2 edges
                 for out_key, prob in [('home', ph), ('draw', pd), ('away', pa)]:
@@ -1190,7 +1300,7 @@ def scan_football(api, state, dry_run=False):
                         _is_wc = intl_league == 'FIFA_WC'
                         _e_min = WC_MIN_EDGE if _is_wc else MIN_EDGE
                         _c_min = WC_MIN_CONF if _is_wc else MIN_CONF
-                        if edge >= _e_min and prob >= _c_min and edge < 0.45 and prob < 0.92:
+                        if not _skip_1x2 and edge >= _e_min and prob >= _c_min and edge < 0.45 and prob < 0.92:
                             _pick = {
                                 'match': match_label, 'league': intl_league,
                                 'event_id': eid, 'market_url': murl,
@@ -1221,6 +1331,39 @@ def scan_football(api, state, dry_run=False):
                                 'model_prob': prob, 'edge': edge,
                                 'sport': 'soccer', 'intl': True,
                             })
+
+                # WC BTTS edges (DC xG model — 66.7% WR in club soccer)
+                if intl_league == 'FIFA_WC' and p_btts_yes is not None:
+                    for _bo, _bp in [('yes', p_btts_yes), ('no', p_btts_no)]:
+                        if _bo in odds_btts:
+                            _pr, _mu = odds_btts[_bo]
+                            _edge = _bp * _pr - 1
+                            _skip_this_btts = _skip_btts_yes and _bo == 'yes'
+                            if not _skip_this_btts and _edge >= WC_MIN_EDGE and _bp >= 0.55 and _edge < 0.45 and _bp < 0.92:
+                                picks.append({
+                                    'match': match_label, 'league': intl_league,
+                                    'event_id': eid, 'market_url': _mu,
+                                    'price': _pr,
+                                    'label': f'BTTS {"Yes" if _bo == "yes" else "No"} (xG {_xg_h:.1f}/{_xg_a:.1f})',
+                                    'model_prob': _bp, 'edge': _edge,
+                                    'sport': 'soccer', 'intl': True, '_wc_phase_c': True,
+                                })
+
+                # WC 2H Goals O/U 1.5 edges (DC xG × 0.45 — live prices since May 27)
+                if intl_league == 'FIFA_WC' and p_o15_2h is not None:
+                    for _ho, _hp in [('over', p_o15_2h), ('under', p_u15_2h)]:
+                        if _ho in odds_2h:
+                            _pr, _mu = odds_2h[_ho]
+                            _edge = _hp * _pr - 1
+                            if _edge >= WC_MIN_EDGE and _hp >= 0.55 and _edge < 0.45 and _hp < 0.92:
+                                picks.append({
+                                    'match': match_label, 'league': intl_league,
+                                    'event_id': eid, 'market_url': _mu,
+                                    'price': _pr,
+                                    'label': f'Goals 2H {_ho.title()} 1.5 (xG {_xg_h*0.45:.1f}+{_xg_a*0.45:.1f})',
+                                    'model_prob': _hp, 'edge': _edge,
+                                    'sport': 'soccer', 'intl': True, '_wc_phase_c': True,
+                                })
 
     # Record odds for monitoring
     try:
@@ -1316,6 +1459,49 @@ def scan_football(api, state, dry_run=False):
             log.info('Steam moves detected: %d picks', _steam_count)
     except Exception as _e:
         log.debug('Steam scan error: %s', _e)
+
+    # WC correlated picks cap: keep top-2 per match (avoid over-betting correlated outcomes)
+    _wc_by_match = {}
+    for _pi, _pp in enumerate(picks):
+        if not _pp.get('_wc_phase_c'):
+            continue
+        _mk = _pp.get('match', '')
+        _wc_by_match.setdefault(_mk, []).append(_pi)
+    _capped = set()
+    for _mk, _idxs in _wc_by_match.items():
+        if len(_idxs) <= 2:
+            continue
+        # Sort by edge descending, drop everything after top 2
+        _idxs_sorted = sorted(_idxs, key=lambda i: picks[i].get('edge', 0), reverse=True)
+        for _drop_i in _idxs_sorted[2:]:
+            _capped.add(_drop_i)
+            log.info('WC picks cap: dropped %s %s (corr)', picks[_drop_i].get('match','?')[:25], picks[_drop_i].get('label','?'))
+    if _capped:
+        picks = [p for i, p in enumerate(picks) if i not in _capped]
+        log.info('WC picks cap: removed %d correlated picks', len(_capped))
+
+    # WC Pinnacle blend: 30% DC model + 70% Pinnacle no-vig for 1X2 picks
+    _pinn_blended = 0
+    try:
+        from oraculo_clv import get_novig_prob as _gnp
+        for _pi, _pp in enumerate(picks):
+            if not _pp.get('_wc_phase_c'):
+                continue
+            _lbl = _pp.get('label', '')
+            if 'BTTS' in _lbl or '1.5' in _lbl or '2.5' in _lbl:
+                continue  # blend 1X2 only
+            _pinn_p = _gnp(_pp.get('match', ''), 'soccer', _lbl, 'soccer-international-world-cup')
+            if _pinn_p and 0.05 < _pinn_p < 0.95:
+                _b_prob = round(0.30 * _pp['model_prob'] + 0.70 * _pinn_p, 4)
+                _b_edge = round(_b_prob * _pp['price'] - 1, 4)
+                picks[_pi] = {**_pp, 'model_prob': _b_prob, 'edge': _b_edge,
+                               '_pinn_blend': True, '_dc_prob': _pp['model_prob'],
+                               '_pinn_prob': round(_pinn_p, 4)}
+                _pinn_blended += 1
+    except Exception as _pe:
+        log.debug('WC Pinnacle blend error: %s', _pe)
+    if _pinn_blended:
+        log.info('WC Pinnacle blend: %d picks updated', _pinn_blended)
 
     # Higher minimum edge for soccer (8%) to avoid marginal bets
     _pre_filter = len(picks)
@@ -1563,6 +1749,12 @@ def scan_tennis(api, state, dry_run=False):
                 _wta_fresh = True
                 log.info('Tennis WTA Elo loaded from cache (%d players)', len(wta_elo.overall))
         if not _wta_fresh:
+            try:
+                from oraculo_tennis import download_wta_data
+                download_wta_data()
+                log.info('WTA Sackmann data refreshed')
+            except Exception as _ewta:
+                log.debug('WTA download skipped: %s', _ewta)
             for fname in sorted(os.listdir(cache_dir)) if os.path.isdir(cache_dir) else []:
                 if fname.startswith('wta_') and fname.endswith('.json'):
                     with open(os.path.join(cache_dir, fname)) as f:
@@ -4227,6 +4419,7 @@ def sync_obsidian(state):
 # ---------------------------------------------------------------------------
 # HTML Dashboard
 # ---------------------------------------------------------------------------
+HEARTBEAT_FILE  = os.path.join(SCRIPT_DIR, '.oraculo_heartbeat')
 DASHBOARD_FILE = os.path.join(SCRIPT_DIR, 'dashboard.html')
 
 def generate_dashboard(state):
@@ -4272,6 +4465,38 @@ def generate_dashboard(state):
             settled_pred = sum(1 for l in lines if '"result":' in l and '"result": null' not in l)
             pred_stats = f"Predictions logged: {total_pred} ({settled_pred} settled)"
 
+        # WC 2026 progress section
+        from datetime import date as _date
+        _wc_start = _date(2026, 6, 12)
+        _today = _date.today()
+        _wc_days_left = (_wc_start - _today).days
+        _wc_countdown = (f"{_wc_days_left} days to kick-off" if _wc_days_left > 0
+                         else ("LIVE" if _wc_days_left == 0 else "IN PROGRESS"))
+        _wc_reserve = state.get('wc_reserve', 0)
+        _wc_bets = [b for b in active
+                    if b.get('cutoff_time', '') >= '2026-06-01'
+                    or b.get('league') == 'FIFA_WC']
+        _wc_rows = ''
+        for _wb in sorted(_wc_bets, key=lambda x: x.get('cutoff_time', '')):
+            _wc_rows += (f'<tr><td>{_wb.get("match","?")[:40]}</td>'
+                         f'<td>{_wb.get("label","?")[:30]}</td>'
+                         f'<td>{_wb.get("odds",0):.2f}</td>'
+                         f'<td>${_wb.get("stake",0):.2f}</td>'
+                         f'<td>{_wb.get("cutoff_time","?")[:10]}</td></tr>')
+        _wc_table = (f'''<table><tr><th>Match</th><th>Pick</th><th>Odds</th>
+                     <th>Stake</th><th>Date</th></tr>{_wc_rows}</table>'''
+                     if _wc_rows else '<p style="color:#888">No WC bets placed yet.</p>')
+        wc_section = f'''<h2>&#127942; World Cup 2026 ({_wc_countdown})</h2>
+<div class="kpi">
+  <div class="kpi-box"><div class="label">WC Reserve</div>
+    <div class="value">${_wc_reserve:.2f}</div></div>
+  <div class="kpi-box"><div class="label">WC Active Bets</div>
+    <div class="value">{len(_wc_bets)}</div></div>
+  <div class="kpi-box"><div class="label">WC Stake In Flight</div>
+    <div class="value">${sum(b.get("stake",0) for b in _wc_bets):.2f}</div></div>
+</div>
+{_wc_table}'''
+
         html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Oraculo Dashboard</title>
 <meta http-equiv="refresh" content="120">
@@ -4305,6 +4530,8 @@ def generate_dashboard(state):
 <h2>Settled Today ({len(settled)})</h2>
 <table><tr><th>Match</th><th>Result</th><th>P&L</th><th>Settled</th></tr>
 {settled_rows}</table>
+
+{wc_section}
 
 <div class="footer">
   Last scan: {state.get('last_scan', 'never')[:19]}<br>
@@ -5404,8 +5631,28 @@ def run_loop():
     NEWS_REFRESH_INTERVAL = 7200   # Refresh tennis news every 2 hours
     last_news_refresh = 0
 
+    # Dead-man switch: check if a previous crash left a stale heartbeat
+    _hb_stale = False
+    try:
+        if os.path.exists(HEARTBEAT_FILE):
+            _hb_age = time.time() - os.path.getmtime(HEARTBEAT_FILE)
+            if _hb_age > 1800:  # > 30 min
+                _hb_stale = True
+                log.warning('HEARTBEAT STALE: last beat %.0f min ago — runner was down!',
+                            _hb_age / 60)
+                if TELEGRAM_ENABLED:
+                    send_telegram(
+                        f'\u26a0\ufe0f Oraculo restarted after {_hb_age/60:.0f} min downtime')
+    except Exception:
+        pass
+
     while True:
         now_t = time.time()
+        # Write heartbeat file every iteration (dead-man switch)
+        try:
+            open(HEARTBEAT_FILE, 'w').write(str(now_t))
+        except Exception:
+            pass
         # Refresh tennis news for LLM context
         if now_t - last_news_refresh >= NEWS_REFRESH_INTERVAL:
             try:

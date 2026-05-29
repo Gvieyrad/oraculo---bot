@@ -16,7 +16,7 @@ Integración:
 
 Generado en Semana 2 del plan de mejoras Oráculo
 """
-import os, json, time, logging
+import os, json, re, time, logging
 from datetime import datetime, timedelta
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
@@ -45,6 +45,50 @@ def _get_api_key():
         return json.load(open(cfg_path)).get('odds_api_key', '')
     except Exception:
         return ''
+
+
+
+# Path to odds history database (populated by live scraper, Cloudbet event IDs)
+_ODDS_HISTORY_DB = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'odds_history.db')
+
+
+def _fetch_closing_odds_local(event_id: str, market_type: str, label: str) -> float:
+    """
+    Look up the last recorded price for this event in odds_history.db.
+    Supports soccer over/under full-match, 2H and 1H period markets.
+    Returns decimal odds or 0.0 if not found.
+    """
+    if not event_id or not os.path.exists(_ODDS_HISTORY_DB):
+        return 0.0
+    try:
+        import sqlite3
+        label_lower = label.lower()
+        m = re.search(r'(over|under)\s+([\d.]+)', label_lower)
+        if not m:
+            return 0.0
+        direction = m.group(1)
+        line = m.group(2)
+        if '2h' in label_lower or 'second half' in label_lower:
+            url_pat = '%%total_goals_period_second_half/%s?total=%s%%' % (direction, line)
+        elif '1h' in label_lower or 'first half' in label_lower:
+            url_pat = '%%total_goals_period_first_half/%s?total=%s%%' % (direction, line)
+        else:
+            url_pat = '%%total_goals/%s?total=%s%%' % (direction, line)
+        conn = sqlite3.connect(_ODDS_HISTORY_DB)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT price FROM odds_snapshots WHERE event_id=? AND market_url LIKE ? "
+            "AND market_url NOT LIKE '%team%' ORDER BY timestamp DESC LIMIT 1",
+            (str(event_id), url_pat)
+        )
+        row = cur.fetchone()
+        conn.close()
+        if row and float(row[0] or 0) > 1.0:
+            log.debug('CLV local: event=%s %s %s -> %.3f', event_id, direction, line, row[0])
+            return float(row[0])
+    except Exception as e:
+        log.debug('CLV local lookup error: %s', e)
+    return 0.0
 
 
 def _fetch_closing_odds(match: str, sport: str, entry_ts: str) -> float:
@@ -310,12 +354,17 @@ def record_closing_for_settled(predictions_file: str):
 
         # Only process settled bets that don't have CLV yet
         if entry.get('result') and entry.get('clv') is None:
-            entry_odds = entry.get('odds', 0)
-            match     = entry.get('match', '')
-            sport     = entry.get('sport', 'tennis')
-            ts        = entry.get('ts', '')
+            entry_odds  = entry.get('odds', 0)
+            match       = entry.get('match', '')
+            sport       = entry.get('sport', 'tennis')
+            ts          = entry.get('ts', '')
+            market_type = entry.get('market_type', '')
+            label       = entry.get('label', '')
+            event_id    = entry.get('event_id', '')
 
-            closing = _fetch_closing_odds(match, sport, ts)
+            closing = _fetch_closing_odds_local(event_id, market_type, label)
+            if not closing:
+                closing = _fetch_closing_odds(match, sport, ts)
             clv = compute_clv(float(entry_odds), closing) if closing else None
             if clv is not None:
                 entry['clv'] = clv
