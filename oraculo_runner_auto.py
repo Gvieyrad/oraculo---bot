@@ -3013,12 +3013,7 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                       model_prob=p.get('model_prob', 0),
                       market_type=p.get('market_type', ''))
             log.info('  [OK] Bet placed: %s | ID: %s', p['label'], bet_id[:12])
-            _wa_sport = '🏆 WC' if p.get('_wc_phase_c') else {'soccer': '⚽', 'tennis': '🎾', 'baseball': '⚾'}.get(p.get('sport', 'soccer'), '🎰')
-            send_whatsapp(
-                f"{_wa_sport} APUESTA: {p['match'][:35]}\n"
-                f"{p['label']} @{p['price']:.2f} | Edge {p['edge']*100:.0f}%\n"
-                f"Apostado: ${stake:.2f} | Ganancia: +${stake*(p['price']-1):.2f}"
-            )
+            send_whatsapp(_wa_bet_msg(p, stake))
             match_bets_this_cycle[p['match']] = match_bets_this_cycle.get(p['match'], 0) + 1
             active_matches[p['match']] = active_matches.get(p['match'], 0) + stake
             if p.get('event_id',''):
@@ -3069,12 +3064,7 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                           model_prob=p.get('model_prob', 0),
                           market_type=p.get('market_type', ''))
                 log.info('  [OK] Bet placed (retry %s): %s | ID: %s', _retry_curr, p['label'], bet_id[:12])
-                _wa_sport_r = '🏆 WC' if p.get('_wc_phase_c') else {'soccer': '⚽', 'tennis': '🎾', 'baseball': '⚾'}.get(p.get('sport', 'soccer'), '🎰')
-                send_whatsapp(
-                    f"{_wa_sport_r} APUESTA: {p['match'][:35]}\n"
-                    f"{p['label']} @{p['price']:.2f} | Edge {p['edge']*100:.0f}%\n"
-                    f"Apostado: ${stake:.2f} | Ganancia: +${stake*(p['price']-1):.2f}"
-                )
+                send_whatsapp(_wa_bet_msg(p, stake))
                 match_bets_this_cycle[p['match']] = match_bets_this_cycle.get(p['match'], 0) + 1
                 active_matches[p['match']] = active_matches.get(p['match'], 0) + stake
                 if p.get('event_id',''):
@@ -3142,9 +3132,10 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                       event_ids=_parlay_eids)  # persisted atomically with save_state
             log.info('  [OK] Parlay placed: %s', bet_id[:12])
             send_whatsapp(
-                f"🎰 PARLAY: {par['label'][:60]}\n"
-                f"@{par['combined_odds']:.2f} | Edge {par['edge']*100:.0f}%\n"
-                f"Apostado: ${stake:.2f} | Ganancia: +${stake*(par['combined_odds']-1):.2f}"
+                f"🎰 Parlay ✅ ({par['n_legs']} picks)\n"
+                f"{par['label'][:60]}\n"
+                f"💰 Odds: {par['combined_odds']:.2f} | Edge: +{par['edge']*100:.1f}%\n"
+                f"💵 Stake: ${stake:.2f} | EV: +${stake*(par['combined_odds']-1):.2f}"
             )
         time.sleep(2.0)  # Respect rate limit
 
@@ -3721,6 +3712,37 @@ def send_telegram(msg):
                              'parse_mode': 'Markdown'}, timeout=5)
     except Exception:
         pass
+
+def _wa_bet_msg(p, stake):
+    """Build WA notification card matching reference format."""
+    sport = p.get('sport', 'soccer')
+    icons = {'soccer': '⚽ Futbol', 'tennis': '🎾 Tennis', 'baseball': '⚾ Beisbol'}
+    hdr = '🏆 WC' if p.get('_wc_phase_c') else icons.get(sport, '🎰 Apuesta')
+    league = p.get('league', '')
+    hdr_line = f'{hdr} ✅ — {league}' if league else f'{hdr} ✅'
+    # date/time from cutoff_time
+    ct = p.get('cutoff_time', '')
+    try:
+        from datetime import datetime as _dt
+        _d = _dt.strptime(ct[:19], '%Y-%m-%dT%H:%M:%S')
+        date_str = _d.strftime('%-d %b %H:%M')
+    except Exception:
+        date_str = ''
+    match_line = p['match'][:50]
+    if date_str:
+        match_line += f' · {date_str}'
+    label = p.get('label', '')
+    odds = p.get('price', 0)
+    edge = p.get('edge', 0) * 100
+    conf = p.get('model_prob', 0) * 100
+    ev = stake * (odds - 1)
+    return (
+        f'{hdr_line}\n'
+        f'{match_line}\n'
+        f'📌 {label}\n'
+        f'💰 Odds: {odds:.2f} | Edge: +{edge:.1f}% | Conf: {conf:.0f}%\n'
+        f'💵 Stake: ${stake:.2f} | EV: +${ev:.2f}'
+    )
 
 def send_whatsapp(msg):
     """Send alert to WhatsApp group via Baileys :3001. Fire-and-forget."""
@@ -4754,13 +4776,16 @@ def process_manual_bets(api, state):
                       sport, price, stake, source='manual', currency=currency,
                       owner=bet.get('owner','friend'))
             state['daily_staked'] += stake
+            state['bets_placed_today'] = state.get('bets_placed_today', 0) + 1
             log.info('  [OK] Manual bet placed: %s | ID: %s', pick, bet_id[:12])
             send_telegram('Manual bet placed: {} | {} @{:.2f} | ${:.2f}'.format(
                 match_name, pick, price, stake))
             send_whatsapp(
-                f'⚽ APUESTA MANUAL: {match_name[:35]}\n'
-                f'{pick} @{price:.2f}\n'
-                f'Apostado: ${stake:.2f} | Ganancia: +${stake*(price-1):.2f}'
+                f'⚽ Manual ✅\n'
+                f'{match_name[:50]}\n'
+                f'📌 {pick}\n'
+                f'💰 Odds: {price:.2f}\n'
+                f'💵 Stake: ${stake:.2f} | EV: +${stake*(price-1):.2f}'
             )
             processed.append({**bet, 'status': 'PLACED', 'bet_id': bet_id,
                             'price': price, 'ts': datetime.now().isoformat()})
@@ -4841,11 +4866,13 @@ def process_manual_bets(api, state):
                           'tennis', 0, stake, source='manual', currency=parlay_currency,
                           owner=parlay.get('owner','friend'))
                 state['daily_staked'] += stake
+                state['bets_placed_today'] = state.get('bets_placed_today', 0) + 1
                 log.info('  [OK] Manual parlay placed: %s', bet_id[:12])
                 send_telegram('Manual parlay placed: {} @${:.2f}'.format(label, stake))
                 send_whatsapp(
-                    f'🎰 PARLAY MANUAL: {label[:60]}\n'
-                    f'Apostado: ${stake:.2f}'
+                    f'🎰 Parlay Manual ✅\n'
+                    f'{label[:60]}\n'
+                    f'💵 Stake: ${stake:.2f}'
                 )
                 placed += 1
             else:
