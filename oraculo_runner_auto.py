@@ -430,6 +430,19 @@ def load_state():
             state["restricted_event_ids"] = []  # Reset daily - stale events cause silent skips
         return state
     except Exception:
+        # Try rolling auto-backup before falling back to stale hardcoded defaults
+        _bak = STATE_FILE + '.bak_auto'
+        if os.path.exists(_bak):
+            try:
+                with open(_bak) as _f:
+                    state = json.load(_f)
+                log.warning('STATE: primary corrupt/missing — loaded from .bak_auto')
+                for k, v in default.items():
+                    state.setdefault(k, v)
+                return state
+            except Exception:
+                pass
+        log.warning('STATE: all state sources failed — starting from hardcoded defaults')
         default['daily_date'] = datetime.now().strftime('%Y-%m-%d')
         return default
 
@@ -439,6 +452,12 @@ def save_state(state):
     with open(_tmp, 'w') as f:
         json.dump(state, f, indent=2, default=str)
     os.replace(_tmp, STATE_FILE)  # atomic on Linux — safe against mid-write corruption
+    # Rolling auto-backup (previous cycle) — used as fallback in load_state
+    try:
+        import shutil as _sh
+        _sh.copy2(STATE_FILE, STATE_FILE + '.bak_auto')
+    except Exception:
+        pass
 
 def reconcile_engine_state():
     """Sync picks/engine_state.json pending bets into auto state.
@@ -3348,9 +3367,11 @@ def check_results(api, state):
                 f'Bankroll: ${state["bankroll"]:.2f} | Today: ${state["daily_pnl"]:+.2f}'
             )
             send_whatsapp(
-                f"{_tg_emoji} {result}: ${_tg_pnl:+.2f} | {_tg_match}\n"
-                f"{_tg_label}{_tg_prob_str}\n"
-                f"BK: ${state['bankroll']:.2f} | Dia: ${state['daily_pnl']:+.2f}"
+                f"{_tg_emoji} {result}\n"
+                f"{_tg_match}\n"
+                f"📌 {_tg_label}{_tg_prob_str}\n"
+                f"💰 Resultado: {'+' if _tg_pnl >= 0 else '-'}${abs(_tg_pnl):.2f}\n"
+                f"📊 Dia: {'+' if state['daily_pnl'] >= 0 else '-'}${abs(state['daily_pnl']):.2f}"
             )
         except Exception as _tg_err:
             log.debug('Telegram settlement notification failed: %s', _tg_err)
