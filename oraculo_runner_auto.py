@@ -15,7 +15,7 @@ Author: Oraculo ML System
 Date: 2026-03-22
 """
 
-import os, sys, json, time, logging, argparse, uuid, re
+import os, sys, json, time, logging, argparse, uuid, re, gc
 from datetime import datetime, timedelta, timezone
 from itertools import combinations
 
@@ -859,6 +859,8 @@ def scan_football(api, state, dry_run=False):
         if not mp.load():
             mp = None
             log.warning('No trained model, using Poisson/Elo only')
+        else:
+            gc.collect()
     except Exception as e:
         log.warning('MarketPredictor unavailable: %s', e)
 
@@ -1781,6 +1783,7 @@ def scan_tennis(api, state, dry_run=False):
             _tn_adv_wta.load_match_history(_cache_dir)
             scan_tennis._adv_atp = _tn_adv_atp
             scan_tennis._adv_wta = _tn_adv_wta
+            gc.collect()
         except Exception as e:
             log.debug('TennisAdvanced unavailable: %s', e)
     except Exception as e:
