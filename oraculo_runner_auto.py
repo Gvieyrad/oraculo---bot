@@ -5115,14 +5115,14 @@ def run_cycle(dry_run=False):
     # Exclude tennis_exact_sets: 0W/6L (-71.6% ROI in Sibila realistic, pure variance drain)
     # sets_under (Sets Under 2.5): BLOCKED pending calibration — N=12 contaminated (Kelly runaway+prob=0 picks)
     #   Revisit when Sibila shadow has 30+ clean picks (prob>0, edge>=8%, stake<=2)
-    # tennis_team_win_set: calibrated filter — edge>=18% AND odds>=1.40
-    # Sibila N=46: current filter ROI +1%, calibrated ROI +16.8% (paradox: conf>=0.75 excluded profitable low-odds picks)
+    # tennis_team_win_set: tactical pool mode — edge>=8% AND odds>=1.35
+    # (relaxed from 18%/1.40 while WC reserve locks USDC; $40 USDT tactical pool rotates Roland Garros picks)
     tennis_picks = [p for p in tennis_picks
                     if p.get('market_type') not in ('tennis_exact_sets', 'sets_under')
-                    # tennis_team_win_set: edge>=18% AND odds>=1.40 (calibrated from Sibila N=46)
+                    # tennis_team_win_set: edge>=8% AND odds>=1.35 (tactical pool, revert to 18%/1.40 after Jun 11)
                     and not (p.get('market_type') == 'tennis_team_win_set'
-                             and (float(p.get('edge', 0) or 0) < 0.18
-                                  or float(p.get('price', 0) or 0) < 1.40))
+                             and (float(p.get('edge', 0) or 0) < 0.08
+                                  or float(p.get('price', 0) or 0) < 1.35))
                     # h2h: require conf>=0.75 (prob<0.7 = -17% to -52% ROI in Sibila)
                     and not (p.get('market_type') in ('', None)
                              and float(p.get('confidence') or p.get('model_prob') or 0) < 0.75)]
