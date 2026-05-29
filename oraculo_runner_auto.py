@@ -435,8 +435,10 @@ def load_state():
 
 def save_state(state):
     state['updated'] = datetime.now().isoformat()
-    with open(STATE_FILE, 'w') as f:
+    _tmp = STATE_FILE + '.tmp'
+    with open(_tmp, 'w') as f:
         json.dump(state, f, indent=2, default=str)
+    os.replace(_tmp, STATE_FILE)  # atomic on Linux — safe against mid-write corruption
 
 def reconcile_engine_state():
     """Sync picks/engine_state.json pending bets into auto state.
@@ -3135,7 +3137,7 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                 f"🎰 Parlay ✅ ({par['n_legs']} picks)\n"
                 f"{par['label'][:60]}\n"
                 f"💰 Odds: {par['combined_odds']:.2f} | Edge: +{par['edge']*100:.1f}%\n"
-                f"💵 Stake: ${stake:.2f} | EV: +${stake*(par['combined_odds']-1):.2f}"
+                f"💵 Apostado: ${stake:.2f} | Ganancia est: +${stake*(par['combined_odds']-1):.2f}"
             )
         time.sleep(2.0)  # Respect rate limit
 
@@ -3714,35 +3716,44 @@ def send_telegram(msg):
         pass
 
 def _wa_bet_msg(p, stake):
-    """Build WA notification card matching reference format."""
+    """Build WA notification card — one field per line, matches reference format."""
     sport = p.get('sport', 'soccer')
-    icons = {'soccer': '⚽ Futbol', 'tennis': '🎾 Tennis', 'baseball': '⚾ Beisbol'}
-    hdr = '🏆 WC' if p.get('_wc_phase_c') else icons.get(sport, '🎰 Apuesta')
+    sport_icons = {'soccer': '⚽ Futbol', 'tennis': '🎾 Tennis', 'baseball': '⚾ Beisbol'}
+    hdr = '🏆 WC' if p.get('_wc_phase_c') else sport_icons.get(sport, '🎰 Apuesta')
     league = p.get('league', '')
-    hdr_line = f'{hdr} ✅ — {league}' if league else f'{hdr} ✅'
-    # date/time from cutoff_time
+    # date from cutoff_time
     ct = p.get('cutoff_time', '')
     try:
         from datetime import datetime as _dt
         _d = _dt.strptime(ct[:19], '%Y-%m-%dT%H:%M:%S')
-        date_str = _d.strftime('%-d %b %H:%M')
+        date_str = _d.strftime('%-d %b · %H:%M')
     except Exception:
         date_str = ''
-    match_line = p['match'][:50]
-    if date_str:
-        match_line += f' · {date_str}'
     label = p.get('label', '')
-    odds = p.get('price', 0)
-    edge = p.get('edge', 0) * 100
-    conf = p.get('model_prob', 0) * 100
-    ev = stake * (odds - 1)
-    return (
-        f'{hdr_line}\n'
-        f'{match_line}\n'
-        f'📌 {label}\n'
-        f'💰 Odds: {odds:.2f} | Edge: +{edge:.1f}% | Conf: {conf:.0f}%\n'
-        f'💵 Stake: ${stake:.2f} | EV: +${ev:.2f}'
-    )
+    odds  = p.get('price', 0)
+    edge  = p.get('edge', 0) * 100
+    conf  = p.get('model_prob', 0) * 100
+    ev    = stake * (odds - 1)
+    lines = [f'{hdr} ✅', p['match'][:50]]
+    if league or date_str:
+        loc_line = ''
+        if league:
+            loc_line += f'🏟 {league}'
+        if date_str:
+            loc_line += f' · 🕐 {date_str}'
+        lines.append(loc_line.strip())
+    elo = p.get('elo_diff')
+    if elo:
+        lines.append(f'📊 ELO diff: {elo:.0f} pts')
+    lines += [
+        f'📌 {label}',
+        f'💰 Odds: {odds:.2f} (Cloudbet)',
+        f'📈 Edge: +{edge:.2f}%',
+        f'🎯 Conf: {conf:.1f}%',
+        f'💵 Apostado: ${stake:.2f}',
+        f'📊 Ganancia est: +${ev:.2f} (retorno: ${stake+ev:.2f})',
+    ]
+    return '\n'.join(lines)
 
 def send_whatsapp(msg):
     """Send alert to WhatsApp group via Baileys :3001. Fire-and-forget."""
@@ -4785,7 +4796,7 @@ def process_manual_bets(api, state):
                 f'{match_name[:50]}\n'
                 f'📌 {pick}\n'
                 f'💰 Odds: {price:.2f}\n'
-                f'💵 Stake: ${stake:.2f} | EV: +${stake*(price-1):.2f}'
+                f'💵 Apostado: ${stake:.2f} | Ganancia est: +${stake*(price-1):.2f}'
             )
             processed.append({**bet, 'status': 'PLACED', 'bet_id': bet_id,
                             'price': price, 'ts': datetime.now().isoformat()})
@@ -4872,7 +4883,7 @@ def process_manual_bets(api, state):
                 send_whatsapp(
                     f'🎰 Parlay Manual ✅\n'
                     f'{label[:60]}\n'
-                    f'💵 Stake: ${stake:.2f}'
+                    f'💵 Apostado: ${stake:.2f}'
                 )
                 placed += 1
             else:
