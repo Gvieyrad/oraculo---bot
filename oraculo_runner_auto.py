@@ -5845,7 +5845,7 @@ def run_cycle(dry_run=False):
                         return True
                     if 'over' not in lbl or 'goals 2h' in lbl:
                         return True
-                    m = _re2.search(r'over\s+(\d+\.?\d*)', lbl)
+                    m = _re2.search(r'over\s*(\d+\.?\d*)', lbl)
                     if not m:
                         return True
                     line = float(m.group(1))
