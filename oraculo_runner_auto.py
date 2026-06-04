@@ -53,6 +53,7 @@ RESULT_INTERVAL = 1800      # 30 min between result checks
 MIN_EDGE = 0.08             # 8% minimum edge — subido de 5%: modelo sobre-estima edge (13.6% declarado vs -7% ROI real)
 MIN_CONF = 0.60             # 60% minimum confidence
 TENNIS_MIN_CONF = 0.72       # 2026-05-26: all tennis segments negative below 72%; raised from 60%
+TENNIS_MIN_EDGE = 0.10       # 2026-06-04: edge 5-9%% WR=57%% Sibila (n=37) -> raise to 0.10 (edge 10%%+ WR=67%%)
 MAX_DAILY_PCT = 0.40        # 40% of bankroll per day
 MAX_PER_BET = 0.05          # 5% per bet
 KELLY_FRAC = 0.25           # Quarter Kelly (global fallback)
@@ -91,6 +92,11 @@ MLB_F5_ML_MIN_EDGE = 0.08        # 2026-06-02: f5_ml lower threshold — shadow 
 MLB_FADE_TEAMS = {
     'CHI Cubs', 'TEX Rangers', 'DET Tigers',    # 0%/25%/25% WR (n>=7, Jun-03)
     'CHW White Sox', 'MIA Marlins',              # 35%/37% WR (n=17/13, Jun-04)
+}
+# 2026-06-04: boost teams — modelo WR>=89% n>=14 (90d Sibila); cap $2.00 (doble del normal)
+MLB_BOOST_TEAMS = {
+    'MIL Brewers',    # WR=93% n=14 PnL=+$237
+    'WAS Nationals',  # WR=89% n=18 PnL=+$333
 }
 # WC 2026 Fase C constants (2026-05-22)
 WC_ENABLED = True
@@ -2055,7 +2061,7 @@ def scan_tennis(api, state, dry_run=False):
                     if float(price) > _max_odds_winner:
                         log.info('  [SKIP] h2h odds cap @%.2f>=2.00 (WR=33%% Sibila 15 picks)', float(price))
                         continue
-                    if edge > MIN_EDGE and _edge_va > 0 and prob > TENNIS_MIN_CONF and edge <= TENNIS_MAX_EDGE and prob < 0.92:
+                    if edge > TENNIS_MIN_EDGE and _edge_va > 0 and prob > TENNIS_MIN_CONF and edge <= TENNIS_MAX_EDGE and prob < 0.92:
                         picks.append({
                             'match': f'{home} vs {away}', 'league': comp_key,
                             'event_id': eid, 'market_url': murl,
@@ -2131,7 +2137,7 @@ def scan_tennis(api, state, dry_run=False):
                                 if prob < 0.01:
                                     continue
                                 edge = prob * price - 1
-                                if (edge > MIN_EDGE and prob >= 0.68 and edge < 0.40
+                                if (edge > TENNIS_MIN_EDGE and prob >= 0.68 and edge < 0.40
                                         and prob < 0.92 and price <= 1.65):
                                     picks.append({
                                         'match': f'{home} vs {away}',
@@ -2359,7 +2365,7 @@ def scan_tennis(api, state, dry_run=False):
                         _edge = _prob * _price - 1.0
                         # Cap odds dynamic (oraculo_filters.json tennis_winner_and_total, default 2.50)
                         _p2_wt_cap = _dyn_tennis_odds.get('tennis_winner_and_total', 2.50)
-                        if _edge > MIN_EDGE and _prob > 0.45 and _edge < 0.35 and _price <= _p2_wt_cap:
+                        if _edge > TENNIS_MIN_EDGE and _prob > 0.45 and _edge < 0.35 and _price <= _p2_wt_cap:
                             picks.append({
                                 'match': match_s, 'league': comp_key,
                                 'event_id': eid, 'market_url': _murl,
@@ -2401,7 +2407,7 @@ def scan_tennis(api, state, dry_run=False):
                         _edge = _prob * _price - 1.0
                         # Cap odds dynamic (oraculo_filters.json tennis_team_win_set, default 1.80)
                         _p2_ws_cap = _dyn_tennis_odds.get('tennis_team_win_set', 1.80)
-                        if _edge > MIN_EDGE and 0.50 < _prob < 0.93 and _edge < 0.35 and _price <= _p2_ws_cap:
+                        if _edge > TENNIS_MIN_EDGE and 0.50 < _prob < 0.93 and _edge < 0.35 and _price <= _p2_ws_cap:
                             _player = home if _team == 'home' else away
                             picks.append({
                                 'match': match_s, 'league': comp_key,
@@ -5388,20 +5394,24 @@ def run_cycle(dry_run=False):
                         _fteam = _fm2.group(1).strip()
                         if _fteam not in MLB_FADE_TEAMS:
                             continue
-                        _opps = [p for p in _eps if p is not _fp and p.get('market_type') == 'mlb_f5_ml']
-                        if not _opps:
+                        # Fix Jun-04: scan_mlb only generates ONE side per game
+                        # (opponent has negative edge => not in _all_mlb). Extract from match string.
+                        _match_teams = str(_fp.get('match', '')).split(' vs ')
+                        if len(_match_teams) != 2:
                             continue
-                        _opp = _opps[0]
-                        _om2 = _re2.search(r'F5 ML: (.+?) \(FIP', str(_opp.get('label', '')))
-                        _opp_team = _om2.group(1).strip() if _om2 else '?'
+                        _t1, _t2 = _match_teams[0].strip(), _match_teams[1].strip()
+                        _opp_team = _t2 if _t1 == _fteam else _t1
+                        _fp_prob = float(_fp.get('model_prob') or 0.5)
+                        _opp_prob = round(1.0 - _fp_prob, 4)
+                        _opp_price = round(1.0 / max(0.1, _opp_prob), 2)
                         _fade = {
-                            'match': _opp.get('match', ''),
+                            'match': _fp.get('match', ''),
                             'event_id': _eid2,
-                            'market_url': _opp.get('market_url', ''),
-                            'price': _opp.get('price', 0),
+                            'market_url': _fp.get('market_url', ''),
+                            'price': _opp_price,
                             'label': 'F5 ML [FADE vs ' + _fteam + ']: ' + _opp_team,
-                            'model_prob': _opp.get('model_prob', 0),
-                            'edge': _opp.get('edge', 0),
+                            'model_prob': _opp_prob,
+                            'edge': 0.0,
                             'sport': 'baseball',
                             'league': 'MLB',
                             'market_type': 'mlb_f5_ml_fade',
@@ -5410,34 +5420,8 @@ def run_cycle(dry_run=False):
                         }
                         _sibila_record(_fade)
                         log.info('[MLB Fade] shadow %s vs [FADE]%s @%.2f', _opp_team, _fteam, _opp.get('price', 0))
-            # 2026-06-03: O/U counter-fade shadow — F5 Over 5.0/5.5 WR=30-31% Sibila (n=795)
-            # Cuando modelo dice Over 5.0 o 5.5, el Under opuesto gana ~70% → acumular datos
-            if _SIBILA_ENABLED:
-                for _sp in _all_mlb:
-                    if _sp.get('market_type') != 'mlb_f5_total':
-                        continue
-                    _ou_m = re.search(r'F5 Over ([\d.]+)', str(_sp.get('label', '') or ''))
-                    if not _ou_m:
-                        continue
-                    _ou_line = float(_ou_m.group(1))
-                    if _ou_line not in (5.0, 5.5):
-                        continue
-                    _counter = {
-                        'match': _sp.get('match', ''),
-                        'event_id': _sp.get('event_id', ''),
-                        'price': _sp.get('price', 0),
-                        'label': f'F5 Under {_ou_line:.1f} [COUNTER@Over{_ou_line:.1f}]',
-                        'model_prob': 1.0 - float(_sp['model_prob'] if _sp.get('model_prob') is not None else 0.5),
-                        'edge': -float(_sp.get('edge') or 0),
-                        'sport': 'baseball',
-                        'league': 'MLB',
-                        'market_type': 'mlb_f5_ou_counter',
-                        '_shadow_only': True,
-                        '_source': 'ou_counter_shadow',
-                    }
-                    _sibila_record(_counter)
-                    log.info('[MLB OUCounter] shadow Under %.1f vs modelo Over %.1f | %s',
-                             _ou_line, _ou_line, _sp.get('match', '?')[:25])
+            # 2026-06-04: counter shadow removed -- scanner blocks Over<6.0 at source,
+            # so Over 5.0/5.5 never reach _all_mlb. Data already validated (n=795, WR=30-31%).
             # Solo picks reales para apostar (post-calibracion)
             def _mlb_line_ok(p):
                 # v4: Over 6.5+, Under 4.0-5.0, ML pass through
@@ -5705,12 +5689,17 @@ def run_cycle(dry_run=False):
             mlb_picks = _filtered_mlb
 
         # Stake cap: F5 O/U $2.00 (shadow-validated 3000+ picks), F5 ML $1.00, Under4.5 $1.00 (new)
+        # 2026-06-04: boost teams (MIL/WAS WR>=89% n>=14) get $2.00 cap (doble del normal f5_ml)
         for _mp in mlb_picks:
             if _mp.get('raw_model_prob_uncal'):
                 _mp['model_prob'] = _mp['raw_model_prob_uncal']  # raw prob -> Kelly positivo
-            if _mp.get('market_type') == 'mlb_f5_ml':
+            _lbl_lower = str(_mp.get('label', '')).lower()
+            _is_boost = any(t.lower() in _lbl_lower for t in MLB_BOOST_TEAMS)
+            if _mp.get('market_type') == 'mlb_f5_ml' and _is_boost:
+                _mp['_max_stake'] = 2.00  # 2026-06-04: boost (MIL/WAS WR>=89% n>=14)
+            elif _mp.get('market_type') == 'mlb_f5_ml':
                 _mp['_max_stake'] = 1.00  # 2026-06-02: conservador f5_ml
-            elif 'under 4.5' in str(_mp.get('label', '')).lower():
+            elif 'under 4.5' in _lbl_lower:
                 _mp['_max_stake'] = 1.00  # 2026-06-03: Under4.5 conservador (nuevo)
             else:
                 _mp['_max_stake'] = 2.00  # F5 O/U validado por shadow analysis

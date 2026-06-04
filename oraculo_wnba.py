@@ -1,4 +1,4 @@
-"""WNBA Elo model + scanner for Oraculo. Shadow mode until 40+ picks validated."""
+"""WNBA Elo model + scanner for Oraculo. Shadow mode until 20+ picks validated."""
 import os, json, time, logging
 from collections import defaultdict
 from datetime import datetime, timedelta
@@ -202,7 +202,7 @@ def scan_wnba(api, state, elo: WNBAElo = None, dry_run: bool = False, shadow: bo
     """Scan WNBA markets for value bets via basketball.1x2.
 
     shadow=True: logs to Sibila only, no real stake placed.
-    Switch to False after 40+ picks with WR > 54% (breakeven at avg ~1.85).
+    Switch to False after 20+ picks with WR > 55% at odds <= 1.90 (Jun-04 pattern).
     """
     if elo is None:
         elo = train_wnba_elo()
@@ -269,7 +269,7 @@ def scan_wnba(api, state, elo: WNBAElo = None, dry_run: bool = False, shadow: bo
 
             if price < 1.05 or not murl or outcome == 'draw':
                 continue
-            if price > 2.50:
+            if price > 1.90:  # 2026-06-04: cap 1.90 (Sibila odds 1.6-1.9 WR=75%, 1.9-2.5 WR=50%)
                 continue
 
             prob = prob_home if outcome == 'home' else prob_away
