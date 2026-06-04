@@ -88,7 +88,10 @@ MLB_PROB_CALIBRATION = 0.85      # Systematic overestimation correction: raw WR 
 MLB_MIN_EDGE = 0.15              # 2026-05-22: raised from 0.08 global — ROI -9.3% on 102 real picks
 MLB_F5_ML_MIN_EDGE = 0.08        # 2026-06-02: f5_ml lower threshold — shadow WR=58.1% n=210 picks
 # 2026-06-03: fade teams — modelo WR<30% con n>=7; registrar oponente en Sibila shadow
-MLB_FADE_TEAMS = {'CHI Cubs', 'TEX Rangers', 'DET Tigers'}  # 0%/25%/25% WR en shadow
+MLB_FADE_TEAMS = {
+    'CHI Cubs', 'TEX Rangers', 'DET Tigers',    # 0%/25%/25% WR (n>=7, Jun-03)
+    'CHW White Sox', 'MIA Marlins',              # 35%/37% WR (n=17/13, Jun-04)
+}
 # WC 2026 Fase C constants (2026-05-22)
 WC_ENABLED = True
 WC_MIN_EDGE = 0.10    # 10% — conservative; result_1x2 historical ROI -28.2%
@@ -5661,10 +5664,10 @@ def run_cycle(dry_run=False):
                     log.info('MLB [1-per-match]: %s ya activo', _mch[:30])
                     continue
 
-                # Filtro 2 v5: OVER — lineas >= 4.5, prob >= 0.65, odds >= 1.75
+                # Filtro 2 v6: OVER — solo lineas 6.5+ (Fase3: 4.5-6.0 WR=30-44% Sibila 1230p -> BLOQUEADO)
                 if _is_over:
-                    if _line < 4.5:
-                        log.info('MLB [over-skip line%.1f]: linea < 4.5', _line)
+                    if _line <= 6.0:
+                        log.info('MLB [over-skip line%.1f]: linea<=6.0 bloqueada (4.5-6.0 WR=30-44%% Sibila)', _line)
                         continue
                     if _conf < 0.63:
                         log.info('MLB [over-prob-skip %.0f%%<63%%]: requiere prob>=63%%', _conf * 100)
@@ -5792,19 +5795,43 @@ def run_cycle(dry_run=False):
                 }
                 def _goals2h_under_ok(p):
                     lbl = str(p.get('label', '') or p.get('side', '')).lower()
+                    # Goals 2H Over: WR=0% n=3 shadow — solo Under tiene señal
+                    if 'goals 2h' in lbl and 'over' in lbl:
+                        return False
                     return 'goals 2h' in lbl and 'under' in lbl \
                         and p.get('league') in _GOALS2H_DOMESTIC \
                         and float(p.get('edge', 0) or 0) >= 0.12 \
                         and float(p.get('confidence', p.get('conf', 0)) or 0) >= 0.70
 
+
+                def _goals_over_line_ok(p):
+                    # 2026-06-04 Fase3: FT Over 4.5-6.0 shadow WR=30-44% -$8928 -- BLOCK
+                    # Keep: Over<=3.5 (WR=56-76%), Over>=6.5 (WR=58-89%)
+                    import re as _re2
+                    lbl = str(p.get('label', '')).lower()
+                    if p.get('market_type') != 'soccer_goals':
+                        return True
+                    if 'over' not in lbl or 'goals 2h' in lbl:
+                        return True
+                    m = _re2.search(r'over\s+(\d+\.?\d*)', lbl)
+                    if not m:
+                        return True
+                    line = float(m.group(1))
+                    if 4.5 <= line <= 6.0:
+                        log.debug('[Soccer Goals] BLOCKED FT Over %.1f (WR=30-44%% gate): %s',
+                                  line, p.get('match', '?'))
+                        return False
+                    return True
+
                 _gp_csv = [p for p in _goal_picks
-                           if p.get('_csv_form')
-                           or p.get('league') == 'soccer-international-world-cup'
-                           or (p.get('league') in _CONMEBOL_COMPS
-                               and p.get('league') not in _INTL_SHADOW_COMPS
-                               and p.get('edge', 0) >= 0.14
-                               and p.get('conf', 0) >= 0.72)
-                           or _goals2h_under_ok(p)]
+                           if (p.get('_csv_form')
+                               or p.get('league') == 'soccer-international-world-cup'
+                               or (p.get('league') in _CONMEBOL_COMPS
+                                   and p.get('league') not in _INTL_SHADOW_COMPS
+                                   and p.get('edge', 0) >= 0.14
+                                   and p.get('conf', 0) >= 0.72)
+                               or _goals2h_under_ok(p))
+                           and _goals_over_line_ok(p)]
                 # Skip picks with kickoff >48h away (allows next-day matches, prevents weeks-long capital lock-up)
                 from datetime import datetime as _dt, timezone as _tz, timedelta as _td
                 _now_utc = _dt.now(_tz.utc)
