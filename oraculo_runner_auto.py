@@ -2849,16 +2849,9 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                  total_pending, max_exposure, MAX_TOTAL_EXPOSURE * 100)
         return 0
 
-    # Dynamic daily budget: scales with bankroll (safety net for drawdowns)
-    # Estadistica: EV positivo -> bankroll crece; esto es solo proteccion de varianza
-    if bankroll >= 200:
-        _daily_budget = DAILY_BUDGET          # 0 normal
-    elif bankroll >= 150:
-        _daily_budget = 40.0                   # leve reduccion
-    elif bankroll >= 100:
-        _daily_budget = 30.0                   # moderado
-    else:
-        _daily_budget = bankroll * 0.25        # survival mode: 25%% del restante
+    # Daily budget proporcional: 25%% del bankroll, sube y baja con el bankroll
+    # 00->0 | 00->5 | 00->00 | 00->25 | <00 -> min 0
+    _daily_budget = max(10.0, bankroll * 0.25)
     max_today = _daily_budget
     # Respect football ceiling if set (to reserve budget for tennis)
     ceiling = state.get('_football_ceiling')
@@ -5583,16 +5576,9 @@ def run_cycle(dry_run=False):
     if football_picks or (parlays and not tennis_picks):
         # Cap football budget: leave TENNIS_BUDGET_RESERVE for tennis if tennis picks exist
         bankroll = state['bankroll']
-        # Dynamic daily budget: scales with bankroll (safety net for drawdowns)
-        # Estadistica: EV positivo -> bankroll crece; esto es solo proteccion de varianza
-        if bankroll >= 200:
-                _daily_budget = DAILY_BUDGET                  # 0 normal
-        elif bankroll >= 150:
-                _daily_budget = 40.0                                   # leve reduccion
-        elif bankroll >= 100:
-                _daily_budget = 30.0                                   # moderado
-        else:
-                _daily_budget = bankroll * 0.25                # survival mode: 25%% del restante
+        # Daily budget proporcional: 25%% del bankroll, escala en ambas direcciones
+        # 00->0 | 00->5 | 00->00 | 00->25 | <00 -> min 0
+        _daily_budget = max(10.0, bankroll * 0.25)
         max_today = _daily_budget
         if tennis_picks:
             tennis_reserve = max_today * TENNIS_BUDGET_RESERVE
