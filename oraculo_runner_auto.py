@@ -54,12 +54,13 @@ MIN_EDGE = 0.08             # 8% minimum edge — subido de 5%: modelo sobre-est
 MIN_CONF = 0.60             # 60% minimum confidence
 TENNIS_MIN_CONF = 0.72       # 2026-05-26: all tennis segments negative below 72%; raised from 60%
 TENNIS_MIN_EDGE = 0.10       # 2026-06-04: edge 5-9%% WR=57%% Sibila (n=37) -> raise to 0.10 (edge 10%%+ WR=67%%)
-MAX_DAILY_PCT = 0.40        # 40% of bankroll per day
-MAX_PER_BET = 0.05          # 5% per bet
+MAX_DAILY_PCT = 0.40        # 40% of bankroll per day (no usado, ver DAILY_BUDGET)
+DAILY_BUDGET = 50.0         # 2026-06-04: presupuesto diario fijo $50
+MAX_PER_BET = 0.08          # 8% per bet (~$16 a bankroll $203)
 KELLY_FRAC = 0.25           # Quarter Kelly (global fallback)
 SPORT_KELLY = {             # Per-sport Kelly fractions
     'tennis':     0.20,  # 2026-05-29: post-filter WR 70% (58 bets) raised from 0.15
-    'baseball':     0.10,  # 2026-05-22: ROI -9.3% on 102 picks -> Kelly 0.15->0.10
+    'baseball':     0.25,  # 2026-06-04: daily budget $50 -> Kelly 0.10->0.25 (~$5/bet)
     'basketball': 0.10,
     'darts':      0.10,
     'soccer':       0.20,
@@ -2074,7 +2075,7 @@ def scan_tennis(api, state, dry_run=False):
                             '_elo_prob': round(_elo_prob_pre, 4),
                             '_edge_va': _edge_va, '_vig': round(_overround - 1.0, 4),
                             'surface': _surf,
-                            '_max_stake': 3.00,  # 2026-05-29: raised from 2.00 (WR 70% confirmed)
+                            '_max_stake': 12.00,  # 2026-05-29: daily 0 (WR 70%%)
                             '_features': {'elo_diff':round(_eh-_ea,3),'form_a':round(_form_ph,3),'form_b':round(_form_pa,3),'h2h_rate':round(_h2h_rate4,3)},
                         })
 
@@ -2375,7 +2376,7 @@ def scan_tennis(api, state, dry_run=False):
                                 'edge': round(_edge, 4),
                                 'sport': 'tennis',
                                 'market_type': 'tennis_winner_and_total',
-                                '_max_stake': 1.00,
+                                '_max_stake': 8.00,
                             })
                             _p2_picks_added += 1
 
@@ -2419,7 +2420,7 @@ def scan_tennis(api, state, dry_run=False):
                                 'sport': 'tennis',
                                 'market_type': 'tennis_team_win_set',
                                 'surface': _surf_p2,
-                                '_max_stake': 3.00,
+                                '_max_stake': 12.00,
                             })
                             _p2_picks_added += 1
 
@@ -2848,7 +2849,17 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                  total_pending, max_exposure, MAX_TOTAL_EXPOSURE * 100)
         return 0
 
-    max_today = bankroll * MAX_DAILY_PCT
+    # Dynamic daily budget: scales with bankroll (safety net for drawdowns)
+    # Estadistica: EV positivo -> bankroll crece; esto es solo proteccion de varianza
+    if bankroll >= 200:
+        _daily_budget = DAILY_BUDGET          # 0 normal
+    elif bankroll >= 150:
+        _daily_budget = 40.0                   # leve reduccion
+    elif bankroll >= 100:
+        _daily_budget = 30.0                   # moderado
+    else:
+        _daily_budget = bankroll * 0.25        # survival mode: 25%% del restante
+    max_today = _daily_budget
     # Respect football ceiling if set (to reserve budget for tennis)
     ceiling = state.get('_football_ceiling')
     if ceiling is not None:
@@ -5572,7 +5583,17 @@ def run_cycle(dry_run=False):
     if football_picks or (parlays and not tennis_picks):
         # Cap football budget: leave TENNIS_BUDGET_RESERVE for tennis if tennis picks exist
         bankroll = state['bankroll']
-        max_today = bankroll * MAX_DAILY_PCT
+        # Dynamic daily budget: scales with bankroll (safety net for drawdowns)
+        # Estadistica: EV positivo -> bankroll crece; esto es solo proteccion de varianza
+        if bankroll >= 200:
+                _daily_budget = DAILY_BUDGET                  # 0 normal
+        elif bankroll >= 150:
+                _daily_budget = 40.0                                   # leve reduccion
+        elif bankroll >= 100:
+                _daily_budget = 30.0                                   # moderado
+        else:
+                _daily_budget = bankroll * 0.25                # survival mode: 25%% del restante
+        max_today = _daily_budget
         if tennis_picks:
             tennis_reserve = max_today * TENNIS_BUDGET_RESERVE
             football_cap = max_today - tennis_reserve
@@ -5680,6 +5701,26 @@ def run_cycle(dry_run=False):
                     log.info('MLB [fullgame-disabled %s]: ROI -10.3%% real / -6.2%% Sibila', _mkt_type)
                     continue
 
+                # Filtro 5: FIP gate — skip F5 ML si oponente (fade team) tiene pitcher elite ese dia
+                # Cuando fade team tiene FIP<=3.20 vs nuestro pick, el modelo subestima su pitching
+                # Ejemplo: TB 0-DET 8 (DET fade team, FIP 3.43 — justo por encima del threshold)
+                if _is_ml and _mkt_type == 'mlb_f5_ml':
+                    _fip_m = re.search(r'FIP ([\d.]+)/([\d.]+)', _lbl)
+                    _match_parts = str(_mch).split(' vs ')
+                    if _fip_m and len(_match_parts) == 2:
+                        _home_fip  = float(_fip_m.group(1))
+                        _away_fip  = float(_fip_m.group(2))
+                        _home_team = _match_parts[0].strip()
+                        _picked_m  = re.search(r'F5 ML: (.+?) \(FIP', _lbl)
+                        if _picked_m:
+                            _picked   = _picked_m.group(1).strip()
+                            _opp_name = _match_parts[1].strip() if _picked == _home_team else _match_parts[0].strip()
+                            _opp_fip  = _away_fip if _picked == _home_team else _home_fip
+                            if _opp_name in MLB_FADE_TEAMS and _opp_fip <= 3.20:
+                                log.info('MLB [fip-fade-gate %s]: oponente fade %s FIP=%.2f<=3.20 — skip',
+                                         _picked[:12], _opp_name[:12], _opp_fip)
+                                continue
+
                 _filtered_mlb.append(_mp)
                 _active_matches.add(_mch)
 
@@ -5696,13 +5737,15 @@ def run_cycle(dry_run=False):
             _lbl_lower = str(_mp.get('label', '')).lower()
             _is_boost = any(t.lower() in _lbl_lower for t in MLB_BOOST_TEAMS)
             if _mp.get('market_type') == 'mlb_f5_ml' and _is_boost:
-                _mp['_max_stake'] = 2.00  # 2026-06-04: boost (MIL/WAS WR>=89% n>=14)
+                _mp['_max_stake'] = 15.00  # 2026-06-04: boost (MIL/WAS WR>=89% n>=14, daily 0)
+            elif _mp.get('market_type') == 'mlb_f5_ml' and float(_mp.get('_min_fip', 99)) <= 2.0:
+                _mp['_max_stake'] = 12.00  # elite pitching min_fip<=2.0 WR=74-86%% Sibila Jun-04
             elif _mp.get('market_type') == 'mlb_f5_ml':
-                _mp['_max_stake'] = 1.00  # 2026-06-02: conservador f5_ml
+                _mp['_max_stake'] = 10.00  # 2026-06-02: daily 0 normal
             elif 'under 4.5' in _lbl_lower:
-                _mp['_max_stake'] = 1.00  # 2026-06-03: Under4.5 conservador (nuevo)
+                _mp['_max_stake'] = 8.00  # 2026-06-03: Under4.5 daily 0
             else:
-                _mp['_max_stake'] = 2.00  # F5 O/U validado por shadow analysis
+                _mp['_max_stake'] = 12.00  # F5 O/U daily 0
         if mlb_picks:
             _caps = {p.get('match','?'): p.get('_max_stake',2.0) for p in mlb_picks}
             log.info('MLB: %d picks -> place_bets | caps=%s | settled=%d',
@@ -5853,7 +5896,7 @@ def run_cycle(dry_run=False):
                             _lbl2 = str(_gp2.get("label","")).lower()
                             if 'goals 2h' in _lbl2 and 'under' in _lbl2 \
                                     and _gp2.get("league") in _GOALS2H_DOMESTIC:
-                                _gp2.setdefault("_max_stake", 3.00)
+                                _gp2.setdefault("_max_stake", 12.00)
                                 log.debug("[Soccer Goals 2H Under] dom cap $3: %s", _gp2.get("match","?"))
                             else:
                                 _gp2.setdefault("_max_stake", 5.00)
