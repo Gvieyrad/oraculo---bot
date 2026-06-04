@@ -23,27 +23,6 @@ VIRTUAL_BANKROLL_START = 1000.0
 KELLY_FRAC  = 0.25   # quarter Kelly
 MAX_BET_PCT = 0.05   # max 5% of virtual bankroll per bet
 
-# ---------------------------------------------------------------------------
-# Realistic shadow track (added 2026-05-12)
-# Mirrors live Oraculo SPORT_KELLY config. Keep in sync with
-# oraculo_runner_auto.py:53-78. Only the FIRST occurrence per
-# (match, market, side) carries realistic_stake; duplicates stay NULL.
-# ---------------------------------------------------------------------------
-REALISTIC_BANKROLL_START = 1000.0
-REALISTIC_SPORT_KELLY = {
-    'tennis':     0.15,
-    'baseball':   0.15,
-    'basketball': 0.10,
-    'darts':      0.10,
-    'soccer':     0.20,
-}
-REALISTIC_KELLY_FRAC        = 0.25
-REALISTIC_MAX_PER_BET       = 0.05
-REALISTIC_MIN_STAKE         = 0.50
-REALISTIC_LOSS_STREAK_LIMIT = 5
-REALISTIC_LOSS_STREAK_FACTOR= 0.50
-REALISTIC_CIRCUIT_BREAKER   = 10.0
-
 
 # ---------------------------------------------------------------------------
 # DB setup
@@ -82,12 +61,7 @@ def _init_db():
         resolved_ts      TEXT,
         placed           INTEGER DEFAULT 0,
         real_stake       REAL,
-        bet_id           TEXT,
-        market_type      TEXT DEFAULT '',
-        realistic_stake  REAL,
-        realistic_br_before REAL,
-        realistic_pnl    REAL,
-        is_duplicate     INTEGER DEFAULT 0
+        bet_id           TEXT
     );
     CREATE INDEX IF NOT EXISTS ix_sibila_ts     ON sibila_picks(ts);
     CREATE INDEX IF NOT EXISTS ix_sibila_sport  ON sibila_picks(sport);
@@ -103,13 +77,6 @@ def _init_db():
         conn.execute("INSERT INTO sibila_meta VALUES ('virtual_bankroll', ?)",
                      (str(VIRTUAL_BANKROLL_START),))
     conn.commit()
-    # Schema migration: add event_id + market_url if not present
-    for _col_def in ('event_id TEXT DEFAULT ""',
-                     'market_url TEXT DEFAULT ""'):
-        try:
-            conn.execute('ALTER TABLE sibila_picks ADD COLUMN ' + _col_def)
-        except Exception:
-            pass  # column already exists
     conn.close()
 
 
@@ -139,65 +106,9 @@ def _kelly_stake(edge, odds, bankroll):
     """Quarter Kelly, capped at MAX_BET_PCT of bankroll."""
     if not edge or edge <= 0 or not odds or odds <= 1:
         return 0.0
-    prob = (1.0 / odds) + edge
-    b = odds - 1.0
-    full_kelly = max((b * prob - (1.0 - prob)) / b, 0.0)
+    full_kelly = edge / (odds - 1.0)
     stake = full_kelly * KELLY_FRAC * bankroll
     return round(min(stake, MAX_BET_PCT * bankroll), 2)
-
-
-def _get_realistic_bankroll():
-    conn = _get_conn()
-    row  = conn.execute("SELECT value FROM sibila_meta WHERE key='realistic_bankroll'").fetchone()
-    conn.close()
-    return float(row['value']) if row else REALISTIC_BANKROLL_START
-
-
-def _set_realistic_bankroll(br):
-    conn = _get_conn()
-    conn.execute("INSERT OR REPLACE INTO sibila_meta VALUES ('realistic_bankroll', ?)",
-                 (str(round(br, 4)),))
-    conn.commit()
-    conn.close()
-
-
-def _realistic_consecutive_losses(conn=None):
-    """Count consecutive realistic losses on resolved primary rows."""
-    own = False
-    if conn is None:
-        conn = _get_conn(); own = True
-    rows = conn.execute("""
-        SELECT result FROM sibila_picks
-        WHERE realistic_stake IS NOT NULL AND realistic_stake > 0
-          AND result IN ('WIN','LOSS') AND realistic_pnl IS NOT NULL
-        ORDER BY resolved_ts DESC LIMIT 10
-    """).fetchall()
-    if own: conn.close()
-    streak = 0
-    for r in rows:
-        if r['result'] == 'LOSS': streak += 1
-        else: break
-    return streak
-
-
-def _realistic_kelly_stake(prob, odds, bk, sport, consecutive_losses=0):
-    """Mirror of oraculo_runner_auto.kelly_stake() — sport-specific Kelly fraction."""
-    if bk < REALISTIC_CIRCUIT_BREAKER:
-        return 0.0
-    if not prob or prob <= 0 or not odds or odds <= 1:
-        return 0.0
-    b = odds - 1
-    full_kelly = (b * prob - (1 - prob)) / b
-    if full_kelly <= 0:
-        return 0.0
-    sport_l = (sport or '').lower()
-    frac = REALISTIC_SPORT_KELLY.get(sport_l, REALISTIC_KELLY_FRAC)
-    kelly = max(0, full_kelly * frac)
-    kelly = min(kelly, REALISTIC_MAX_PER_BET)
-    stake = bk * kelly
-    if consecutive_losses >= REALISTIC_LOSS_STREAK_LIMIT:
-        stake *= REALISTIC_LOSS_STREAK_FACTOR
-    return round(stake, 2) if stake >= REALISTIC_MIN_STAKE else 0.0
 
 
 def _classify_level(pick):
@@ -226,15 +137,14 @@ def _classify_level(pick):
 def _classify_market(label, sport):
     """Normalize market label to clean category."""
     lbl = (label or '').lower()
-    if 'exact' in lbl and 'set' in lbl:
-        return 'tennis_exact_sets'
+    if '[fade' in lbl:
+        return 'mlb_f5_ml_fade'
+    if '[counter' in lbl:
+        return 'mlb_f5_ou_counter'
     if 'under' in lbl and 'set' in lbl:
         return 'sets_under'
     if 'over' in lbl and 'set' in lbl:
         return 'sets_over'
-    # F5 ML: baseball first 5 innings moneyline (label='F5 ML: NYY ...' or market='moneyline_innings_1_to_5')
-    if ('f5' in lbl and 'ml' in lbl) or 'innings' in lbl:
-        return 'f5_moneyline'
     if 'winner' in lbl or 'moneyline' in lbl or 'h2h' in lbl:
         return 'match_winner'
     if 'handicap' in lbl or ' ah' in lbl:
@@ -260,12 +170,8 @@ def record_pick(pick: dict, placed: bool = False, real_stake: float = None, bet_
     try:
         odds       = float(pick.get('price') or pick.get('odds') or 0)
         edge       = float(pick.get('edge') or 0)
-        prob_model = float(pick.get('raw_model_prob_uncal') or pick.get('raw_model_prob') or pick.get('model_prob') or 0)
+        prob_model = float(pick.get('model_prob') or 0)
         prob_book  = round(1.0 / odds, 4) if odds > 1 else 0.0
-        # Normalize to vig-adjusted edge so _kelly_stake (prob=1/odds+edge) recovers prob_model correctly.
-        # Scanners using classical Kelly (prob*odds-1) would otherwise inflate shadow stakes.
-        if prob_model > 0 and odds > 1:
-            edge = round(prob_model - 1.0 / odds, 4)
         conf       = float(pick.get('confidence') or prob_model)
         sport      = (pick.get('sport') or 'tennis').lower()
         surface    = (pick.get('surface') or '').lower() or None
@@ -274,68 +180,23 @@ def record_pick(pick: dict, placed: bool = False, real_stake: float = None, bet_
         vbr   = _get_virtual_bankroll()
         stake = _kelly_stake(edge, odds, vbr)
 
-        match_val  = pick.get('match') or ''
-        market_val = _classify_market(label, sport)
-        side_val   = label
-
         conn = _get_conn()
-
-        # Dedup 1: event_id check (24h window) — prevents re-logging same game after resolver clears it
-        _eid = pick.get('event_id') or ''
-        if _eid:
-            _eid_seen = conn.execute(
-                "SELECT id FROM sibila_picks WHERE event_id=? AND sport=? "
-                "AND ts >= datetime('now', '-24 hours') LIMIT 1",
-                (_eid, sport)).fetchone()
-            if _eid_seen:
-                conn.close()
-                return
-
-        # Dedup 2: match+market+side pending check (fallback for picks without event_id)
-        _recent = conn.execute(
-            "SELECT id FROM sibila_picks WHERE match=? AND COALESCE(market,'')=? "
-            "AND COALESCE(side,'')=? AND result IS NULL LIMIT 1",
-            (match_val, market_val or '', side_val or '')).fetchone()
-        if _recent:
-            conn.close()
-            return
-
-        # Realistic track: only set on FIRST unresolved occurrence per (match,market,side).
-        # Duplicates from later scan cycles keep realistic_* NULL so bankroll doesn't compound.
-        existing = conn.execute(
-            "SELECT realistic_stake FROM sibila_picks "
-            "WHERE match=? AND COALESCE(market,'')=? AND COALESCE(side,'')=? "
-            "  AND realistic_stake IS NOT NULL "
-            "ORDER BY ts ASC LIMIT 1",
-            (match_val, market_val or '', side_val or '')
-        ).fetchone()
-        if existing is not None:
-            realistic_stake = None
-            realistic_br_before = None
-        else:
-            r_bk = _get_realistic_bankroll()
-            r_streak = _realistic_consecutive_losses(conn)
-            realistic_stake = _realistic_kelly_stake(prob_model, odds, r_bk, sport, r_streak)
-            realistic_br_before = round(r_bk, 2) if realistic_stake > 0 else None
-
         conn.execute("""
-            INSERT OR IGNORE INTO sibila_picks
+            INSERT INTO sibila_picks
               (ts, sport, match, league, surface, level, market, side,
                prob_model, prob_book, edge, confidence, odds,
                shadow_stake, shadow_br_before,
-               placed, real_stake, bet_id, market_type,
-               realistic_stake, realistic_br_before,
-               event_id, market_url)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               placed, real_stake, bet_id)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             datetime.now().isoformat(),
             sport,
-            match_val,
+            pick.get('match') or '',
             pick.get('league') or '',
             surface,
             _classify_level(pick),
-            market_val,
-            side_val,
+            _classify_market(label, sport),
+            label,
             round(prob_model, 4),
             prob_book,
             round(edge, 4),
@@ -346,11 +207,6 @@ def record_pick(pick: dict, placed: bool = False, real_stake: float = None, bet_
             1 if placed else 0,
             round(real_stake, 4) if real_stake else None,
             bet_id,
-            pick.get('market_type') or '',
-            realistic_stake,
-            realistic_br_before,
-            pick.get('event_id') or '',
-            pick.get('market_url') or '',
         ))
         conn.commit()
         conn.close()
@@ -366,123 +222,13 @@ def mark_placed(match: str, label: str, bet_id: str, real_stake: float):
         conn = _get_conn()
         conn.execute("""
             UPDATE sibila_picks SET placed=1, bet_id=?, real_stake=?
-            WHERE id = (
-                SELECT id FROM sibila_picks
-                WHERE match=? AND side=? AND result IS NULL
-                ORDER BY ts DESC LIMIT 1
-            )
+            WHERE match=? AND side=? AND result IS NULL
+            ORDER BY ts DESC LIMIT 1
         """, (bet_id, real_stake, match, label))
         conn.commit()
         conn.close()
     except Exception as e:
         log.debug('Sibila mark_placed error: %s', e)
-
-
-def resolve_shadow_picks(match: str, side: str = None, result: str = None,
-                         closing_odds: float = None) -> int:
-    """
-    Resolve all shadow picks (placed=0) for a given match+side.
-    Called automatically after a real bet settles so the simulation
-    tracks the same outcomes without depending on real bet placement.
-    Returns number of picks resolved.
-    """
-    try:
-        conn = _get_conn()
-        if side:
-            rows = conn.execute(
-                "SELECT * FROM sibila_picks "
-                "WHERE match=? AND side=? AND placed=0 AND result IS NULL"
-                " AND ts >= datetime('now', '-7 days')",
-                (match, side)).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM sibila_picks "
-                "WHERE match=? AND placed=0 AND result IS NULL"
-                " AND ts >= datetime('now', '-7 days')",
-                (match,)).fetchall()
-
-        if not rows:
-            conn.close()
-            return 0
-
-        result_norm = (result or '').upper()
-        if result_norm not in ('WIN', 'LOSS', 'VOID', 'PUSH', 'HALF_WIN', 'HALF_LOSS'):
-            result_norm = 'VOID'
-        now = datetime.now().isoformat()
-        resolved = 0
-        total_pnl = 0.0
-
-        total_realistic_pnl = 0.0
-        primary_id = min(r['id'] for r in rows)  # only first pick contributes to bankroll
-        for row in rows:
-            odds  = row['odds'] or 1.0
-            stake = row['shadow_stake'] or 0.0
-
-            if result_norm in ('WIN', 'HALF_WIN'):
-                pnl = round(stake * (odds - 1.0), 4)
-            elif result_norm in ('LOSS', 'HALF_LOSS'):
-                pnl = round(-stake, 4)
-            else:
-                pnl = 0.0
-
-            # Realistic pnl — only on primary rows (realistic_stake IS NOT NULL)
-            r_stake = row['realistic_stake']
-            r_pnl = None
-            if r_stake is not None and r_stake > 0:
-                if result_norm in ('WIN', 'HALF_WIN'):
-                    r_pnl = round(r_stake * (odds - 1.0), 4)
-                elif result_norm in ('LOSS', 'HALF_LOSS'):
-                    r_pnl = round(-r_stake, 4)
-                else:
-                    r_pnl = 0.0
-                total_realistic_pnl += r_pnl
-
-            clv = None
-            if closing_odds and closing_odds > 1 and odds > 1:
-                clv = round(closing_odds / odds - 1.0, 4)
-
-            conn.execute(
-                "UPDATE sibila_picks "
-                "SET result=?, pnl=?, realistic_pnl=COALESCE(?, realistic_pnl), "
-                "resolved_ts=?, "
-                "closing_odds=COALESCE(closing_odds, ?), clv=COALESCE(clv, ?) "
-                "WHERE id=?",
-                (result_norm, pnl, r_pnl, now, closing_odds, clv, row['id']))
-            if row['id'] == primary_id:
-                total_pnl += pnl
-            resolved += 1
-
-        # update virtual bankroll so future stakes are sized correctly
-        if resolved > 0 and result_norm not in ('VOID', 'PUSH'):
-            row_br = conn.execute(
-                "SELECT value FROM sibila_meta WHERE key='virtual_bankroll'"
-            ).fetchone()
-            cur_br = float(row_br['value']) if row_br else VIRTUAL_BANKROLL_START
-            new_br = max(cur_br + total_pnl, 1.0)
-            conn.execute(
-                "INSERT OR REPLACE INTO sibila_meta VALUES ('virtual_bankroll', ?)",
-                (str(round(new_br, 4)),)
-            )
-
-            # Realistic bankroll — only primary rows contributed via total_realistic_pnl
-            if total_realistic_pnl != 0:
-                row_r = conn.execute(
-                    "SELECT value FROM sibila_meta WHERE key='realistic_bankroll'"
-                ).fetchone()
-                cur_r = float(row_r['value']) if row_r else REALISTIC_BANKROLL_START
-                new_r = max(cur_r + total_realistic_pnl, 1.0)
-                conn.execute(
-                    "INSERT OR REPLACE INTO sibila_meta VALUES ('realistic_bankroll', ?)",
-                    (str(round(new_r, 4)),)
-                )
-        conn.commit()
-        conn.close()
-        log.debug('Sibila shadow resolved: %d picks for %s -> %s',
-                  resolved, (match or '')[:30], result_norm)
-        return resolved
-    except Exception as ex:
-        log.debug('Sibila resolve_shadow error: %s', ex)
-        return 0
 
 
 def resolve_pick(bet_id: str = None, match: str = None, label: str = None,
@@ -514,8 +260,7 @@ def resolve_pick(bet_id: str = None, match: str = None, label: str = None,
 
         rid    = row['id']
         odds   = row['odds'] or 1.0
-        # real bets store stake in real_stake; shadow bets use shadow_stake
-        stake  = row['real_stake'] or row['shadow_stake'] or 0.0
+        stake  = row['shadow_stake'] or 0.0
         result_norm = (result or '').upper()
 
         if result_norm == 'WIN':
@@ -526,42 +271,21 @@ def resolve_pick(bet_id: str = None, match: str = None, label: str = None,
             pnl = 0.0
             result_norm = 'VOID'
 
-        # Realistic pnl — only if this row is the primary (has realistic_stake)
-        r_stake = row['realistic_stake']
-        r_pnl = None
-        if r_stake is not None and r_stake > 0:
-            if result_norm == 'WIN':
-                r_pnl = round(r_stake * (odds - 1.0), 4)
-            elif result_norm == 'LOSS':
-                r_pnl = round(-r_stake, 4)
-            else:
-                r_pnl = 0.0
-            if r_pnl != 0:
-                cur_r = _get_realistic_bankroll()
-                r_pnl_pending = r_pnl  # applied after commit
-        else:
-                r_pnl_pending = None
-
         clv = None
         if closing_odds and closing_odds > 1 and odds > 1:
             clv = round(closing_odds / odds - 1.0, 4)
 
-        cur_vbr = _get_virtual_bankroll()
-        new_br = max(cur_vbr + pnl, 1.0)
+        vbr_before = row['shadow_br_before'] or _get_virtual_bankroll()
+        new_br = vbr_before + pnl
+        _set_virtual_bankroll(new_br)
 
         conn.execute("""
             UPDATE sibila_picks
-            SET result=?, pnl=?, realistic_pnl=COALESCE(?, realistic_pnl),
-                resolved_ts=?, closing_odds=?, clv=?
+            SET result=?, pnl=?, resolved_ts=?, closing_odds=?, clv=?
             WHERE id=?
-        """, (result_norm, pnl, r_pnl, datetime.now().isoformat(), closing_odds, clv, rid))
+        """, (result_norm, pnl, datetime.now().isoformat(), closing_odds, clv, rid))
         conn.commit()
         conn.close()
-        # Update bankrolls AFTER commit so DB stays consistent on failure
-        _set_virtual_bankroll(new_br)
-        if r_pnl_pending is not None:
-            cur_r = _get_realistic_bankroll()
-            _set_realistic_bankroll(max(cur_r + r_pnl_pending, 1.0))
         log.debug('Sibila resolved id=%d: %s -> %s pnl=$%.2f vbr=$%.2f',
                   rid, (match or bet_id or '?')[:30], result_norm, pnl, new_br)
     except Exception as e:
@@ -577,7 +301,7 @@ def get_stats(days: int = 30) -> dict:
     cutoff    = (datetime.now() - timedelta(days=days)).isoformat()
     conn      = _get_conn()
     all_picks = [dict(r) for r in conn.execute(
-        "SELECT * FROM sibila_picks WHERE ts >= ? AND is_duplicate=0", (cutoff,)).fetchall()]
+        "SELECT * FROM sibila_picks WHERE ts >= ?", (cutoff,)).fetchall()]
     conn.close()
 
     if not all_picks:
@@ -763,50 +487,71 @@ def format_telegram(days: int = 30) -> str:
     return '\n'.join(lines)
 
 
-
-
-def clv_report(window: int = 20, min_picks: int = 5) -> dict:
+def resolve_fade_shadow_picks(match: str, bet_team: str, result: str,
+                              closing_odds: float = None) -> int:
     """
-    CLV semaphore: returns CLV avg per market/sport over last `window` resolved picks.
-    Status: green (>+3%), yellow (-3% to +3%), red (<-3%).
+    Resolve mlb_f5_ml_fade shadow picks for a given match.
+    bet_team: the team that the real bet was placed on.
+    result: WIN/LOSS/VOID for bet_team.
+    Logic: if fade label shows bet_team as OPP_TEAM → same result;
+           if fade label shows bet_team as FADE_TEAM → inverted result.
+    Virtual bankroll NOT updated — fade picks are observation-only.
     """
-    conn = _get_conn()
-    conn.row_factory = __import__("sqlite3").Row
-    rows = conn.execute("""
-        SELECT COALESCE(sport,"?") as sp,
-               COALESCE(market,"?") as mkt,
-               COUNT(*) as n,
-               ROUND(AVG(clv)*100, 2) as avg_clv,
-               ROUND(AVG(edge)*100, 1) as avg_edge,
-               SUM(CASE WHEN result="WIN" THEN 1 ELSE 0 END) as wins,
-               ROUND(SUM(pnl)/NULLIF(SUM(ABS(shadow_stake)),0)*100,1) as roi
-        FROM (
-            SELECT * FROM sibila_picks
-            WHERE clv IS NOT NULL AND result IS NOT NULL AND is_duplicate = 0
-            ORDER BY ts DESC LIMIT ?
-        ) sub
-        GROUP BY sp, mkt
-        HAVING n >= ?
-        ORDER BY n DESC
-    """, (window * 10, min_picks)).fetchall()
-    conn.close()
+    import re as _re
+    _inv = {'WIN': 'LOSS', 'LOSS': 'WIN', 'VOID': 'VOID'}
+    result_norm = (result or '').upper()
+    if result_norm not in ('WIN', 'LOSS', 'VOID'):
+        result_norm = 'VOID'
+    try:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT * FROM sibila_picks "
+            "WHERE match=? AND side LIKE 'F5 ML [FADE%' AND placed=0 AND result IS NULL",
+            (match,)).fetchall()
+        if not rows:
+            conn.close()
+            return 0
+        resolved = 0
+        now = datetime.now().isoformat()
+        for row in rows:
+            label = row['side'] or ''
+            m = _re.search(r'\[FADE vs (.+?)\]: (.+)', label)
+            if not m:
+                continue
+            fade_team = m.group(1).strip()
+            opp_team  = m.group(2).strip()
+            bt = (bet_team or '').strip()
+            if bt == opp_team:
+                pick_result = result_norm
+            elif bt == fade_team:
+                pick_result = _inv.get(result_norm, 'VOID')
+            else:
+                continue
+            odds  = row['odds'] or 1.0
+            stake = row['shadow_stake'] or 0.0
+            if pick_result == 'WIN':
+                pnl = round(stake * (odds - 1.0), 4)
+            elif pick_result == 'LOSS':
+                pnl = round(-stake, 4)
+            else:
+                pnl = 0.0
+            clv = None
+            if closing_odds and closing_odds > 1 and odds > 1:
+                clv = round(closing_odds / odds - 1.0, 4)
+            conn.execute(
+                "UPDATE sibila_picks SET result=?, pnl=?, resolved_ts=?, "
+                "closing_odds=COALESCE(closing_odds, ?), clv=COALESCE(clv, ?) WHERE id=?",
+                (pick_result, pnl, now, closing_odds, clv, row['id']))
+            resolved += 1
+        if resolved:
+            conn.commit()
+            log.debug('Fade shadow resolved: %d picks for %s', resolved, match[:30])
+        conn.close()
+        return resolved
+    except Exception as e:
+        log.debug('resolve_fade_shadow_picks error: %s', e)
+        return 0
 
-    result = []
-    alerts = []
-    for r in rows:
-        clv = r["avg_clv"]
-        status = "green" if clv and clv > 3 else ("red" if clv and clv < -3 else "yellow")
-        entry = {
-            "sport": r["sp"], "market": r["mkt"], "n": r["n"],
-            "avg_clv": clv, "avg_edge": r["avg_edge"],
-            "wr": round(r["wins"]/r["n"]*100,1) if r["n"] else 0,
-            "roi": r["roi"], "status": status,
-        }
-        result.append(entry)
-        if status == "red":
-            alerts.append("%s/%s CLV=%+.1f%% (n=%d)" % (r["sp"], r["mkt"], clv or 0, r["n"]))
-
-    return {"scanners": result, "alerts": alerts, "window": window}
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO)

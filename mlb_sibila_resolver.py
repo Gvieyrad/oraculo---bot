@@ -101,6 +101,13 @@ def _parse_side(side_str):
     # Remove dome tag
     s_clean = s.replace('[dome]', '').strip()
 
+    # Fade shadow: 'F5 ML [FADE vs CHI Cubs]: ATL Braves' -> bet on ATL Braves
+    if '[fade vs' in s_clean:
+        import re
+        m = re.search(r'\[FADE vs .+?\]:\s*(.+)', side_str, re.IGNORECASE)
+        opp_team = m.group(1).strip() if m else ''
+        return ('f5_ml', None, None, opp_team)
+
     # F5 ML: ARI Diamondbacks (FIP ...)
     if 'ml:' in s_clean or 'f5 ml' in s_clean:
         # Extract team name between 'ml:' and '('

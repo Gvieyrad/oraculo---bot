@@ -57,7 +57,7 @@ MAX_DAILY_PCT = 0.40        # 40% of bankroll per day
 MAX_PER_BET = 0.05          # 5% per bet
 KELLY_FRAC = 0.25           # Quarter Kelly (global fallback)
 SPORT_KELLY = {             # Per-sport Kelly fractions
-    'tennis':     0.15,  # 2026-05-12: real WR 51.7%, was 0.42 (stale 87.5% bias)
+    'tennis':     0.20,  # 2026-05-29: post-filter WR 70% (58 bets) raised from 0.15
     'baseball':     0.10,  # 2026-05-22: ROI -9.3% on 102 picks -> Kelly 0.15->0.10
     'basketball': 0.10,
     'darts':      0.10,
@@ -83,9 +83,12 @@ TENNIS_PARLAY_STAKE_PCT = 0.05  # 5% of bankroll for tennis parlay
 STEAM_ENABLED = False          # Disable steam move betting (getting RESTRICTED by Cloudbet)
 SOCCER_ENABLED = True          # Re-enabled: 86% WR on 14 real bets, +$185 PnL
 SOCCER_GOALS_ENABLED = True    # Re-enabled: referee goal-rate multiplier + stricter thresholds (P3.1)
-MLB_ENABLED = False            # 2026-05-22: DISABLED — model has zero discriminative power (winners avg_mp=57.5% == losers 57.1%), ROI -11.0% on 92 real picks
+MLB_ENABLED = True             # 2026-06-01: re-enabled; 2026-06-02: f5_ml ACTIVADO LIVE (shadow WR=58.1% n=210 > umbral 54%/30)
 MLB_PROB_CALIBRATION = 0.85      # Systematic overestimation correction: raw WR 36.3% vs implied 43.6%
 MLB_MIN_EDGE = 0.15              # 2026-05-22: raised from 0.08 global — ROI -9.3% on 102 real picks
+MLB_F5_ML_MIN_EDGE = 0.08        # 2026-06-02: f5_ml lower threshold — shadow WR=58.1% n=210 picks
+# 2026-06-03: fade teams — modelo WR<30% con n>=7; registrar oponente en Sibila shadow
+MLB_FADE_TEAMS = {'CHI Cubs', 'TEX Rangers', 'DET Tigers'}  # 0%/25%/25% WR en shadow
 # WC 2026 Fase C constants (2026-05-22)
 WC_ENABLED = True
 WC_MIN_EDGE = 0.10    # 10% — conservative; result_1x2 historical ROI -28.2%
@@ -872,18 +875,23 @@ def scan_football(api, state, dry_run=False):
     log.info('=== SCANNING FOOTBALL MARKETS ===')
     picks = []
 
-    # Try to load ML model
+    # Try to load ML model — cached on function to avoid reloading 49MB pkl each cycle
     mp = None
     try:
         from oraculo_market_predictor import MarketPredictor
-        mp = MarketPredictor('picks_global')
-        if not mp.load():
-            mp = None
-            log.warning('No trained model, using Poisson/Elo only')
-        else:
-            gc.collect()
+        if not hasattr(scan_football, '_mp_cache') or scan_football._mp_cache is None:
+            _mp_new = MarketPredictor('picks_global')
+            if _mp_new.load():
+                scan_football._mp_cache = _mp_new
+                gc.collect()
+                log.info('MarketPredictor loaded and cached (picks_global)')
+            else:
+                scan_football._mp_cache = None
+                log.warning('No trained model, using Poisson/Elo only')
+        mp = scan_football._mp_cache
     except Exception as e:
         log.warning('MarketPredictor unavailable: %s', e)
+        scan_football._mp_cache = None
 
     # Load math models
     poisson, elo = None, None
@@ -2039,10 +2047,10 @@ def scan_tennis(api, state, dry_run=False):
                     if 'madrid' in comp_key or 'rome' in comp_key or 'hamburg' in comp_key or 'atp1000' in comp_key or 'masters' in comp_key:
                         log.info('  [SKIP] ATP1000 blocked (%s): WR=43.4%% Sibila', comp_key[:35])
                         continue
-                    # Cap odds 2.10: Sibila 29.6% WR -$199 on odds>2.10 (54 picks)
-                    _max_odds_winner = _dyn_tennis_odds.get('tennis_winner', 2.10)
+                    # Cap odds 2.00: Sibila 33% WR -$3.06 on odds>=2.00 (15 picks); prior cap was 2.10
+                    _max_odds_winner = _dyn_tennis_odds.get('tennis_winner', 2.00)
                     if float(price) > _max_odds_winner:
-                        log.info('  [SKIP] odds cap @%.2f>2.10 (WR=29.6%% Sibila)', float(price))
+                        log.info('  [SKIP] h2h odds cap @%.2f>=2.00 (WR=33%% Sibila 15 picks)', float(price))
                         continue
                     if edge > MIN_EDGE and _edge_va > 0 and prob > TENNIS_MIN_CONF and edge <= TENNIS_MAX_EDGE and prob < 0.92:
                         picks.append({
@@ -2057,7 +2065,7 @@ def scan_tennis(api, state, dry_run=False):
                             '_elo_prob': round(_elo_prob_pre, 4),
                             '_edge_va': _edge_va, '_vig': round(_overround - 1.0, 4),
                             'surface': _surf,
-                            '_max_stake': 2.00,
+                            '_max_stake': 3.00,  # 2026-05-29: raised from 2.00 (WR 70% confirmed)
                             '_features': {'elo_diff':round(_eh-_ea,3),'form_a':round(_form_ph,3),'form_b':round(_form_pa,3),'h2h_rate':round(_h2h_rate4,3)},
                         })
 
@@ -2065,6 +2073,11 @@ def scan_tennis(api, state, dry_run=False):
     _adv = getattr(scan_tennis, '_adv_atp', None)
     if _adv:
         for comp_key in tennis_comps:
+            # 2026-06-03: block same comps as h2h (wta-foggia, wta-rome-italy, etc.)
+            if any(b in comp_key for b in _dyn_tennis_blocks):
+                log.info('  [SKIP win_set] blocked comp (%s): %s',
+                         next((b for b in _dyn_tennis_blocks if b in comp_key), '?'), comp_key[:40])
+                continue
             events = api.get_odds(comp_key)
             if not events:
                 continue
@@ -2199,6 +2212,11 @@ def scan_tennis(api, state, dry_run=False):
         _p2_picks_added = 0
 
         for comp_key in _p2_comps:
+            # 2026-06-03: block same comps as h2h (wta-foggia, wta-rome-italy, etc.)
+            if any(b in comp_key for b in _dyn_tennis_blocks):
+                log.info('  [SKIP TN-P2] blocked comp (%s): %s',
+                         next((b for b in _dyn_tennis_blocks if b in comp_key), '?'), comp_key[:40])
+                continue
             events = api.get_odds(comp_key)
             if not events:
                 continue
@@ -2336,8 +2354,9 @@ def scan_tennis(api, state, dry_run=False):
                         else:
                             continue
                         _edge = _prob * _price - 1.0
-                        # Cap odds 2.50: Sibila 22.2% WR -63 on odds>2.50 (9 picks)
-                        if _edge > MIN_EDGE and _prob > 0.45 and _edge < 0.35 and _price <= 2.50:
+                        # Cap odds dynamic (oraculo_filters.json tennis_winner_and_total, default 2.50)
+                        _p2_wt_cap = _dyn_tennis_odds.get('tennis_winner_and_total', 2.50)
+                        if _edge > MIN_EDGE and _prob > 0.45 and _edge < 0.35 and _price <= _p2_wt_cap:
                             picks.append({
                                 'match': match_s, 'league': comp_key,
                                 'event_id': eid, 'market_url': _murl,
@@ -2377,8 +2396,9 @@ def scan_tennis(api, state, dry_run=False):
                         else:
                             continue
                         _edge = _prob * _price - 1.0
-                        # Cap odds 1.80: Sibila 46.7% WR -5 on odds>1.79 (15 picks)
-                        if _edge > MIN_EDGE and 0.50 < _prob < 0.93 and _edge < 0.35 and _price <= 1.80:
+                        # Cap odds dynamic (oraculo_filters.json tennis_team_win_set, default 1.80)
+                        _p2_ws_cap = _dyn_tennis_odds.get('tennis_team_win_set', 1.80)
+                        if _edge > MIN_EDGE and 0.50 < _prob < 0.93 and _edge < 0.35 and _price <= _p2_ws_cap:
                             _player = home if _team == 'home' else away
                             picks.append({
                                 'match': match_s, 'league': comp_key,
@@ -2796,7 +2816,23 @@ def place_bets(api, state, picks, parlays, dry_run=False):
         return 0
 
     # Hard cap: total pending exposure across ALL days
-    total_pending = sum(b.get('stake', 0) for b in state.get('active_bets', []))
+    # Exclude long-horizon WC pre-event bets (cutoff >5d away) — they have their own wc_reserve pool
+    _today_d = datetime.utcnow().date()
+    def _is_long_horizon(b):
+        ct = b.get('cutoff_time', '')
+        if not ct:
+            return False
+        try:
+            return (datetime.strptime(str(ct)[:10], '%Y-%m-%d').date() - _today_d).days > 5
+        except Exception:
+            return False
+    total_pending = sum(b.get('stake', 0) for b in state.get('active_bets', [])
+                        if not _is_long_horizon(b))
+    wc_pending = sum(b.get('stake', 0) for b in state.get('active_bets', [])
+                     if _is_long_horizon(b))
+    if wc_pending > 0:
+        log.debug('WC pre-event excluded from exposure cap: $%.2f (%d bets)',
+                  wc_pending, sum(1 for b in state.get('active_bets', []) if _is_long_horizon(b)))
     max_exposure = bankroll * MAX_TOTAL_EXPOSURE
     if total_pending >= max_exposure:
         log.info('EXPOSURE CAP: $%.2f pending >= $%.2f max (%.0f%% of bankroll)',
@@ -3048,7 +3084,8 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                            p['edge'], p['price'], stake, bet_id, p.get('sport', 'soccer'),
                            signal=p.get('signal', 'model'),
                            league=p.get('league', ''),
-                           event_id=p.get('event_id', ''))
+                           event_id=p.get('event_id', ''),
+                           market_type=p.get('market_type'))  # 2026-06-02 fix
             # Portfolio Kelly: ajustar stake por correlacion con bets abiertas
             if _PORTFOLIO_ENABLED:
                 _port_result = _PORTFOLIO.get_adjusted_stake(p, base_stake=stake)
@@ -3351,6 +3388,17 @@ def check_results(api, state):
                 if _n_shad:
                     log.debug('[Sibila] %d shadow picks resolved for %s',
                               _n_shad, matched_active.get('match', '')[:30])
+                _fm_fade = re.search(r'F5 ML: (.+?) \(FIP', matched_active.get('label', ''))
+                if _fm_fade:
+                    _n_fade = _sibila_resolve_fade(
+                        match=matched_active.get('match', ''),
+                        bet_team=_fm_fade.group(1).strip(),
+                        result=result,
+                        closing_odds=_closing,
+                    )
+                    if _n_fade:
+                        log.info('[Sibila Fade] %d fade picks resolved for %s',
+                                 _n_fade, matched_active.get('match', '')[:30])
         if _PORTFOLIO_ENABLED:
             _PORTFOLIO.invalidate_cache()  # bet cerrada -> recalcular portafolio
         # Telegram notification for each settlement
@@ -3487,7 +3535,7 @@ def reconcile_bankroll(api, state):
         all_pending_stake = sum(float(b.get('stake', 0)) for b in bets if not b.get('isSettled'))
         correct_bankroll = INITIAL_DEPOSIT + all_settled_pnl + all_pending_stake + state.get('cumulative_void_returns', 0)
         drift = abs(state['bankroll'] - correct_bankroll)
-        if drift > 0.25:
+        if drift > 1.50:  # raised from 0.25 to kill ±$3 tennis-bet oscillation
             log.warning('RECONCILE: Auto-correcting bankroll $%.2f -> $%.2f (drift=$%.2f)',
                         state['bankroll'], correct_bankroll, drift)
             if drift > 5.0:
@@ -3933,6 +3981,10 @@ except ImportError:
 try:
     from oraculo_sibila import record_pick as _sibila_record, mark_placed as _sibila_placed, resolve_pick as _sibila_resolve, resolve_shadow_picks as _sibila_resolve_shadow, format_telegram as _sibila_fmt
     try:
+        from oraculo_sibila import resolve_fade_shadow_picks as _sibila_resolve_fade
+    except ImportError:
+        def _sibila_resolve_fade(*a, **kw): return 0
+    try:
         from soccer_sibila_resolver import resolve_all_pending as _soccer_resolve_shadows
     except ImportError:
         def _soccer_resolve_shadows(**kw): return (0, 0, 0)
@@ -3958,6 +4010,7 @@ except ImportError:
     def _sibila_placed(*a, **kw): pass
     def _sibila_resolve(*a, **kw): pass
     def _sibila_resolve_shadow(*a, **kw): return 0
+    def _sibila_resolve_fade(*a, **kw): return 0
     def _sibila_fmt(**kw): return 'Sibila no disponible'
 # ── Learned Rules (generado por _learn_from_losses.py) ──────────────────
 import json as _json
@@ -4158,7 +4211,7 @@ def _classify_market_type(label, sport):
         return 'btts'
     return 'result_1x2'
 
-def _log_prediction(match, label, model_prob, edge, odds, stake, bet_id, sport, signal='model', league='', event_id='', conf=None):
+def _log_prediction(match, label, model_prob, edge, odds, stake, bet_id, sport, signal='model', league='', event_id='', conf=None, market_type=None):
     """Append prediction to JSONL file for backtest analysis."""
     try:
         entry = {
@@ -4170,7 +4223,7 @@ def _log_prediction(match, label, model_prob, edge, odds, stake, bet_id, sport, 
             'bet_id': bet_id, 'sport': sport,
             'league': league, 'event_id': event_id,
             'conf': round(conf, 4) if conf is not None else round(model_prob, 4),
-            'market_type': _classify_market_type(label, sport),
+            'market_type': market_type or _classify_market_type(label, sport),
             'signal': signal,
             'result': None,  # filled later by _log_settlement
         }
@@ -5221,7 +5274,7 @@ def run_cycle(dry_run=False):
     # 2. Scan football — always scan (records to Sibila shadow); bet only if SOCCER_ENABLED
     # 2026-05-13: scan with dry_run=True so picks populate Sibila even when betting is off.
     # Then discard football_picks=[] so place_bets / parlay builders don't try to bet.
-    football_picks = scan_football(api, state, dry_run=True)
+    football_picks = scan_football(api, state, dry_run=dry_run)  # 2026-05-29: F2 enable live
     if not SOCCER_ENABLED:
         football_picks = []
     # Fase B 2026-05-22: drop over/under picks below raw 0.65 model_prob
@@ -5234,6 +5287,33 @@ def run_cycle(dry_run=False):
         _dropped_ou = _pre_ou - len(football_picks)
         if _dropped_ou:
             log.info('[FaseB] over/under threshold 0.65: dropped %d low-conf picks', _dropped_ou)
+
+    # Fase 2 soccer filter v2 (2026-05-30): two-bucket approach — sibila analysis
+    # Bucket A: conf>=85% + edge>=5%   → 99% WR (low edge = model+market agree)
+    # Bucket B: conf 75-85% + edge<10% → 98% WR (market agrees with model)
+    # Blocked:  conf 75-85% + edge>=10% → 54% WR (market disagrees = market right in soccer)
+    if football_picks:
+        _pre_f2 = len(football_picks)
+        football_picks = [
+            p for p in football_picks
+            if (p.get('market_type') or '') not in ('over', 'under', 'ou', 'total')
+            and (
+                (float(p.get('confidence') or p.get('model_prob') or 0) >= 0.85
+                 and float(p.get('edge') or 0) >= 0.05
+                 and float(p.get('price') or p.get('odds') or 0) <= 1.50)  # 2026-06-02: backtest n=39 WR=84.6% cliff at odds 1.52
+                or
+                (0.75 <= float(p.get('confidence') or p.get('model_prob') or 0) < 0.85
+                 and float(p.get('edge') or 0) >= 0.05
+                 and float(p.get('edge') or 0) < 0.10
+                 and float(p.get('price') or p.get('odds') or 0) <= 1.50)  # 2026-06-02: backtest n=39 WR=84.6% cliff at odds 1.52
+            )
+        ]
+        for _p in football_picks:
+            _p['_max_stake'] = 2.00  # 2026-06-02: raised, backtest ROI +34% at odds<1.50
+        _dropped_f2 = _pre_f2 - len(football_picks)
+        if _dropped_f2:
+            log.info('[F2] Soccer live filter v2: kept %d/%d (dropped %d)',
+                     len(football_picks), _pre_f2, _dropped_f2)
     mlb_picks = []
 
     # 3. Scan tennis
@@ -5244,14 +5324,22 @@ def run_cycle(dry_run=False):
     # tennis_team_win_set: tactical pool mode — edge>=8% AND odds>=1.35
     # (relaxed from 18%/1.40 while WC reserve locks USDC; $40 USDT tactical pool rotates Roland Garros picks)
     tennis_picks = [p for p in tennis_picks
-                    if p.get('market_type') not in ('tennis_exact_sets', 'sets_under')
-                    # tennis_team_win_set: edge>=8% AND odds>=1.35 (tactical pool, revert to 18%/1.40 after Jun 11)
+                    if p.get('market_type') not in ('tennis_exact_sets', 'sets_under',
+                                                    'tennis_winner_and_total')  # w+total: 0W/1L, complex market
+                    # tennis_team_win_set: edge>=10% AND odds 1.40-1.90
+                    # EXCLUIR 0.15-0.18: valle de la muerte WR=42.9% ROI=-34% n=7 (2026-06-02)
+                    # 0.12-0.15 WR=75% y 0.18+ WR=75% son buenos; 0.15-0.18 es anomalia del modelo
                     and not (p.get('market_type') == 'tennis_team_win_set'
-                             and (float(p.get('edge', 0) or 0) < 0.08
-                                  or float(p.get('price', 0) or 0) < 1.35))
-                    # h2h: require conf>=0.75 (prob<0.7 = -17% to -52% ROI in Sibila)
-                    and not (p.get('market_type') in ('', None)
-                             and float(p.get('confidence') or p.get('model_prob') or 0) < 0.75)]
+                             and (float(p.get('edge', 0) or 0) < 0.10
+                                  or float(p.get('price', 0) or 0) < 1.40
+                                  or float(p.get('price', 0) or 0) > 1.90
+                                  or (0.15 <= float(p.get('edge', 0) or 0) < 0.18)))
+                    # tennis_team_win_set (no): favor wins set — floor 1.50 (50% WR at odds<=1.50, 75% at >1.50)
+                    and not (p.get('market_type') == 'tennis_team_win_set'
+                             and '(no)' in str(p.get('label', '') or p.get('side', '') or '')
+                             and float(p.get('price', 0) or 0) <= 1.50)
+                    # h2h: DESACTIVADO 2026-06-02 — WR=52.6%, ROI=-7.6% Sibila n=38 placed; win_set (WR=65.7%) es el mercado
+                    and p.get('market_type') not in ('', None)]
     # Platt calibration shadow log — N=54 Sibila tws, A=0.357 B=0.088 — log only, no placement effect
     try:
         from oraculo_tws_calibrator import shadow_log_platt as _tws_platt_shadow
@@ -5278,6 +5366,75 @@ def run_cycle(dry_run=False):
             if _SIBILA_ENABLED:
                 for _sp in _all_mlb:
                     _sibila_record(_sp)
+            # 2026-06-03: Fade shadow — cuando modelo elige equipo con WR<30%, registrar oponente
+            if _SIBILA_ENABLED and MLB_FADE_TEAMS:
+                _ev_map = {}
+                for _sp in _all_mlb:
+                    _eid2 = _sp.get('event_id', '')
+                    if _eid2 not in _ev_map:
+                        _ev_map[_eid2] = []
+                    _ev_map[_eid2].append(_sp)
+                import re as _re2
+                for _eid2, _eps in _ev_map.items():
+                    for _fp in _eps:
+                        if _fp.get('market_type') != 'mlb_f5_ml':
+                            continue
+                        _fm2 = _re2.search(r'F5 ML: (.+?) \(FIP', str(_fp.get('label', '')))
+                        if not _fm2:
+                            continue
+                        _fteam = _fm2.group(1).strip()
+                        if _fteam not in MLB_FADE_TEAMS:
+                            continue
+                        _opps = [p for p in _eps if p is not _fp and p.get('market_type') == 'mlb_f5_ml']
+                        if not _opps:
+                            continue
+                        _opp = _opps[0]
+                        _om2 = _re2.search(r'F5 ML: (.+?) \(FIP', str(_opp.get('label', '')))
+                        _opp_team = _om2.group(1).strip() if _om2 else '?'
+                        _fade = {
+                            'match': _opp.get('match', ''),
+                            'event_id': _eid2,
+                            'market_url': _opp.get('market_url', ''),
+                            'price': _opp.get('price', 0),
+                            'label': 'F5 ML [FADE vs ' + _fteam + ']: ' + _opp_team,
+                            'model_prob': _opp.get('model_prob', 0),
+                            'edge': _opp.get('edge', 0),
+                            'sport': 'baseball',
+                            'league': 'MLB',
+                            'market_type': 'mlb_f5_ml_fade',
+                            '_shadow_only': True,
+                            '_source': 'fade_shadow',
+                        }
+                        _sibila_record(_fade)
+                        log.info('[MLB Fade] shadow %s vs [FADE]%s @%.2f', _opp_team, _fteam, _opp.get('price', 0))
+            # 2026-06-03: O/U counter-fade shadow — F5 Over 5.0/5.5 WR=30-31% Sibila (n=795)
+            # Cuando modelo dice Over 5.0 o 5.5, el Under opuesto gana ~70% → acumular datos
+            if _SIBILA_ENABLED:
+                for _sp in _all_mlb:
+                    if _sp.get('market_type') != 'mlb_f5_total':
+                        continue
+                    _ou_m = re.search(r'F5 Over ([\d.]+)', str(_sp.get('label', '') or ''))
+                    if not _ou_m:
+                        continue
+                    _ou_line = float(_ou_m.group(1))
+                    if _ou_line not in (5.0, 5.5):
+                        continue
+                    _counter = {
+                        'match': _sp.get('match', ''),
+                        'event_id': _sp.get('event_id', ''),
+                        'price': _sp.get('price', 0),
+                        'label': f'F5 Under {_ou_line:.1f} [COUNTER@Over{_ou_line:.1f}]',
+                        'model_prob': 1.0 - float(_sp['model_prob'] if _sp.get('model_prob') is not None else 0.5),
+                        'edge': -float(_sp.get('edge') or 0),
+                        'sport': 'baseball',
+                        'league': 'MLB',
+                        'market_type': 'mlb_f5_ou_counter',
+                        '_shadow_only': True,
+                        '_source': 'ou_counter_shadow',
+                    }
+                    _sibila_record(_counter)
+                    log.info('[MLB OUCounter] shadow Under %.1f vs modelo Over %.1f | %s',
+                             _ou_line, _ou_line, _sp.get('match', '?')[:25])
             # Solo picks reales para apostar (post-calibracion)
             def _mlb_line_ok(p):
                 # v4: Over 6.5+, Under 4.0-5.0, ML pass through
@@ -5302,9 +5459,13 @@ def run_cycle(dry_run=False):
                             _cp['edge'] = round(_cp['model_prob'] - 1.0/float(_cp['odds']), 4)
             # Filter uses calibrated edge/prob (MLB_PROB_CALIBRATION already applied above)
             # 2026-05-22: added edge > 0 guard — historical bets showed neg-edge picks slipping through
+            # 2026-06-01: shadow-only for now — block h2h full-game (WR=41%, ROI=-12%)
+            # f5_ml/f5_total: edge threshold relaxed (calibration artifact gives edge~0)
+            # 2026-06-02: f5_ml ACTIVADO LIVE — WR=58.1% n=210 supera umbral; MLB_F5_ML_MIN_EDGE=0.08
             mlb_picks = [p for p in _all_mlb
-                         if float(p.get('edge') or 0) > 0
-                         and float(p.get('edge') or 0) >= MLB_MIN_EDGE
+                         if p.get('market_type') in ('mlb_f5_ml', 'mlb_f5_total')
+                         and float(p.get('edge') or 0) > 0
+                         and float(p.get('edge') or 0) >= (MLB_F5_ML_MIN_EDGE if p.get('market_type') == 'mlb_f5_ml' else MLB_MIN_EDGE)
                          and float(p.get('model_prob') or 0) >= 0.55]
             log.info('MLB: %d candidatos totales, %d pasan pre-filtro v5 (prob>=60%%)',
                      len(_all_mlb), len(mlb_picks))
@@ -5346,6 +5507,7 @@ def run_cycle(dry_run=False):
             _sc_prob_key = chr(39)+chr(114)+chr(97)+chr(119)+chr(95)+chr(109)+chr(111)+chr(100)+chr(101)+chr(108)+chr(95)+chr(112)+chr(114)+chr(111)+chr(98)+chr(39)
             for _sp in sc_picks:
                 _sp[_sc_prob_key] = float(_sp.get('raw_model_prob') or _sp.get('model_prob') or _sp.get('base_rate_prob') or 0)
+                _sp.setdefault('market_type', 'soccer_corners')  # 2026-06-02: tag Sibila tracking
                 _sibila_record(_sp)
     except ImportError as _sie:
         log.warning('Soccer v2 import error: %s', _sie)
@@ -5475,8 +5637,8 @@ def run_cycle(dry_run=False):
             for _mp in mlb_picks:
                 _lbl = str(_mp.get('label', '') or _mp.get('side', '')).lower()
                 _mch = str(_mp.get('match', ''))
-                _m = re.search(r'[\d.]+', _lbl.replace('f5', '').replace('under', '').replace('over', ''))
-                _line = float(_m.group()) if _m else 0.0
+                _lm = re.search(r'(?:over|under)\s+([\d.]+)', _lbl)
+                _line = float(_lm.group(1)) if _lm else 0.0
                 _odds = float(_mp.get('price') or _mp.get('odds') or 2.0)
                 _edge = float(_mp.get('edge') or 0)
                 _is_over  = 'over'  in _lbl
@@ -5511,13 +5673,19 @@ def run_cycle(dry_run=False):
                         log.info('MLB [over-odds-skip @%.2f<1.75]: odds insuficientes', _odds)
                         continue
 
-                # Filtro 3 v5: UNDER desactivado (full-game Y F5)
-                # F5 Under bloqueado 2026-05-26: Sibila limpia WR=40.3% ROI=-24.1% (77 picks, 20 juegos)
-                # Dato anterior 58% WR era pre-dedup — contaminado
+                # Filtro 3 v5: UNDER — solo linea 4.5 habilitada
+                # F5 Under 4.5: WR=67% n=246 Sibila (2026-06-03) — re-enable selectivo
+                # Otras lineas (2.5/3.0/3.5): WR=31-41% — siguen bloqueadas
+                # Blanket ban 2026-05-26 era para todos; ahora 4.5 separado
                 _mkt_type = str(_mp.get('market_type',''))
                 if _is_under and not _is_ml:
-                    log.info('MLB [under-disabled]: Under full-game y F5 desactivado (ROI -24.1%% Sibila limpia)')
-                    continue
+                    if _line == 4.5 and _mkt_type == 'mlb_f5_total' and _conf >= 0.65:
+                        log.info('[MLB Under4.5 LIVE] WR=67%% Sibila n=246 @%.2f conf=%.0f%%',
+                                 _odds, _conf * 100)
+                    else:
+                        log.info('MLB [under-disabled line=%.1f conf=%.0f%%]: solo Under4.5 con conf>=65%%',
+                                 _line, _conf * 100)
+                        continue
 
                 # Filtro 4: solo F5 — full-game ML/total desactivado
                 # Real: 91 bets -10.3% ROI | Sibila: 2996 bets -6.2% ROI (2026-05-19)
@@ -5533,13 +5701,14 @@ def run_cycle(dry_run=False):
                 log.info('MLB filters v5: %d/%d removidos', _n_removed, len(mlb_picks))
             mlb_picks = _filtered_mlb
 
-        # Stake cap: F5 O/U $2.00 (shadow-validated 3000+ picks), F5 ML $1.00 (unvalidated market)
+        # Stake cap: F5 O/U $2.00 (shadow-validated 3000+ picks), F5 ML $1.00, Under4.5 $1.00 (new)
         for _mp in mlb_picks:
             if _mp.get('raw_model_prob_uncal'):
                 _mp['model_prob'] = _mp['raw_model_prob_uncal']  # raw prob -> Kelly positivo
-            _mkt = str(_mp.get('market', ''))
-            if 'moneyline' in _mkt:
-                _mp['_max_stake'] = 2.00  # F5 ML validado: 124 bets Sibila +49.4% ROI (2026-05-19)
+            if _mp.get('market_type') == 'mlb_f5_ml':
+                _mp['_max_stake'] = 1.00  # 2026-06-02: conservador f5_ml
+            elif 'under 4.5' in str(_mp.get('label', '')).lower():
+                _mp['_max_stake'] = 1.00  # 2026-06-03: Under4.5 conservador (nuevo)
             else:
                 _mp['_max_stake'] = 2.00  # F5 O/U validado por shadow analysis
         if mlb_picks:
@@ -5587,6 +5756,9 @@ def run_cycle(dry_run=False):
                 # CONMEBOL — added 2026-05-22 (stricter thresholds applied post-filter)
                 'soccer-international-clubs-copa-libertadores',
                 'soccer-international-clubs-copa-sudamericana',
+                # Intl shadow 2026-06-02 -- validar post-WC antes de apostar
+                'soccer-international-conmebol-copa-america',
+                'soccer-international-uefa-nations-league',
             ]
         ) if 'soccer' in c or 'international' in c]
         _goal_picks = _scan_goals(api, state, comp_keys=_goals_comps, dry_run=dry_run, min_edge=0.12, min_conf=0.70)
@@ -5602,12 +5774,37 @@ def run_cycle(dry_run=False):
                     'soccer-international-clubs-copa-libertadores',
                     'soccer-international-clubs-copa-sudamericana',
                 }
+                # Shadow-only intl comps: registrar en Sibila, no apostar hasta validar WC
+                _INTL_SHADOW_COMPS = {
+                    'soccer-international-conmebol-copa-america',
+                    'soccer-international-uefa-nations-league',
+                }
+                # 2026-06-03: Goals 2H Under — relajar CSV gate para ligas domésticas
+                # Sibila: Goals 2H Under 2.5 WR=96% n=273, Under 1.5 WR=81% n=167
+                # Ligas domésticas aprobadas (tienen odds history como señal alternativa)
+                _GOALS2H_DOMESTIC = {
+                    'soccer-england-premier-league', 'soccer-germany-bundesliga',
+                    'soccer-italy-serie-a', 'soccer-spain-laliga', 'soccer-france-ligue-1',
+                    'soccer-netherlands-eredivisie', 'soccer-portugal-primeira-liga',
+                    'soccer-england-championship', 'soccer-germany-2-bundesliga',
+                    'soccer-spain-laliga-2', 'soccer-scotland-premiership',
+                    'soccer-belgium-first-division-a',
+                }
+                def _goals2h_under_ok(p):
+                    lbl = str(p.get('label', '') or p.get('side', '')).lower()
+                    return 'goals 2h' in lbl and 'under' in lbl \
+                        and p.get('league') in _GOALS2H_DOMESTIC \
+                        and float(p.get('edge', 0) or 0) >= 0.12 \
+                        and float(p.get('confidence', p.get('conf', 0)) or 0) >= 0.70
+
                 _gp_csv = [p for p in _goal_picks
                            if p.get('_csv_form')
                            or p.get('league') == 'soccer-international-world-cup'
                            or (p.get('league') in _CONMEBOL_COMPS
+                               and p.get('league') not in _INTL_SHADOW_COMPS
                                and p.get('edge', 0) >= 0.14
-                               and p.get('conf', 0) >= 0.72)]
+                               and p.get('conf', 0) >= 0.72)
+                           or _goals2h_under_ok(p)]
                 # Skip picks with kickoff >48h away (allows next-day matches, prevents weeks-long capital lock-up)
                 from datetime import datetime as _dt, timezone as _tz, timedelta as _td
                 _now_utc = _dt.now(_tz.utc)
@@ -5633,11 +5830,18 @@ def run_cycle(dry_run=False):
                     for _gp2 in _gp_csv:
                         if "under" in str(_gp2.get("label","")).lower():
                             _gp2["sport"] = "soccer_under"
-                    # Cap stake on internationals without domestic CSV form data (max $5)
+                    # Goals 2H Under doméstico sin CSV: cap $3 (WR=90%+ Sibila, conservador)
+                    # Otros sin CSV (intl): cap $5
                     for _gp2 in _gp_csv:
                         if not _gp2.get("_csv_form"):
-                            _gp2.setdefault("_max_stake", 5.00)
-                            log.debug("[Soccer Goals] intl cap $5: %s", _gp2.get("match","?"))
+                            _lbl2 = str(_gp2.get("label","")).lower()
+                            if 'goals 2h' in _lbl2 and 'under' in _lbl2 \
+                                    and _gp2.get("league") in _GOALS2H_DOMESTIC:
+                                _gp2.setdefault("_max_stake", 3.00)
+                                log.debug("[Soccer Goals 2H Under] dom cap $3: %s", _gp2.get("match","?"))
+                            else:
+                                _gp2.setdefault("_max_stake", 5.00)
+                                log.debug("[Soccer Goals] intl cap $5: %s", _gp2.get("match","?"))
                     placed += place_bets(api, state, _gp_csv, [], dry_run)
                     MAX_TOTAL_EXPOSURE = _saved_exp
                     log.info('[Soccer Goals] %d csv-backed picks placed', len(_gp_csv))
@@ -5647,6 +5851,28 @@ def run_cycle(dry_run=False):
                 log.debug('[Soccer Goals] SOCCER_GOALS_ENABLED=False — shadow only, %d picks', len(_goal_picks))
     except Exception as _ge:
         log.debug('Soccer goals scan error: %s', _ge)
+
+    # Copa Libertadores/Sudamericana — SHADOW ONLY (sin CSV form, thresholds reducidos)
+    # Objetivo: acumular datos en Sibila para validar WR antes de habilitar real
+    try:
+        from oraculo_soccer_v2 import scan_soccer_goals as _scan_goals_copa
+        _copa_comps = [
+            'soccer-international-clubs-copa-libertadores',
+            'soccer-international-clubs-copa-sudamericana',
+        ]
+        _copa_picks = _scan_goals_copa(api, state, comp_keys=_copa_comps, dry_run=True,
+                                        min_edge=0.06, min_conf=0.62)
+        if _copa_picks and _SIBILA_ENABLED:
+            _copa_new = 0
+            for _cp in _copa_picks:
+                _cp['_shadow_only'] = True
+                _cp['_source'] = 'copa_shadow'
+                _sibila_record(_cp)
+                _copa_new += 1
+            if _copa_new:
+                log.info('[Copa Shadow] %d picks registrados en Sibila (shadow)', _copa_new)
+    except Exception as _ce:
+        log.debug('Copa shadow scan error: %s', _ce)
 
     if sc_picks:
         # Referee-filtered picks go to place_bets; unfiltered shadow only
@@ -5677,6 +5903,15 @@ def run_cycle(dry_run=False):
                 os.path.join(SCRIPT_DIR, 'sibila.db'))
         except Exception as _clve:
             log.debug('CLV cloudbet update failed: %s', _clve)
+    else:
+        # 2026-06-02: record_cloudbet_clv usa cloudbet_config.json, no ODDS_API_KEY
+        try:
+            from oraculo_clv import CLVOracle as _CLVOracleCB
+            _cb_clv = _CLVOracleCB(odds_api_key='')
+            _cb_clv.record_cloudbet_clv(api, state.get('active_bets', []),
+                os.path.join(SCRIPT_DIR, 'sibila.db'))
+        except Exception as _clve2:
+            log.debug('CLV cloudbet (standalone) failed: %s', _clve2)
 
     log.info('Cycle complete: %d picks found (%d fb + %d tn + %d mlb + %d sc), %d placed | Bankroll: $%.2f',
              len(football_picks) + len(tennis_picks) + len(mlb_picks) + len(sc_picks), len(football_picks), len(tennis_picks), len(mlb_picks), len(sc_picks),
