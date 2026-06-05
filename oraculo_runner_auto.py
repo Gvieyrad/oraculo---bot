@@ -2869,15 +2869,20 @@ def place_bets(api, state, picks, parlays, dry_run=False):
 
     # Build dedup sets: per match+label AND per match (exposure tracking)
     active_keys = set()
+    active_ev_markets = set()  # event_id|market_url — stable dedup (label can change between scans)
     active_matches = {}  # match_name -> total staked
     active_events = {}   # event_id -> total staked (cross-cycle)
     for ab in state.get('active_bets', []):
         ak = f"{ab.get('match','')}|{ab.get('label','')}"
         active_keys.add(ak)
+        _ab_eid = ab.get('event_id', '')
+        _ab_murl = ab.get('market_url', '')
+        if _ab_eid and _ab_murl:
+            active_ev_markets.add(f"{_ab_eid}|{_ab_murl}")
         mn = ab.get('match', '')
         if mn and 'PARLAY' not in mn and '(legacy)' not in mn:
             active_matches[mn] = active_matches.get(mn, 0) + ab.get('stake', 0)
-        eid = ab.get('event_id', '')
+        eid = _ab_eid
         if eid:
             active_events[eid] = active_events.get(eid, 0) + ab.get('stake', 0)
 
@@ -2918,6 +2923,11 @@ def place_bets(api, state, picks, parlays, dry_run=False):
         active_key = f"{p['match']}|{p['label']}"
         if active_key in active_keys:
             log.info('  [SKIP] Already active: %s | %s', p['match'][:35], p['label'])
+            continue
+        # Skip if already bet same event+market (label can differ between scans, e.g. xG value changes)
+        _ev_mkt_key = f"{p.get('event_id','')}|{p.get('market_url','')}"
+        if _ev_mkt_key and _ev_mkt_key in active_ev_markets:
+            log.info('  [SKIP-EVMKT] Duplicate event+market: %s', _ev_mkt_key[:60])
             continue
         # Skip if already hit max bets for this match (1 per match)
         match_name = p['match']
@@ -3090,6 +3100,9 @@ def place_bets(api, state, picks, parlays, dry_run=False):
             active_matches[p['match']] = active_matches.get(p['match'], 0) + stake
             if p.get('event_id',''):
                 active_events[p['event_id']] = active_events.get(p['event_id'], 0) + stake
+            _placed_ev_mkt = f"{p.get('event_id','')}|{p.get('market_url','')}"
+            if _placed_ev_mkt.strip('|'):
+                active_ev_markets.add(_placed_ev_mkt)
             # save_state called by _save_bet
             # Track prediction for backtest
             _log_prediction(p['match'], p['label'],
@@ -5654,6 +5667,17 @@ def run_cycle(dry_run=False):
                 if _mch in _active_matches:
                     log.info('MLB [1-per-match]: %s ya activo', _mch[:30])
                     continue
+
+                # Filtro 1b: NUNCA apostar en FADE_TEAMS — modelo los sobreestima (WR=22-38%)
+                # FADE_TEAMS en live = EV negativo: breakeven > WR real historico
+                if _is_ml and _mkt_type == 'mlb_f5_ml':
+                    import re as _re_fade
+                    _picked_m = _re_fade.search(r'F5 ML: (.+?) \(FIP', _lbl)
+                    if _picked_m:
+                        _picked_team = _picked_m.group(1).strip()
+                        if _picked_team in MLB_FADE_TEAMS:
+                            log.info('MLB [fade-block %s]: WR historico<breakeven — no apostar en vivo', _picked_team[:15])
+                            continue
 
                 # Filtro 2 v6: OVER — solo lineas 6.5+ (Fase3: 4.5-6.0 WR=30-44% Sibila 1230p -> BLOQUEADO)
                 if _is_over:
