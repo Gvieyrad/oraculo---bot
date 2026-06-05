@@ -2334,7 +2334,7 @@ def scan_tennis(api, state, dry_run=False):
                             _p2_picks_added += 1
 
                 # 2.2: tennis.winner_and_total (BO3 only — p_h20/p_a20 undefined for BO5/Slams)
-                wt_mkt = mkts.get('tennis.winner_and_total', {}) if _bo == 3 else {}
+                wt_mkt = {}  # DISABLED 2026-06-05: WR=16.3%% on 49 picks Sibila
                 for _sub_k, _sub_v in wt_mkt.get('submarkets', {}).items():
                     for sel in (_sub_v.get('selections') or []):
                         if sel.get('status') not in ('SELECTION_ENABLED', None, ''):
@@ -2408,7 +2408,7 @@ def scan_tennis(api, state, dry_run=False):
                         _edge = _prob * _price - 1.0
                         # Cap odds dynamic (oraculo_filters.json tennis_team_win_set, default 1.80)
                         _p2_ws_cap = _dyn_tennis_odds.get('tennis_team_win_set', 1.80)
-                        if _edge > TENNIS_MIN_EDGE and 0.50 < _prob < 0.93 and _edge < 0.35 and _price <= _p2_ws_cap:
+                        if _edge > TENNIS_MIN_EDGE and _prob >= TENNIS_MIN_CONF and _prob < 0.93 and _edge < 0.35 and _price <= _p2_ws_cap:
                             _player = home if _team == 'home' else away
                             picks.append({
                                 'match': match_s, 'league': comp_key,
@@ -3112,16 +3112,17 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                            league=p.get('league', ''),
                            event_id=p.get('event_id', ''),
                            market_type=p.get('market_type'))  # 2026-06-02 fix
-            # Portfolio Kelly: ajustar stake por correlacion con bets abiertas
+            # Portfolio Kelly: registrar correlacion post-placement (solo tracking — no cancela el bet)
+            # NOTE: el sizing real ya fue calculado por PortfolioKelly pre-placement.
+            # Bug fix: 'continue' aqui hacia que sibila_placed no se llamara para bets ya colocados.
             if _PORTFOLIO_ENABLED:
                 _port_result = _PORTFOLIO.get_adjusted_stake(p, base_stake=stake)
                 if _port_result.get('skip'):
-                    log.info('  [Portfolio] SKIP: %s', _port_result.get('reason',''))
-                    continue
-                stake = _port_result['stake_adj']
-                p['portfolio_adj']  = _port_result['stake_adj']
-                p['portfolio_corr'] = _port_result.get('corr_penalty', 0)
-                p['portfolio_capped'] = _port_result.get('capped', False)
+                    log.warning('  [Portfolio-post] Would have skipped (bet already placed): %s', _port_result.get('reason',''))
+                else:
+                    p['portfolio_adj']  = _port_result['stake_adj']
+                    p['portfolio_corr'] = _port_result.get('corr_penalty', 0)
+                    p['portfolio_capped'] = _port_result.get('capped', False)
             if _SIBILA_ENABLED:
                 _sibila_placed(p['match'], p['label'], bet_id, stake)
             # RLM boost: si sharp money confirma nuestro pick -> +20% stake
@@ -3155,6 +3156,9 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                 active_matches[p['match']] = active_matches.get(p['match'], 0) + stake
                 if p.get('event_id',''):
                     active_events[p['event_id']] = active_events.get(p['event_id'], 0) + stake
+                _retry_ev_mkt = f"{p.get('event_id','')}|{p.get('market_url','')}"
+                if _retry_ev_mkt.strip('|'):
+                    active_ev_markets.add(_retry_ev_mkt)
                 if _SIBILA_ENABLED:
                     _sibila_placed(p['match'], p['label'], bet_id, stake)
             else:
@@ -5836,15 +5840,26 @@ def run_cycle(dry_run=False):
                     'soccer-belgium-first-division-a',
                 }
                 def _goals2h_under_ok(p):
+                    import re as _re_xg
                     lbl = str(p.get('label', '') or p.get('side', '')).lower()
-                    # Goals 2H Over: WR=0% n=3 shadow — solo Under tiene señal
+                    # Goals 2H Over: WR=0% n=3 shadow -- solo Under tiene senal
                     if 'goals 2h' in lbl and 'over' in lbl:
                         return False
-                    return 'goals 2h' in lbl and 'under' in lbl \
-                        and p.get('league') in _GOALS2H_DOMESTIC \
-                        and float(p.get('edge', 0) or 0) >= 0.12 \
-                        and float(p.get('confidence', p.get('conf', 0)) or 0) >= 0.70
-
+                    if 'goals 2h' not in lbl or 'under' not in lbl:
+                        return False
+                    # xG gate (Sibila 2026-06-05):
+                    # Under 1.5: xG<=0.4 WR=98% (n=55), xG 0.5-0.6 WR=20% (n=5) -- BLOCK 0.5+
+                    # Under 2.5: xG<=1.2 WR=100% (n=20), xG>1.2 WR=66% (n=6) -- BLOCK 1.3+
+                    _m_xg = _re_xg.search(r'xg ([0-9.]+)', lbl)
+                    if _m_xg:
+                        _xg = float(_m_xg.group(1))
+                        if 'under 1.5' in lbl and _xg > 0.4:
+                            return False
+                        if 'under 2.5' in lbl and _xg > 1.2:
+                            return False
+                    return (p.get("league") in _GOALS2H_DOMESTIC
+                        and float(p.get("edge", 0) or 0) >= 0.12
+                        and float(p.get("confidence", p.get("conf", 0)) or 0) >= 0.70)
 
                 def _goals_over_line_ok(p):
                     # 2026-06-04 Fase3: FT Over 4.5-6.0 shadow WR=30-44% -$8928 -- BLOCK
