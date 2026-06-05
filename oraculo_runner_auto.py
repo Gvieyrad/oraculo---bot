@@ -3048,7 +3048,7 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                     log.debug('Sharp ref error: %s', _se)
         _wc_reserve = state.get('wc_reserve', 0)
         if _wc_reserve > 0 and _bet_currency == 'USDC':
-            _usdc_total = state.get('bankroll_by_currency', {}).get('USDC', 0)
+            _usdc_total = state.get('bankroll', 0) - state.get('bankroll_by_currency', {}).get('USDT', 0)  # use total minus USDT; bbc.USDC is stale when deposits bypass it
             _usdc_pending = sum(b.get('stake', 0) for b in state.get('active_bets', [])
                                 if b.get('currency', '') == 'USDC' and b.get('status', 'open') == 'open')
             _usdc_effective = _usdc_total - _usdc_pending
