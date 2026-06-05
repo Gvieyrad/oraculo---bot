@@ -92,7 +92,7 @@ MLB_F5_ML_MIN_EDGE = 0.08        # 2026-06-02: f5_ml lower threshold — shadow 
 # 2026-06-03: fade teams — modelo WR<30% con n>=7; registrar oponente en Sibila shadow
 MLB_FADE_TEAMS = {
     'CHI Cubs', 'TEX Rangers', 'DET Tigers',    # 0%/25%/25% WR (n>=7, Jun-03)
-    'CHW White Sox', 'MIA Marlins',              # 35%/37% WR (n=17/13, Jun-04)
+    'MIA Marlins',                               # MIA 37% WR n=13; CHW removed 2026-06-05 WR=35% reversed
 }
 # 2026-06-04: boost teams — modelo WR>=89% n>=14 (90d Sibila); cap $2.00 (doble del normal)
 MLB_BOOST_TEAMS = {
@@ -2408,7 +2408,7 @@ def scan_tennis(api, state, dry_run=False):
                         _edge = _prob * _price - 1.0
                         # Cap odds dynamic (oraculo_filters.json tennis_team_win_set, default 1.80)
                         _p2_ws_cap = _dyn_tennis_odds.get('tennis_team_win_set', 1.80)
-                        if _edge > TENNIS_MIN_EDGE and _prob >= TENNIS_MIN_CONF and _prob < 0.93 and _edge < 0.35 and _price <= _p2_ws_cap:
+                        if _edge > TENNIS_MIN_EDGE and _prob >= TENNIS_MIN_CONF and _prob < 0.93 and _edge < 0.35 and _price <= _p2_ws_cap and _price >= 1.40:
                             _player = home if _team == 'home' else away
                             picks.append({
                                 'match': match_s, 'league': comp_key,
@@ -5656,6 +5656,7 @@ def run_cycle(dry_run=False):
                 _is_under = 'under' in _lbl
                 _is_ml    = 'ml'    in _lbl
                 _conf = float(_mp.get('raw_model_prob_uncal') or _mp.get('raw_model_prob') or _mp.get('model_prob') or _mp.get('confidence') or 0)
+                _mkt_type = str(_mp.get('market_type', ''))
 
                 # Filtro 0: PROB minima 0.60 (O/U) — bucket 55-59% destruye $13k
                 # Under 4.5: ML model validated threshold is 0.58
@@ -5760,6 +5761,7 @@ def run_cycle(dry_run=False):
                 _mp['_max_stake'] = 8.00  # 2026-06-03: Under4.5 daily 0
             else:
                 _mp['_max_stake'] = 12.00  # F5 O/U daily 0
+        mlb_picks = [p for p in mlb_picks if not (p.get('market_type') == 'mlb_f5_total' and 'under' in str(p.get('label', '')).lower())]  # 2026-06-05: F5 Under WR=40.3% n=77 block
         if mlb_picks:
             _caps = {p.get('match','?'): p.get('_max_stake',2.0) for p in mlb_picks}
             log.info('MLB: %d picks -> place_bets | caps=%s | settled=%d',
