@@ -2138,7 +2138,7 @@ def scan_tennis(api, state, dry_run=False):
                                 if prob < 0.01:
                                     continue
                                 edge = prob * price - 1
-                                if (edge > TENNIS_MIN_EDGE and prob >= 0.68 and edge < 0.40
+                                if (edge > TENNIS_MIN_EDGE and prob >= 0.74 and edge < 0.40
                                         and prob < 0.92 and price <= 1.65):
                                     picks.append({
                                         'match': f'{home} vs {away}',
@@ -5677,10 +5677,11 @@ def run_cycle(dry_run=False):
                 # FADE_TEAMS en live = EV negativo: breakeven > WR real historico
                 if _is_ml and _mkt_type == 'mlb_f5_ml':
                     import re as _re_fade
-                    _picked_m = _re_fade.search(r'F5 ML: (.+?) \(FIP', _lbl)
+                    _picked_m = _re_fade.search(r'f5 ml: (.+?) \(fip', _lbl)
                     if _picked_m:
                         _picked_team = _picked_m.group(1).strip()
-                        if _picked_team in MLB_FADE_TEAMS:
+                        _fade_lower = {t.lower() for t in MLB_FADE_TEAMS}
+                        if _picked_team in _fade_lower:
                             log.info('MLB [fade-block %s]: WR historico<breakeven — no apostar en vivo', _picked_team[:15])
                             continue
 
@@ -5720,17 +5721,17 @@ def run_cycle(dry_run=False):
                 # Cuando fade team tiene FIP<=3.20 vs nuestro pick, el modelo subestima su pitching
                 # Ejemplo: TB 0-DET 8 (DET fade team, FIP 3.43 — justo por encima del threshold)
                 if _is_ml and _mkt_type == 'mlb_f5_ml':
-                    _fip_m = re.search(r'FIP ([\d.]+)/([\d.]+)', _lbl)
+                    _fip_m = re.search(r'fip ([\d.]+)/([\d.]+)', _lbl)
                     _match_parts = str(_mch).split(' vs ')
                     if _fip_m and len(_match_parts) == 2:
                         _home_fip  = float(_fip_m.group(1))
                         _away_fip  = float(_fip_m.group(2))
                         _home_team = _match_parts[0].strip()
-                        _picked_m  = re.search(r'F5 ML: (.+?) \(FIP', _lbl)
+                        _picked_m  = re.search(r'f5 ml: (.+?) \(fip', _lbl)
                         if _picked_m:
                             _picked   = _picked_m.group(1).strip()
-                            _opp_name = _match_parts[1].strip() if _picked == _home_team else _match_parts[0].strip()
-                            _opp_fip  = _away_fip if _picked == _home_team else _home_fip
+                            _opp_name = _match_parts[1].strip() if _picked.lower() == _home_team.lower() else _match_parts[0].strip()
+                            _opp_fip  = _away_fip if _picked.lower() == _home_team.lower() else _home_fip
                             if _opp_name in MLB_FADE_TEAMS and _opp_fip <= 3.20:
                                 log.info('MLB [fip-fade-gate %s]: oponente fade %s FIP=%.2f<=3.20 — skip',
                                          _picked[:12], _opp_name[:12], _opp_fip)
@@ -5761,7 +5762,18 @@ def run_cycle(dry_run=False):
                 _mp['_max_stake'] = 8.00  # 2026-06-03: Under4.5 daily 0
             else:
                 _mp['_max_stake'] = 12.00  # F5 O/U daily 0
-        mlb_picks = [p for p in mlb_picks if not (p.get('market_type') == 'mlb_f5_total' and 'under' in str(p.get('label', '')).lower())]  # 2026-06-05: F5 Under WR=40.3% n=77 block
+        # F5 Under dome shadow (2026-06-05): WR=60% n=10 -- accumulate before enabling live
+        _dome_under = [p for p in mlb_picks
+                       if "under" in str(p.get("label", "") or p.get("side", "")).lower()
+                       and "[dome]" in str(p.get("label", "") or p.get("side", "")).lower()]
+        for _dp in _dome_under:
+            _dp["_shadow_only"] = True
+            try:
+                _sibila_record(_dp)
+                log.info("[MLB F5-Under Dome] shadow %s @%.2f", _dp.get("match", "?"), _dp.get("price", 0))
+            except Exception as _e:
+                log.warning("[MLB F5-Under Dome] sibila_record err: %s", _e)
+        mlb_picks = [p for p in mlb_picks if 'under' not in str(p.get('label', '') or p.get('side', '')).lower()]  # 2026-06-05: F5 Under WR=40.3% n=77 block
         if mlb_picks:
             _caps = {p.get('match','?'): p.get('_max_stake',2.0) for p in mlb_picks}
             log.info('MLB: %d picks -> place_bets | caps=%s | settled=%d',
