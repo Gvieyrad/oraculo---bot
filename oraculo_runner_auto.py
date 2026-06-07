@@ -3053,7 +3053,7 @@ def place_bets(api, state, picks, parlays, dry_run=False):
             _usdc_pending = sum(b.get('stake', 0) for b in state.get('active_bets', [])
                                 if b.get('currency', '') == 'USDC' and b.get('status', 'open') == 'open')
             _usdc_effective = _usdc_total - _usdc_pending
-            _is_wc_pick = (p.get('cutoff_time', '') or '') >= '2026-06-01' or p.get('league') == 'FIFA_WC'
+            _is_wc_pick = p.get('sport', '') in ('soccer', 'football') and ((p.get('cutoff_time', '') or '') >= '2026-06-01' or p.get('league') == 'FIFA_WC')
             if not _is_wc_pick and _usdc_effective - stake < _wc_reserve:
                 # Bug fix: try USDT fallback before skipping (don't blacklist — funding constraint ≠ bad pick)
                 _usdt_total = state.get('bankroll_by_currency', {}).get('USDT', 0)
