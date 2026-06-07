@@ -86,6 +86,8 @@ STEAM_ENABLED = False          # Disable steam move betting (getting RESTRICTED 
 SOCCER_ENABLED = True          # Re-enabled: 86% WR on 14 real bets, +$185 PnL
 SOCCER_GOALS_ENABLED = True    # Re-enabled: referee goal-rate multiplier + stricter thresholds (P3.1)
 MLB_ENABLED = True             # 2026-06-01: re-enabled; 2026-06-02: f5_ml ACTIVADO LIVE (shadow WR=58.1% n=210 > umbral 54%/30)
+MLB_F5_ML_ENABLED = False        # 2026-06-07: backtest 759j WR=51.3%% sin edge
+MLB_F5_TOTAL_ENABLED = False       # 2026-06-07: WR=35.3%% n=85 picks -$11.95; apagar hasta backtest
 MLB_PROB_CALIBRATION = 0.85      # Systematic overestimation correction: raw WR 36.3% vs implied 43.6%
 MLB_MIN_EDGE = 0.15              # 2026-05-22: raised from 0.08 global — ROI -9.3% on 102 real picks
 MLB_F5_ML_MIN_EDGE = 0.08        # 2026-06-02: f5_ml lower threshold — shadow WR=58.1% n=210 picks
@@ -2409,7 +2411,8 @@ def scan_tennis(api, state, dry_run=False):
                         _edge = _prob * _price - 1.0
                         # Cap odds dynamic (oraculo_filters.json tennis_team_win_set, default 1.80)
                         _p2_ws_cap = _dyn_tennis_odds.get('tennis_team_win_set', 1.80)
-                        if _edge > TENNIS_MIN_EDGE and _prob >= TENNIS_MIN_CONF and _prob < 0.93 and _edge < 0.35 and _price <= _p2_ws_cap and _price >= 1.40:
+                        _dow = datetime.now(timezone.utc).weekday()  # 0=Mon
+                        if _edge > TENNIS_MIN_EDGE and _prob >= TENNIS_MIN_CONF and _prob < 0.93 and _edge < 0.35 and _price <= _p2_ws_cap and _price >= 1.40 and _dow != 0:  # 2026-06-07: Mon WR=40%% block
                             _player = home if _team == 'home' else away
                             picks.append({
                                 'match': match_s, 'league': comp_key,
@@ -2421,7 +2424,7 @@ def scan_tennis(api, state, dry_run=False):
                                 'sport': 'tennis',
                                 'market_type': 'tennis_team_win_set',
                                 'surface': _surf_p2,
-                                '_max_stake': 12.00,
+                                '_max_stake': (8.00 if _dow == 1 else 5.00),  # Tue WR=88.2%% boost
                             })
                             _p2_picks_added += 1
 
@@ -5479,7 +5482,7 @@ def run_cycle(dry_run=False):
             # f5_ml/f5_total: edge threshold relaxed (calibration artifact gives edge~0)
             # 2026-06-02: f5_ml ACTIVADO LIVE — WR=58.1% n=210 supera umbral; MLB_F5_ML_MIN_EDGE=0.08
             mlb_picks = [p for p in _all_mlb
-                         if p.get('market_type') in ('mlb_f5_ml', 'mlb_f5_total')
+                         if ((p.get('market_type') == 'mlb_f5_total' and MLB_F5_TOTAL_ENABLED) or (p.get('market_type') == 'mlb_f5_ml' and MLB_F5_ML_ENABLED))
                          and float(p.get('edge') or 0) > 0
                          and float(p.get('edge') or 0) >= (MLB_F5_ML_MIN_EDGE if p.get('market_type') == 'mlb_f5_ml' else MLB_MIN_EDGE)
                          and float(p.get('model_prob') or 0) >= 0.55]
@@ -5761,12 +5764,8 @@ def run_cycle(dry_run=False):
                 _mp['model_prob'] = _mp['raw_model_prob_uncal']  # raw prob -> Kelly positivo
             _lbl_lower = str(_mp.get('label', '')).lower()
             _is_boost = any(t.lower() in _lbl_lower for t in MLB_BOOST_TEAMS)
-            if _mp.get('market_type') == 'mlb_f5_ml' and _is_boost:
-                _mp['_max_stake'] = 15.00  # 2026-06-04: boost (MIL/WAS WR>=89% n>=14, daily 0)
-            elif _mp.get('market_type') == 'mlb_f5_ml' and float(_mp.get('_min_fip', 99)) <= 2.0:
-                _mp['_max_stake'] = 12.00  # elite pitching min_fip<=2.0 WR=74-86%% Sibila Jun-04
-            elif _mp.get('market_type') == 'mlb_f5_ml':
-                _mp['_max_stake'] = 10.00  # 2026-06-02: daily 0 normal
+            if _mp.get("market_type") == "mlb_f5_ml":
+                _mp["_max_stake"] = 1.00   # 2026-06-07: recal WR=17%% -- 1 USD cap hasta 50+ picks live WR>55%%
             elif 'under 4.5' in _lbl_lower:
                 _mp['_max_stake'] = 8.00  # 2026-06-03: Under4.5 daily 0
             else:

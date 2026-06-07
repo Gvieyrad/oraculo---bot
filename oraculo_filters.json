@@ -2,15 +2,19 @@
   "_meta": {
     "version": 1,
     "description": "Dynamic filter config for Oraculo. Managed by oraculo_auto_analyzer.py. Do not edit by hand.",
-    "last_updated": "2026-05-26",
-    "updated_by": "manual_init"
+    "last_updated": "2026-06-02",
+    "updated_by": "wta_italy_block"
   },
   "tennis": {
     "blocked_comp_substrings": [
-      "wta"
+      "wta",
+      "wta-rome-italy",
+      "wta-foggia"
     ],
     "blocked_comp_substrings_reason": {
-      "wta": "Sibila 62.1% WR break-even (29 picks) — shadow-only until 50+ clean picks"
+      "wta": "Sibila 62.1% WR break-even (29 picks) \u2014 shadow-only until 50+ clean picks",
+      "wta-rome-italy": "WTA Rome Italy: 6W/18 (33% WR, z=-2.61, p=0.009) \u2014 estadisticamente significativo",
+      "wta-foggia": "WTA Foggia Italy: 0W/2 (0% WR) \u2014 patron Italy consistente"
     },
     "max_odds": {
       "tennis_winner": 2.1,
