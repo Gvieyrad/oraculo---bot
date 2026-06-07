@@ -5448,7 +5448,7 @@ def run_cycle(dry_run=False):
                             '_source': 'fade_shadow',
                         }
                         _sibila_record(_fade)
-                        log.info('[MLB Fade] shadow %s vs [FADE]%s @%.2f', _opp_team, _fteam, _opp.get('price', 0))
+                        log.info('[MLB Fade] shadow %s vs [FADE]%s @%.2f', _opp_team, _fteam, _opp_price)
             # 2026-06-04: counter shadow removed -- scanner blocks Over<6.0 at source,
             # so Over 5.0/5.5 never reach _all_mlb. Data already validated (n=795, WR=30-31%).
             # Solo picks reales para apostar (post-calibracion)
