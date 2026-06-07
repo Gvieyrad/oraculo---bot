@@ -94,6 +94,7 @@ MLB_FADE_TEAMS = {
     'CHI Cubs', 'TEX Rangers', 'DET Tigers',    # 0%/25%/25% WR (n>=7, Jun-03)
     'MIA Marlins',                               # MIA 37% WR n=13; CHW removed 2026-06-05 WR=35% reversed
 }
+MLB_FADE_TEAMS_LOWER = {t.lower() for t in MLB_FADE_TEAMS}  # sync auto; usar este en filtros
 # 2026-06-04: boost teams — modelo WR>=89% n>=14 (90d Sibila); cap $2.00 (doble del normal)
 MLB_BOOST_TEAMS = {
     'MIL Brewers',    # WR=93% n=14 PnL=+$237
@@ -3068,6 +3069,13 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                              _usdc_effective, _usdt_total - _usdt_pending, stake, _wc_reserve, p.get('label', '')[:20])
                     api.currency = _orig_currency
                     continue  # no _rejected_keys — retry next cycle
+        # Guard pre-placement: detiene fade_teams que escaparon filtros upstream
+        if p.get('sport') == 'baseball' and p.get('market_type') == 'mlb_f5_ml':
+            _guard_lbl = str(p.get('label', '')).lower()
+            _guard_m = re.search(r'f5 ml: (.+?) \(fip', _guard_lbl)
+            if _guard_m and _guard_m.group(1).strip() in MLB_FADE_TEAMS_LOWER:
+                log.error('[FADE-GUARD] BUG: fade_team "%s" escapo filtros — placement bloqueado', _guard_m.group(1)[:20])
+                continue
         log.info('  Placing: %s | %s @%.3f | $%.2f %s', p['match'][:35], p['label'], p['price'], stake, _bet_currency)
         resp = api.place_straight(p['event_id'], p['market_url'], p['price'], stake)
         api.currency = _orig_currency
@@ -5680,10 +5688,11 @@ def run_cycle(dry_run=False):
                     _picked_m = _re_fade.search(r'f5 ml: (.+?) \(fip', _lbl)
                     if _picked_m:
                         _picked_team = _picked_m.group(1).strip()
-                        _fade_lower = {t.lower() for t in MLB_FADE_TEAMS}
-                        if _picked_team in _fade_lower:
+                        if _picked_team in MLB_FADE_TEAMS_LOWER:
                             log.info('MLB [fade-block %s]: WR historico<breakeven — no apostar en vivo', _picked_team[:15])
                             continue
+                        else:
+                            log.debug('MLB [fade-ok %s]: no en fade_teams, pasa', _picked_team[:15])
 
                 # Filtro 2 v6: OVER — solo lineas 6.5+ (Fase3: 4.5-6.0 WR=30-44% Sibila 1230p -> BLOQUEADO)
                 if _is_over:
