@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""
+ganagol.py — Genera predicciones 1X2 para Ganagol de Latinka
+usando el modelo Dixon-Coles ya entrenado de Oraculo.
+
+Uso:
+  python3 ganagol.py
+  python3 ganagol.py "Liverpool" "Man City" "Barcelona" "Real Madrid" ...
+  (pares de equipos: local visitante local visitante ...)
+"""
+import sys, json, os
+from difflib import get_close_matches, SequenceMatcher
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DC_CACHE   = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'dixon_coles.json')
+
+from math import exp, factorial
+
+def _tau(x, y, lam, mu, rho):
+    if x == 0 and y == 0: return 1 - lam * mu * rho
+    elif x == 0 and y == 1: return 1 + lam * rho
+    elif x == 1 and y == 0: return 1 + mu * rho
+    elif x == 1 and y == 1: return 1 - rho
+    return 1.0
+
+def _pmf(k, lam):
+    if lam <= 0: return 1.0 if k == 0 else 0.0
+    return exp(-lam) * (lam ** k) / factorial(k)
+
+def load_model():
+    if not os.path.exists(DC_CACHE):
+        sys.exit(f"Cache no encontrado: {DC_CACHE}")
+    with open(DC_CACHE) as f:
+        return json.load(f)
+
+def lambda_(model, team, is_home):
+    base = model['league_avg'] / 2
+    atk  = model['attack'].get(team, 1.0)
+    def_ = model['defense'].get(team, 1.0)
+    adv  = model['home_adv'] if is_home else 1.0
+    return base * atk * def_ * adv
+
+def predict(model, home, away, max_goals=8):
+    rho = model['rho']
+    lam = lambda_(model, home, True)
+    mu  = lambda_(model, away, False)
+    ph = pd = pa = p_o25 = 0
+    for i in range(max_goals):
+        for j in range(max_goals):
+            p = _pmf(i, lam) * _pmf(j, mu) * _tau(i, j, lam, mu, rho)
+            if   i > j: ph += p
+            elif i == j: pd += p
+            else:        pa += p
+            if i + j > 2: p_o25 += p
+    total = ph + pd + pa
+    if total > 0: ph, pd, pa = ph/total, pd/total, pa/total
+    return ph, pd, pa, p_o25, lam, mu
+
+_ALIASES = {
+    'wolverhampton': 'Wolves',
+    'wolverhampton wanderers': 'Wolves',
+    'atletico madrid': 'Ath Madrid',
+    'universidad catolica': 'Universidad Católica',
+    'atletico paranaense': 'Athletico-PR',
+    'athletico paranaense': 'Athletico-PR',
+    'monterrey wanderers': 'M. Wanderers',
+    'central espanol': 'Central Espanol',
+    'deportivo maldonado': 'Dep. Maldonado',
+    'limache': None,
+    'central espanol': None,
+}
+_NO_DATA = {k for k, v in _ALIASES.items() if v is None}
+
+def resolve(name, known_teams):
+    if name in known_teams:
+        return name, True
+    name_lower = name.lower()
+    if name_lower in _NO_DATA:
+        return None, False
+    alias = _ALIASES.get(name_lower)
+    if alias and alias in known_teams:
+        return alias, True
+    matches = get_close_matches(name, known_teams, n=3, cutoff=0.50)
+    if not matches:
+        return None, False
+    best = max(matches, key=lambda m: SequenceMatcher(None, name.lower(), m.lower()).ratio())
+    return best, False
+
+def stars(conf):
+    n = min(5, 1 + int(conf * 5))
+    return '★' * n + '☆' * (5 - n)
+
+def ticket_label(pick):
+    return {'1': 'L  (Local gana)', 'X': 'E  (Empate)', '2': 'V  (Visita gana)'}[pick]
+
+def golazo_advice(po25):
+    if po25 >= 0.60: return f'SI  (Mas 2.5 — {po25:.0%} prob)'
+    if po25 <= 0.40: return f'NO  (Menos 2.5 — {1-po25:.0%} prob baja)'
+    return f'DUDOSO ({po25:.0%} para mas 2.5)'
+
+def main():
+    model = load_model()
+    teams = list(model['attack'].keys())
+
+    if len(sys.argv) > 2:
+        args = sys.argv[1:]
+        if len(args) % 2 != 0:
+            sys.exit("Error: pasa pares de equipos (local visitante ...)")
+        pairs = [(args[i], args[i+1]) for i in range(0, len(args), 2)]
+    else:
+        print("=== GANAGOL — Ingresa los partidos (hasta 4 jugadas) ===")
+        print("Formato: Local vs Visitante  |  Enter en blanco para terminar\n")
+        pairs = []
+        for i in range(1, 5):
+            raw = input(f"Jugada {i:02d}: ").strip()
+            if not raw:
+                break
+            parts = [p.strip() for p in raw.split("vs")]
+            if len(parts) != 2:
+                print("  Formato: Local vs Visitante")
+                continue
+            pairs.append((parts[0], parts[1]))
+
+    if not pairs:
+        sys.exit("Sin partidos ingresados.")
+
+    results = []
+
+    # ── Análisis detallado ────────────────────────────────────────────────────
+    print()
+    print("=" * 68)
+    print(f"{'GANAGOL — ANÁLISIS DIXON-COLES':^68}")
+    print("=" * 68)
+
+    for idx, (raw_h, raw_a) in enumerate(pairs, 1):
+        home, h_exact = resolve(raw_h, teams)
+        away, a_exact = resolve(raw_a, teams)
+
+        print(f"\nJUGADA {idx:02d}")
+        if not home:
+            print(f"  ⚠  '{raw_h}' no encontrado — sin datos suficientes")
+            results.append(None)
+            continue
+        if not away:
+            print(f"  ⚠  '{raw_a}' no encontrado — sin datos suficientes")
+            results.append(None)
+            continue
+
+        ph, pd, pa, po25, lam, mu = predict(model, home, away)
+        probs = {'1': ph, 'X': pd, '2': pa}
+        pick  = max(probs, key=probs.get)
+        conf  = probs[pick]
+
+        h_tag = '' if h_exact else f' (≈{raw_h})'
+        a_tag = '' if a_exact else f' (≈{raw_a})'
+        print(f"  {home}{h_tag}  vs  {away}{a_tag}")
+        print(f"  xG esperados → Local: {lam:.2f}  |  Visita: {mu:.2f}")
+        print(f"  Probabilidades: L={ph:.0%}  E={pd:.0%}  V={pa:.0%}")
+        print(f"  Mas de 2.5 goles: {po25:.0%}")
+        print(f"  PICK: [{pick}] {ticket_label(pick)}  {stars(conf)}  ({conf:.0%} confianza)")
+
+        results.append({'pick': pick, 'conf': conf, 'po25': po25,
+                        'home': home, 'away': away, 'lam': lam, 'mu': mu,
+                        'ph': ph, 'pd': pd, 'pa': pa})
+
+    # ── BOLETO FINAL ──────────────────────────────────────────────────────────
+    print()
+    print("=" * 68)
+    print(f"{'*** BOLETO GANAGOL — MARCA ESTO ***':^68}")
+    print("=" * 68)
+    print()
+
+    golazo_votes = []
+    for idx, r in enumerate(results, 1):
+        if r is None:
+            print(f"  Jugada {idx:02d}: ⚠  Sin recomendación (equipo no reconocido)")
+            golazo_votes.append(False)
+            continue
+        lev = {'1': '[L]', 'X': '[E]', '2': '[V]'}[r['pick']]
+        partido = f"{r['home']} vs {r['away']}"[:40]
+        print(f"  Jugada {idx:02d}: {lev}   {partido:<40} {stars(r['conf'])}")
+        golazo_votes.append(r['po25'] >= 0.55)
+
+    # Golazo 200 recomendacion global
+    si_count = sum(golazo_votes)
+    print()
+    print("  GOLAZO 200 (+S/ 1.00 por jugada, +S/ 200,000 al premio):")
+    for idx, (r, vote) in enumerate(zip(results, golazo_votes), 1):
+        if r is None: continue
+        label = 'SI  →' if vote else 'NO  →'
+        print(f"    Jugada {idx:02d}: {label} {golazo_advice(r['po25'])}")
+
+    print()
+    if si_count >= 3:
+        print("  RECOMENDACION GOLAZO 200: JUEGALO (mayoría de partidos con O2.5)")
+    elif si_count == 0:
+        print("  RECOMENDACION GOLAZO 200: NO (todos los partidos son de baja puntuacion)")
+    else:
+        print(f"  RECOMENDACION GOLAZO 200: OPCIONAL ({si_count}/{len(results)} partidos con O2.5)")
+
+    print()
+    print("=" * 68)
+    print("  Modelo: Dixon-Coles con decay temporal | Liga avg: {:.2f} goles".format(
+        model.get('league_avg', 2.65)))
+    print("  Equipos sin match exacto usan parámetros neutros (atk/def=1.0)")
+    print("=" * 68)
+
+if __name__ == '__main__':
+    main()
