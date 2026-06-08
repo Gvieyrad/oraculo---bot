@@ -5652,6 +5652,7 @@ def run_cycle(dry_run=False):
         _dow = _dt.datetime.utcnow().weekday()  # 0=Mon
         _active_matches = set(b.get('match', '') for b in state.get('active_bets', []))
         _filtered_mlb = []
+        _mkt_type = ""  # guard: init before loop (UnboundLocalError fix 2026-06-08)
 
         # Regla global: no apostar los lunes (WR=0% historico)
         if _dow == 0:
