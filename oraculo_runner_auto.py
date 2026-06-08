@@ -67,6 +67,7 @@ SPORT_KELLY = {             # Per-sport Kelly fractions
     'soccer_under': 0.25,  # 2026-05-22: U2.5 +25.5% ROI, U1.5 +47.3% -> boost Kelly
 }
 MIN_STAKE = 0.50            # Minimum bet $0.50
+MAX_STAKE_ABS = 5.0         # 2026-06-08: hard cap $5 per bet (user rule)
 CIRCUIT_BREAKER = 10.0      # Stop if bankroll < $10
 LOSS_STREAK_LIMIT = 5       # Reduce stake after 5 consecutive losses
 LOSS_STREAK_FACTOR = 0.50   # Reduce to 50%
@@ -790,6 +791,7 @@ def kelly_stake(bankroll, prob, odds, consecutive_losses=0, sport=None):
     if consecutive_losses >= LOSS_STREAK_LIMIT:
         stake *= LOSS_STREAK_FACTOR
         log.info('  Loss streak %d: stake reduced to $%.2f', consecutive_losses, stake)
+    stake = min(stake, MAX_STAKE_ABS)
     return max(round(stake, 2), 0) if stake >= MIN_STAKE else 0
 
 # ---------------------------------------------------------------------------
