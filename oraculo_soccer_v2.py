@@ -766,11 +766,11 @@ _DEFAULT_O15 = 0.760
 
 # Under 1.5 2H base rates (from 2424-25 data — more conservative leagues have higher rate)
 _LEAGUE_U15_2H = {
-    'soccer-england-premier-league':       0.500,
-    'soccer-germany-bundesliga':           0.511,
-    'soccer-italy-serie-a':                0.526,
-    'soccer-spain-la-liga':                0.526,
-    'soccer-france-ligue-1':               0.560,
+    'soccer-england-premier-league':       0.450,  # backtest 3503m: actual 45.0% (was 50.0%)
+    'soccer-germany-bundesliga':           0.493,  # backtest actual 49.3%
+    'soccer-italy-serie-a':                0.570,  # backtest actual 57.0% (was 52.6%)
+    'soccer-spain-la-liga':                0.574,  # backtest actual 57.4% (was 52.6%)
+    'soccer-france-ligue-1':               0.528,  # backtest actual 52.8% (was 56.0%)
     'soccer-netherlands-eredivisie':       0.510,
     'soccer-portugal-primeira-liga':       0.530,
     'soccer-england-championship':         0.572,

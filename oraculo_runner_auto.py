@@ -113,6 +113,7 @@ TENNIS_MAX_EDGE = 0.18         # Cap: 0.20+ bucket is -7.8% ROI — model overes
 TENNIS_PLATT_A = 1.044   # 2026-05-22: Platt calibration fitted on 124 Sibila picks (15% overestim corrected)
 TENNIS_PLATT_B = -0.7552  # logit(p) scaled + shifted; reduces avg prob 68%->53% matching real WR
 SHARP_REF_ENABLED = True       # Pre-placement check: skip if model differs from Pinnacle no-vig by >10%
+RESULT_1X2_ENABLED = False     # 2026-06-08: -18.42% ROI (4W/9L) — disabled until positive backtest
 CB_BASE = 'https://sports-api.cloudbet.com'
 # Initial deposits (known constants for bankroll reconciliation)
 INITIAL_DEPOSIT = 57.03        # Total initial deposit (USDC + USDT)
@@ -1346,7 +1347,7 @@ def scan_football(api, state, dry_run=False):
                         _is_wc = intl_league == 'FIFA_WC'
                         _e_min = WC_MIN_EDGE if _is_wc else MIN_EDGE
                         _c_min = WC_MIN_CONF if _is_wc else MIN_CONF
-                        if not _skip_1x2 and edge >= _e_min and prob >= _c_min and edge < 0.45 and prob < 0.92:
+                        if RESULT_1X2_ENABLED and not _skip_1x2 and edge >= _e_min and prob >= _c_min and edge < 0.45 and prob < 0.92:
                             _pick = {
                                 'match': match_label, 'league': intl_league,
                                 'event_id': eid, 'market_url': murl,
