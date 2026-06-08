@@ -152,6 +152,23 @@ def _parse_market(side_str):
         line = next((l for l in line_candidates if l > 3), None)
         return ('corners_total', direction, line)
 
+    # Goals FT compact (e.g. 'over25 over', 'under15 under')
+    m = re.match(r'(over|under)(\d{2})\s+(over|under)', s)
+    if m:
+        line = float(m.group(2)) / 10.0  # '25' -> 2.5
+        direction = m.group(3)
+        return ('goals_ft', direction, line)
+
+    # BTTS (both teams to score)
+    if 'btts' in s:
+        direction = 'yes' if 'yes' in s else 'no'
+        return ('btts', direction, 0.0)  # line unused but non-None
+
+    # Asian Handicap
+    m = re.match(r'ah\s+(home|away)\s+([+-]?\d+\.?\d*)', s)
+    if m:
+        return ('asian_handicap', m.group(1), float(m.group(2)))
+
     return ('unknown', direction, None)
 
 def _eval_result(row, market_kind, direction, line):
@@ -190,6 +207,23 @@ def _eval_result(row, market_kind, direction, line):
         corners = hc + ac
         detail = f'HC={hc} AC={ac} total={corners}'
         won = corners < line if direction == 'under' else corners > line
+        return won, detail
+
+    if market_kind == 'btts':
+        fthg = gi('FTHG'); ftag = gi('FTAG')
+        both_scored = fthg > 0 and ftag > 0
+        detail = f'FT {fthg}-{ftag}'
+        won = both_scored if direction == 'yes' else not both_scored
+        return won, detail
+
+    if market_kind == 'asian_handicap':
+        fthg = gi('FTHG'); ftag = gi('FTAG')
+        # line is home handicap (same value for both outcomes)
+        home_cover = (fthg - ftag) + (line or 0.0)
+        detail = f'FT {fthg}-{ftag} line={line:+.2f} cover={home_cover:+.2f}'
+        if abs(home_cover) < 0.05:  # push on whole-number line (e.g. AH 0, AH 1)
+            return None, 'PUSH: ' + detail
+        won = home_cover > 0 if direction == 'home' else home_cover < 0
         return won, detail
 
     return None, None
@@ -401,8 +435,20 @@ def resolve_all_pending(dry_run=False):
         won, detail = _eval_result(result_row, market_kind, direction, line)
 
         if won is None:
-            log.warning(f'  No data for {market_kind}: {home} vs {away}')
-            not_found += 1
+            if detail and str(detail).startswith('PUSH:'):
+                log.info(f'  PUSH (VOID) | {home} vs {away} | {detail}')
+                if not dry_run:
+                    now_push = datetime.utcnow().isoformat()
+                    conn.execute(
+                        "UPDATE sibila_picks SET result='VOID', pnl=0, "
+                        "resolved_ts=? WHERE id=?",
+                        (now_push, pick_id)
+                    )
+                    conn.commit()
+                resolved += 1
+            else:
+                log.warning(f'  No data for {market_kind}: {home} vs {away}')
+                not_found += 1
             continue
 
         result = 'WIN' if won else 'LOSS'
