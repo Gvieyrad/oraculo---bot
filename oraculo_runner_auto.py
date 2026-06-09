@@ -114,6 +114,7 @@ TENNIS_PLATT_A = 1.044   # 2026-05-22: Platt calibration fitted on 124 Sibila pi
 TENNIS_PLATT_B = -0.7552  # logit(p) scaled + shifted; reduces avg prob 68%->53% matching real WR
 SHARP_REF_ENABLED = True       # Pre-placement check: skip if model differs from Pinnacle no-vig by >10%
 RESULT_1X2_ENABLED = False     # 2026-06-08: -18.42% ROI (4W/9L) — disabled until positive backtest
+WC_RESULT_1X2_ENABLED = False   # Jun 10: flip True if live WC odds show edge on heavy favorites
 CB_BASE = 'https://sports-api.cloudbet.com'
 # Initial deposits (known constants for bankroll reconciliation)
 INITIAL_DEPOSIT = 57.03        # Total initial deposit (USDC + USDT)
@@ -122,11 +123,11 @@ INITIAL_DEPOSIT_USDT = 22.47   # 57.03 x 26.00/65.98 -- proportional split
 
 # Markets (V3: no BTTS)
 LEAGUE_MARKETS = {
-    'PL': ['over25', 'over15', 'under35', 'corners_o95'],
-    'PD': ['over25', 'over15', 'under35', 'corners_o95'],
-    'SA': ['over25', 'over15', 'under35', 'corners_o95'],
-    'BL1': ['over25', 'over15', 'under35'],
-    'FL1': ['over25', 'over15', 'under35'],
+    'PL': ['over25', 'over15', 'under35', 'corners_o95', 'btts_yes', 'asian_handicap'],
+    'PD': ['over25', 'over15', 'under35', 'corners_o95', 'btts_yes', 'asian_handicap'],
+    'SA': ['over25', 'over15', 'under35', 'corners_o95', 'btts_yes', 'asian_handicap'],
+    'BL1': ['over25', 'over15', 'under35', 'btts_yes', 'asian_handicap'],
+    'FL1': ['over25', 'over15', 'under35', 'btts_yes', 'asian_handicap'],
     'ELC': ['over25', 'over15'],
     'DED': ['over25', 'over15'],
     'PPL': ['over25', 'over15', 'under35'],  # 2026-05-13: U3.5=74.5% historical
@@ -1015,10 +1016,10 @@ def scan_football(api, state, dry_run=False):
                                             dc_model=_dc_model, xg_data=_xg_data,
                                             injury_data=_injury_data)
                                         _gbm_pred = _gbm.predict(_feats)
-                                        _gbm_prob = _gbm_pred.get(side + '_win', model_prob) if side != 'draw' else _gbm_pred.get('draw', model_prob)
-                                        # Blend: 50% GBM + 30% original + 20% DC
-                                        model_prob = 0.5 * _gbm_prob + 0.3 * model_prob + 0.2 * (_dc_model.predict(home, away).get(side + '_win' if side != 'draw' else 'draw', model_prob) if _dc_model else model_prob)
-                                        edge = model_prob * odds_val - 1
+                                        _gbm_prob = _gbm_pred.get(outcome + '_win', model_prob)  # 'home_win' or 'away_win'
+                                        # Blend: 60% GBM + 40% Poisson AH (DC omitted: wrong market for AH)
+                                        model_prob = 0.6 * _gbm_prob + 0.4 * model_prob
+                                        edge = model_prob - implied  # prob-diff edge, consistent with gate threshold
                                     except Exception:
                                         pass
                                 if edge > MIN_EDGE and model_prob > MIN_CONF and edge < 0.45 and model_prob < 0.92:
@@ -1028,6 +1029,8 @@ def scan_football(api, state, dry_run=False):
                                         'price': price, 'label': f'AH {outcome} {line:+.1f}',
                                         'model_prob': model_prob, 'edge': edge,
                                         'sport': 'soccer',
+                                        '_shadow_only': True,  # Cantera: n>=30 WR>=58% before live
+                                        'market_type': 'asian_handicap',
                                     })
                     except Exception:
                         pass
@@ -1063,10 +1066,8 @@ def scan_football(api, state, dry_run=False):
                         if _res:
                             if mkt_key == 'over25':
                                 _p = _res.get('over25', {}).get('prob_yes')
-                            elif mkt_key == 'btts_yes':
-                                _p = _res.get('btts', {}).get('prob_yes')
-                            else:
-                                _p = _res.get('btts', {}).get('prob_no')
+                            elif mkt_key in ('btts_yes', 'btts_no'):
+                                _p = _res.get('btts', {}).get('prob_yes')  # conv: model_prob_over=P(btts=yes)
                             if _p is not None:
                                 model_prob_over = round(float(_p), 4)
                                 _peru_ml_ok = True
@@ -1104,7 +1105,7 @@ def scan_football(api, state, dry_run=False):
                         from math import exp
                         _lh, _la = poisson.predict_lambda(home, away)
                         _p_btts = (1 - exp(-_lh)) * (1 - exp(-_la))
-                        model_prob_over = _p_btts if mkt_key == 'btts_yes' else (1 - _p_btts)
+                        model_prob_over = _p_btts  # P(btts=yes); loop inverts for btts_no
                     except Exception:
                         pass
                 if model_prob_over is None:
@@ -1116,9 +1117,9 @@ def scan_football(api, state, dry_run=False):
                         from oraculo_xg_weather import get_forecast_adjustment as _wfadj
                         _wadj = _wfadj(home, ev_cutoff)
                         if _wadj != 1.0:
-                            if mkt_key in ('over25', 'over15', 'btts_yes'):
+                            if mkt_key in ('over25', 'over15', 'btts_yes', 'btts_no'):
                                 model_prob_over = round(model_prob_over * _wadj, 4)
-                            else:  # under/btts_no: rain HELPS
+                            else:  # under: rain helps
                                 model_prob_over = round(min(model_prob_over / _wadj, 0.95), 4)
                             log.debug('Weather adj %.3f for %s %s: p=%.3f',
                                       _wadj, home, mkt_key, model_prob_over)
@@ -1127,7 +1128,7 @@ def scan_football(api, state, dry_run=False):
 
                 mkt_data = markets.get(cb_mkt_key, {})
                 for outcome, params_filter in outcomes:
-                    prob = model_prob_over if outcome == 'over' else (1 - model_prob_over)
+                    prob = model_prob_over if outcome in ('over', 'yes') else (1 - model_prob_over)
                     best_price, best_url = None, ''
                     for sub in mkt_data.get('submarkets', {}).values():
                         for sel in sub.get('selections', []):
@@ -1146,13 +1147,17 @@ def scan_football(api, state, dry_run=False):
                     implied = 1.0 / best_price
                     edge = prob - implied
                     if edge > MIN_EDGE and prob > MIN_CONF and edge < 0.45 and prob < 0.92:
-                        picks.append({
+                        _dp = {
                             'match': f'{home} vs {away}', 'league': league,
                             'event_id': eid, 'market_url': best_url,
                             'price': best_price, 'label': f'{mkt_key} {outcome}',
                             'model_prob': prob, 'edge': edge,
                             'sport': 'soccer',
-                        })
+                        }
+                        if mkt_key in ('btts_yes', 'btts_no'):
+                            _dp['_shadow_only'] = True  # Cantera: n>=25 WR>=65% before live
+                            _dp['market_type'] = 'btts'
+                        picks.append(_dp)
 
 
     # --- INTERNATIONAL / FIFA WC QUALIFIERS ---
@@ -1347,7 +1352,8 @@ def scan_football(api, state, dry_run=False):
                         _is_wc = intl_league == 'FIFA_WC'
                         _e_min = WC_MIN_EDGE if _is_wc else MIN_EDGE
                         _c_min = WC_MIN_CONF if _is_wc else MIN_CONF
-                        if RESULT_1X2_ENABLED and not _skip_1x2 and edge >= _e_min and prob >= _c_min and edge < 0.45 and prob < 0.92:
+                        _r1x2_ok = (WC_RESULT_1X2_ENABLED if _is_wc else RESULT_1X2_ENABLED)
+                        if _r1x2_ok and not _skip_1x2 and edge >= _e_min and prob >= _c_min and edge < 0.45 and prob < 0.92:
                             _pick = {
                                 'match': match_label, 'league': intl_league,
                                 'event_id': eid, 'market_url': murl,
@@ -1932,6 +1938,8 @@ def scan_tennis(api, state, dry_run=False):
                 continue
 
             _gbc_ph = None; _elo_prob_pre = prob_home  # defaults if GBC unavailable
+            # GBC feature defaults — used in _features dict; overwritten inside GBC block
+            _eh = _ea = 1500; _form_ph = _form_pa = 0.5; _h2h_rate4 = 0.5
             # Phase 3: blend GBC probability (trained on 26y data + pre-trained ELO features)
             _gbc_v1 = getattr(scan_tennis, '_gbc_v1', None)
             if _gbc_v1 is not None:
@@ -1993,6 +2001,7 @@ def scan_tennis(api, state, dry_run=False):
                 except Exception as _eg:
                     log.debug('GBC blend err: %s', _eg)
 
+            _prob_home_precal = prob_home  # capture pre-Platt for raw_model_prob_uncal
             # Platt calibration: corrects 15%% systematic overestimation (fitted 2026-05-22 on 124 Sibila picks)
             try:
                 import math as _pm
@@ -2074,7 +2083,7 @@ def scan_tennis(api, state, dry_run=False):
                             'event_id': eid, 'market_url': murl,
                             'price': float(price), 'label': f'Winner: {player}',
                             'model_prob': round(prob, 4),
-                            'raw_model_prob_uncal': round(prob, 4),
+                            'raw_model_prob_uncal': round(_prob_home_precal if outcome == 'home' else (1 - _prob_home_precal), 4),
                             'confidence': round(prob, 4),
                             'edge': edge, 'sport': 'tennis', 'player': player,
                             '_gbc_prob': round(_gbc_ph, 4) if _gbc_ph is not None else None,
@@ -2909,7 +2918,7 @@ def place_bets(api, state, picks, parlays, dry_run=False):
         if straight_remaining < MIN_STAKE:
             break
         # Skip shadow-only picks (WNBA, NHL until validated)
-        if p.get('shadow'):
+        if p.get('shadow') or p.get('_shadow_only'):
             log.debug('  [SKIP-SHADOW] %s', p.get('label', ''))
             continue
         # Skip previously rejected combos
@@ -2988,8 +2997,8 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                                sport=p.get('sport', ''))
         stake = round(stake * _stake_factor, 2)
         if stake <= 0:
-            if p.get('_max_stake'):
-                # Validation bet: force _max_stake even if portfolio is full
+            if p.get('_force_validation') and p.get('_max_stake'):
+                # Explicit validation bet only — NOT triggered by _max_stake alone
                 stake = p['_max_stake']
                 log.debug('_max_stake forced: PortfolioKelly=0, using $%.2f validation stake', stake)
             else:
@@ -3001,7 +3010,7 @@ def place_bets(api, state, picks, parlays, dry_run=False):
         if p.get('_wc_phase_c') and WC_ENABLED:
             _wc_res = state.get('wc_reserve', 0) or bankroll * 0.53
             stake = round(max(_wc_res * WC_STAKE_PCT, 1.00), 2)
-            log.info('[WC_FaseC] Fixed stake: $%.2f (1%% of wc_reserve $%.2f)', stake, _wc_res)
+            log.info('[WC_FaseC] Fixed stake: $%.2f (2%% of wc_reserve $%.2f)', stake, _wc_res)
         # Per-sport Kelly fractions replace the old dead-zone binary logic
         # LLM said REDUCE: cut stake by 50%
         if p.get('_llm_reduce'):
@@ -5720,7 +5729,7 @@ def run_cycle(dry_run=False):
                 _mkt_type = str(_mp.get('market_type',''))
                 if _is_under and not _is_ml:
                     if _line == 4.5 and _mkt_type == 'mlb_f5_total' and _conf >= 0.65:
-                        log.info('[MLB Under4.5 LIVE] WR=67%% Sibila n=246 @%.2f conf=%.0f%%',
+                        log.debug('[MLB Under4.5 SHADOW/FILTERED] WR=67%% Sibila n=246 @%.2f conf=%.0f%%',
                                  _odds, _conf * 100)
                     else:
                         log.info('MLB [under-disabled line=%.1f conf=%.0f%%]: solo Under4.5 con conf>=65%%',
@@ -5947,7 +5956,7 @@ def run_cycle(dry_run=False):
                             _lbl2 = str(_gp2.get("label","")).lower()
                             if 'goals 2h' in _lbl2 and 'under' in _lbl2 \
                                     and _gp2.get("league") in _GOALS2H_DOMESTIC:
-                                _gp2.setdefault("_max_stake", 12.00)
+                                _gp2.setdefault("_max_stake", 3.00)
                                 log.debug("[Soccer Goals 2H Under] dom cap $3: %s", _gp2.get("match","?"))
                             else:
                                 _gp2.setdefault("_max_stake", 5.00)

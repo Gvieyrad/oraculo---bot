@@ -181,8 +181,8 @@ def _eval_result(row, market_kind, direction, line):
     if market_kind == 'goals_2h':
         fthg = gi('FTHG'); ftag = gi('FTAG')
         hthg = gi('HTHG'); htag = gi('HTAG')
-        if not (fthg or ftag or hthg or htag) and not row.get('FTHG'):
-            return None, None  # no HT data
+        if not row.get('HTHG') or not row.get('HTAG'):
+            return None, None  # no HT data — cannot compute 2H goals
         goals = (fthg - hthg) + (ftag - htag)
         detail = f'{fthg}-{ftag} (HT {hthg}-{htag}) 2H={goals}'
         won = goals < line if direction == 'under' else goals > line
@@ -218,9 +218,13 @@ def _eval_result(row, market_kind, direction, line):
 
     if market_kind == 'asian_handicap':
         fthg = gi('FTHG'); ftag = gi('FTAG')
-        # line is home handicap (same value for both outcomes)
-        home_cover = (fthg - ftag) + (line or 0.0)
-        detail = f'FT {fthg}-{ftag} line={line:+.2f} cover={home_cover:+.2f}'
+        # Cloudbet stores line from each selection's perspective:
+        # home: negative = home gives goals (e.g. home -1.5)
+        # away: positive = away gets goals (e.g. away +1.5)
+        # Convert to unified home-perspective before comparison
+        eff_line = (line or 0.0) if direction == 'home' else -(line or 0.0)
+        home_cover = (fthg - ftag) + eff_line
+        detail = f'FT {fthg}-{ftag} line={line:+.2f} eff={eff_line:+.2f} cover={home_cover:+.2f}'
         if abs(home_cover) < 0.05:  # push on whole-number line (e.g. AH 0, AH 1)
             return None, 'PUSH: ' + detail
         won = home_cover > 0 if direction == 'home' else home_cover < 0
