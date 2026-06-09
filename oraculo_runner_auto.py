@@ -110,8 +110,8 @@ WC_MIN_CONF = 0.55    # 55% — DC model 60.9% accuracy
 WC_STAKE_PCT = 0.02   # fixed 2% of wc_reserve per bet
 WC_START_DATE = '2026-06-12'
 TENNIS_MAX_EDGE = 0.18         # Cap: 0.20+ bucket is -7.8% ROI — model overestimates extreme edges
-TENNIS_PLATT_A = 1.044   # 2026-05-22: Platt calibration fitted on 124 Sibila picks (15% overestim corrected)
-TENNIS_PLATT_B = -0.7552  # logit(p) scaled + shifted; reduces avg prob 68%->53% matching real WR
+TENNIS_PLATT_A = 0.6218  # 2026-06-09: refitted on 98 resolved picks; A=0.6218 B=-0.0276 → avg cal 0.673=WR
+TENNIS_PLATT_B = -0.0276  # old B=-0.7552 was over-correcting (cal 0.622 vs WR 0.673); new matches exactly
 SHARP_REF_ENABLED = True       # Pre-placement check: skip if model differs from Pinnacle no-vig by >10%
 RESULT_1X2_ENABLED = False     # 2026-06-08: -18.42% ROI (4W/9L) — disabled until positive backtest
 WC_RESULT_1X2_ENABLED = False   # Jun 10: flip True if live WC odds show edge on heavy favorites
@@ -5372,8 +5372,8 @@ def run_cycle(dry_run=False):
     # 3. Scan tennis
     tennis_picks = scan_tennis(api, state, dry_run)
     # Exclude tennis_exact_sets: 0W/6L (-71.6% ROI in Sibila realistic, pure variance drain)
-    # sets_under (Sets Under 2.5): BLOCKED pending calibration — N=12 contaminated (Kelly runaway+prob=0 picks)
-    #   Revisit when Sibila shadow has 30+ clean picks (prob>0, edge>=8%, stake<=2)
+    # sets_under (Sets Under 2.5): BLOCKED — clay WR=9.1%% (11 RG picks all LOSS); model calibrated for hard/grass only
+    #   Revisit: need 30+ hard/grass resolved picks; do NOT unblock for clay GS tourneys
     # tennis_team_win_set: tactical pool mode — edge>=8% AND odds>=1.35
     # (relaxed from 18%/1.40 while WC reserve locks USDC; $40 USDT tactical pool rotates Roland Garros picks)
     tennis_picks = [p for p in tennis_picks

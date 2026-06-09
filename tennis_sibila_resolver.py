@@ -116,7 +116,7 @@ def _find_match(all_rows, player1, player2, ts_str):
     except Exception:
         return None, None, None
 
-    dates = [(pick_dt + timedelta(days=d)).strftime('%Y-%m-%d') for d in (-2, -1, 0, 1, 2)]
+    dates = [(pick_dt + timedelta(days=d)).strftime('%Y-%m-%d') for d in (-1, 0, 1, 2, 3, 4, 5, 6, 7)]
 
     best, best_score = None, 0.0
     best_p1_is_winner = None
