@@ -5993,6 +5993,22 @@ def run_cycle(dry_run=False):
     except Exception as _ce:
         log.debug('Copa shadow scan error: %s', _ce)
 
+    # Corners Cantera: shadow mode until n>=60 resolved picks validated
+    # Cloudbet corners odds return when European leagues resume (August 2026)
+    try:
+        from oraculo_corners import scan_corners as _scan_corners
+        _cnr_picks = _scan_corners(api, state, dry_run=True)
+        if _cnr_picks and _SIBILA_ENABLED:
+            _cnr_new = 0
+            for _cnr in _cnr_picks:
+                _sibila_record(_cnr)
+                _cnr_new += 1
+            if _cnr_new:
+                log.info("[Corners Cantera] %d picks registrados en Sibila (shadow)", _cnr_new)
+    except Exception as _cnr_e:
+        log.debug("Corners cantera scan error: %s", _cnr_e)
+
+
     if sc_picks:
         # Referee-filtered picks go to place_bets; unfiltered shadow only
         from oraculo_soccer_v2 import _is_high_card_ref
