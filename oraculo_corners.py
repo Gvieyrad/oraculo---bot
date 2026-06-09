@@ -1,20 +1,22 @@
-#!/usr/bin/env python3
-# oraculo_corners.py - Corners Cantera Model
-# Poisson model for soccer total corners O/U.
+﻿#!/usr/bin/env python3
+# oraculo_corners.py - Corners Cantera Model (GBM)
+# Predicts total corners using rolling team features + GBM regression.
 # CANTERA ONLY: all picks shadow_only=True until n>=60 WR validated.
-import os, json, math, logging, difflib
+import os, json, math, logging, difflib, pickle
 from collections import defaultdict
 
 log = logging.getLogger("oraculo.corners")
 
-SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
-CACHE_DIR   = os.path.join(SCRIPT_DIR, ".oraculo_cache", "csv")
+SCRIPT_DIR     = os.path.dirname(os.path.abspath(__file__))
+CACHE_DIR      = os.path.join(SCRIPT_DIR, ".oraculo_cache", "csv")
+MODEL_PICKLE   = os.path.join(SCRIPT_DIR, ".oraculo_cache", "corners_gbm.pkl")
 
 MIN_TEAM_MATCHES = 5
 MIN_EDGE         = 0.07
 MIN_CONF         = 0.58
 CANTERA_LIVE_N   = 60
 _SEASONS         = ("2526", "2425")
+N_ROLL           = 10
 
 
 def _poisson_pmf(k, lam):
@@ -27,85 +29,204 @@ def _poisson_over(lam, line):
     return 1.0 - sum(_poisson_pmf(k, lam) for k in range(0, k_max + 1))
 
 
-class CornersModel:
+def _roll_avg(history, field, n=N_ROLL):
+    if not history: return None
+    vals = [h[field] for h in history[-n:]]
+    return sum(vals) / len(vals)
+
+
+def _cache_mtime():
+    try:
+        return max(os.path.getmtime(os.path.join(CACHE_DIR, f))
+                   for f in os.listdir(CACHE_DIR) if f.endswith(".json"))
+    except Exception:
+        return 0.0
+
+
+class CornersGBM:
+
+    FEAT_COLS = [
+        "h_corners_avg", "a_corners_avg",
+        "h_shots_avg",   "a_shots_avg",
+        "h_sot_avg",     "a_sot_avg",
+        "h_fouls_avg",   "a_fouls_avg",
+        "lg_avg",        "ref_avg",      "has_ref",
+    ]
 
     def __init__(self):
-        self.home_attack  = {}
-        self.home_defense = {}
-        self.away_attack  = {}
-        self.away_defense = {}
-        self.ref_avg      = {}
-        self.league_avg   = {}
-        self.global_home  = 4.8
-        self.global_away  = 5.0
-        self.trained      = False
+        self.gbm        = None
+        self.home_feats = {}
+        self.away_feats = {}
+        self.league_avg = {}
+        self.ref_avg    = {}
+        self.global_avg = 9.7
+        self.trained    = False
 
     def load(self):
-        raw_ha  = defaultdict(list)
-        raw_hd  = defaultdict(list)
-        raw_aa  = defaultdict(list)
-        raw_ad  = defaultdict(list)
-        ref_t   = defaultdict(list)
-        lg_h    = defaultdict(list)
-        lg_a    = defaultdict(list)
-        n       = 0
+        if self._try_load_pickle():
+            return True
+        return self._train_from_cache()
 
+    def _try_load_pickle(self):
+        if not os.path.exists(MODEL_PICKLE):
+            return False
+        try:
+            if _cache_mtime() > os.path.getmtime(MODEL_PICKLE):
+                log.info("[Corners] Cache newer than pickle - retraining")
+                return False
+            with open(MODEL_PICKLE, "rb") as f:
+                data = pickle.load(f)
+            self.gbm        = data["gbm"]
+            self.home_feats = data["home_feats"]
+            self.away_feats = data["away_feats"]
+            self.league_avg = data["league_avg"]
+            self.ref_avg    = data["ref_avg"]
+            self.global_avg = data["global_avg"]
+            self.trained    = True
+            log.info("[Corners] GBM loaded from pickle (%d home / %d away teams)",
+                     len(self.home_feats), len(self.away_feats))
+            return True
+        except Exception as e:
+            log.warning("[Corners] Pickle load failed: %s", e)
+            return False
+
+    def _train_from_cache(self):
+        try:
+            import numpy as np
+            from sklearn.ensemble import GradientBoostingRegressor
+        except ImportError:
+            log.error("[Corners] sklearn not available")
+            return False
+
+        matches = self._read_cache()
+        if len(matches) < 200:
+            log.warning("[Corners] Too few matches: %d", len(matches))
+            return False
+
+        home_hist = defaultdict(list)
+        away_hist = defaultdict(list)
+        lg_hist   = defaultdict(list)
+        ref_hist  = defaultdict(list)
+        X_rows, y_rows = [], []
+
+        for m in matches:
+            ht, at   = m["home"], m["away"]
+            lg, ref  = m["league"], m["referee"]
+            hh, ah   = home_hist[ht], away_hist[at]
+            lg_list  = lg_hist[lg][-50:]  if lg_hist[lg]           else []
+            ref_list = ref_hist[ref][-30:] if ref and ref_hist[ref] else []
+
+            if len(hh) >= MIN_TEAM_MATCHES and len(ah) >= MIN_TEAM_MATCHES:
+                feat = [
+                    _roll_avg(hh, "c"),  _roll_avg(ah, "c"),
+                    _roll_avg(hh, "s"),  _roll_avg(ah, "s"),
+                    _roll_avg(hh, "st"), _roll_avg(ah, "st"),
+                    _roll_avg(hh, "f"),  _roll_avg(ah, "f"),
+                    sum(lg_list)  / len(lg_list)  if lg_list  else self.global_avg,
+                    sum(ref_list) / len(ref_list) if ref_list else self.global_avg,
+                    1.0 if ref and len(ref_hist[ref]) >= 5 else 0.0,
+                ]
+                X_rows.append(feat)
+                y_rows.append(m["total"])
+
+            home_hist[ht].append({"c": m["hc"], "s": m["hs"], "st": m["hst"], "f": m["hf"]})
+            away_hist[at].append({"c": m["ac"], "s": m["aw"], "st": m["ast"], "f": m["af"]})
+            lg_hist[lg].append(m["total"])
+            if ref: ref_hist[ref].append(m["total"])
+
+        if len(X_rows) < 500:
+            log.warning("[Corners] Not enough training rows: %d", len(X_rows))
+            return False
+
+        import numpy as np
+        from sklearn.ensemble import GradientBoostingRegressor
+
+        X = np.array(X_rows, dtype=float)
+        y = np.array(y_rows, dtype=float)
+        gbm = GradientBoostingRegressor(
+            n_estimators=200, max_depth=4, learning_rate=0.05,
+            subsample=0.8, random_state=42)
+        gbm.fit(X, y)
+
+        for team, hist in home_hist.items():
+            if len(hist) >= MIN_TEAM_MATCHES:
+                self.home_feats[team] = {
+                    "c":  _roll_avg(hist, "c"),
+                    "s":  _roll_avg(hist, "s"),
+                    "st": _roll_avg(hist, "st"),
+                    "f":  _roll_avg(hist, "f"),
+                }
+        for team, hist in away_hist.items():
+            if len(hist) >= MIN_TEAM_MATCHES:
+                self.away_feats[team] = {
+                    "c":  _roll_avg(hist, "c"),
+                    "s":  _roll_avg(hist, "s"),
+                    "st": _roll_avg(hist, "st"),
+                    "f":  _roll_avg(hist, "f"),
+                }
+
+        all_totals = [m["total"] for m in matches]
+        self.global_avg = sum(all_totals) / len(all_totals)
+        for lg, vals in lg_hist.items():
+            if vals: self.league_avg[lg] = sum(vals) / len(vals)
+        for ref, vals in ref_hist.items():
+            if len(vals) >= 5: self.ref_avg[ref] = sum(vals) / len(vals)
+
+        self.gbm     = gbm
+        self.trained = True
+        log.info("[Corners] GBM trained on %d rows (%d home / %d away teams)",
+                 len(X_rows), len(self.home_feats), len(self.away_feats))
+
+        try:
+            os.makedirs(os.path.dirname(MODEL_PICKLE), exist_ok=True)
+            with open(MODEL_PICKLE, "wb") as f:
+                pickle.dump({
+                    "gbm":        self.gbm,
+                    "home_feats": self.home_feats,
+                    "away_feats": self.away_feats,
+                    "league_avg": self.league_avg,
+                    "ref_avg":    self.ref_avg,
+                    "global_avg": self.global_avg,
+                }, f)
+            log.info("[Corners] GBM pickled to %s", MODEL_PICKLE)
+        except Exception as e:
+            log.warning("[Corners] Pickle save failed: %s", e)
+
+        return True
+
+    def _read_cache(self):
+        rows = []
         for fname in sorted(os.listdir(CACHE_DIR)):
             if not fname.endswith(".json"): continue
             if not any(s in fname for s in _SEASONS): continue
             league = fname.replace("_2526.json", "").replace("_2425.json", "")
-            try:
-                matches = json.load(open(os.path.join(CACHE_DIR, fname)))
-            except Exception:
-                continue
-            for m in matches:
-                hc = m.get("home_corners")
-                ac = m.get("away_corners")
+            try: data = json.load(open(os.path.join(CACHE_DIR, fname)))
+            except Exception: continue
+            for m in data:
+                hc = m.get("home_corners"); ac = m.get("away_corners")
                 if hc is None or ac is None: continue
+                try: hc, ac = int(hc), int(ac)
+                except (ValueError, TypeError): continue
+                hs  = m.get("home_shots");        aw  = m.get("away_shots")
+                hst = m.get("home_shots_target"); ast = m.get("away_shots_target")
+                hf  = m.get("home_fouls");        af  = m.get("away_fouls")
+                if any(x is None for x in [hs, aw, hst, ast, hf, af]): continue
                 try:
-                    hc, ac = int(hc), int(ac)
+                    rows.append({
+                        "hc": hc, "ac": ac, "total": hc + ac,
+                        "hs": int(hs), "aw": int(aw),
+                        "hst": int(hst), "ast": int(ast),
+                        "hf": int(hf), "af": int(af),
+                        "date":    (m.get("utc_date") or "")[:10],
+                        "league":  league,
+                        "home":    (m.get("home_team") or "").strip(),
+                        "away":    (m.get("away_team") or "").strip(),
+                        "referee": (m.get("referee")   or "").strip(),
+                    })
                 except (ValueError, TypeError):
                     continue
-                home = (m.get("home_team") or "").strip()
-                away = (m.get("away_team") or "").strip()
-                if not home or not away: continue
-                ref = (m.get("referee") or "").strip()
-
-                raw_ha[home].append(hc); raw_hd[home].append(ac)
-                raw_aa[away].append(ac); raw_ad[away].append(hc)
-                lg_h[league].append(hc); lg_a[league].append(ac)
-                if ref: ref_t[ref].append(hc + ac)
-                n += 1
-
-        if n < 100:
-            log.warning("CornersModel: only %d matches loaded", n)
-            return False
-
-        for team, vals in raw_ha.items():
-            if len(vals) >= MIN_TEAM_MATCHES:
-                self.home_attack[team]  = sum(vals) / len(vals)
-                self.home_defense[team] = sum(raw_hd[team]) / len(raw_hd[team])
-        for team, vals in raw_aa.items():
-            if len(vals) >= MIN_TEAM_MATCHES:
-                self.away_attack[team]  = sum(vals) / len(vals)
-                self.away_defense[team] = sum(raw_ad[team]) / len(raw_ad[team])
-        for league, vals in lg_h.items():
-            if vals:
-                la = lg_a.get(league, [self.global_away])
-                self.league_avg[league] = (sum(vals)/len(vals), sum(la)/len(la))
-        for ref, totals in ref_t.items():
-            if len(totals) >= 8:
-                self.ref_avg[ref] = sum(totals) / len(totals)
-
-        all_h = [v for vals in lg_h.values() for v in vals]
-        all_a = [v for vals in lg_a.values() for v in vals]
-        if all_h: self.global_home = sum(all_h) / len(all_h)
-        if all_a: self.global_away = sum(all_a) / len(all_a)
-
-        self.trained = True
-        log.info("CornersModel: %d matches, %d home teams, %d away teams, %d refs",
-                 n, len(self.home_attack), len(self.away_attack), len(self.ref_avg))
-        return True
+        rows.sort(key=lambda x: x["date"])
+        return rows
 
     def _fuzzy(self, name, lookup):
         if not name: return None
@@ -117,29 +238,29 @@ class CornersModel:
         return m[0] if m else None
 
     def predict(self, home_team, away_team, league=None, referee=None):
-        if not self.trained: return None, {}
+        if not self.trained or self.gbm is None:
+            return None, {}
+        import numpy as np
 
-        lg_home, lg_away = self.league_avg.get(
-            league or "", (self.global_home, self.global_away))
+        lg_avg   = self.league_avg.get(league or "", self.global_avg)
+        ref_key  = self._fuzzy(referee or "", self.ref_avg)
+        ref_val  = self.ref_avg.get(ref_key, lg_avg) if ref_key else lg_avg
+        has_ref  = 1.0 if ref_key else 0.0
 
-        ht = self._fuzzy(home_team, self.home_attack) or home_team
-        at = self._fuzzy(away_team, self.away_attack) or away_team
+        hk = self._fuzzy(home_team, self.home_feats)
+        ak = self._fuzzy(away_team, self.away_feats)
+        hf = self.home_feats.get(hk, {}) if hk else {}
+        af = self.away_feats.get(ak, {}) if ak else {}
 
-        ha = self.home_attack.get(ht,  lg_home)
-        hd = self.home_defense.get(ht, lg_away)
-        aa = self.away_attack.get(at,  lg_away)
-        ad = self.away_defense.get(at, lg_home)
-
-        lam_h = max(2.0, min(9.0, ha * (ad / lg_home) if lg_home > 0 else ha))
-        lam_a = max(2.0, min(9.0, aa * (hd / lg_away) if lg_away > 0 else aa))
-        lam   = lam_h + lam_a
-
-        if referee:
-            rk = self._fuzzy(referee, self.ref_avg)
-            if rk:
-                delta = self.ref_avg[rk] - (self.global_home + self.global_away)
-                lam = max(4.0, min(22.0, lam + delta * 0.3))
-
+        feat = [
+            hf.get("c",  lg_avg * 0.50), af.get("c",  lg_avg * 0.50),
+            hf.get("s",  12.0),           af.get("s",  10.0),
+            hf.get("st",  4.5),           af.get("st",  3.8),
+            hf.get("f",  10.5),           af.get("f",  11.0),
+            lg_avg, ref_val, has_ref,
+        ]
+        lam = float(self.gbm.predict(np.array([feat]))[0])
+        lam = max(4.0, min(22.0, lam))
         p_over = {line: _poisson_over(lam, line)
                   for line in (8.5, 9.0, 9.5, 10.0, 10.5, 11.0, 11.5)}
         return lam, p_over
@@ -187,13 +308,13 @@ def _parse_selections(market_data):
 def scan_corners(api, state, dry_run=False):
     import requests
 
-    model = CornersModel()
+    model = CornersGBM()
     if not model.load():
         log.warning("[Corners] Model load failed")
         return []
 
     headers = {"X-API-Key": api.api_key, "accept": "application/json"}
-    picks = []
+    picks   = []
 
     for league_code, comp_key in _COMP_MAP.items():
         try:
@@ -215,15 +336,14 @@ def scan_corners(api, state, dry_run=False):
 
             home_obj = ev.get("home") or {}
             away_obj = ev.get("away") or {}
-            hn = home_obj.get("name") or ""
-            an = away_obj.get("name") or ""
+            hn = (home_obj.get("name") or "").strip()
+            an = (away_obj.get("name") or "").strip()
             if not hn or not an: continue
 
             lam, p_over = model.predict(hn, an, league=league_code)
             if lam is None: continue
 
-            lg_h, lg_a = model.league_avg.get(
-                league_code, (model.global_home, model.global_away))
+            lg_baseline = model.league_avg.get(league_code, model.global_avg)
 
             for sel in sels:
                 line    = sel["line"]
@@ -243,10 +363,10 @@ def scan_corners(api, state, dry_run=False):
                 if edge < MIN_EDGE: continue
                 if model_p < MIN_CONF: continue
 
-                label = "Corners {} {:.1f}".format(outcome.capitalize(), line)
+                label     = "Corners {} {:.1f}".format(outcome.capitalize(), line)
                 match_str = "{} vs {}".format(hn, an)
                 log.info("[Corners Cantera] %s | %s | edge=%.1f%% p=%.1f%% @%.2f lam=%.1f",
-                         match_str[:35], label, edge*100, model_p*100, price, lam)
+                         match_str[:35], label, edge * 100, model_p * 100, price, lam)
 
                 picks.append({
                     "sport":        "soccer",
@@ -266,13 +386,14 @@ def scan_corners(api, state, dry_run=False):
                     "_lambda":      round(lam, 2),
                     "_line":        line,
                     "_outcome":     outcome,
-                    "_lg_baseline": round(lg_h + lg_a, 2),
+                    "_lg_baseline": round(lg_baseline, 2),
                     "_shadow_only": True,
                     "_source":      "corners_cantera",
                 })
 
     if picks:
-        log.info("[Corners Cantera] %d picks (all shadow, waiting n>=%d)", len(picks), CANTERA_LIVE_N)
+        log.info("[Corners Cantera] %d picks (all shadow, waiting n>=%d)",
+                 len(picks), CANTERA_LIVE_N)
     return picks
 
 
@@ -284,14 +405,16 @@ def corners_cantera_status():
         conn.row_factory = sqlite3.Row
         row = conn.execute(
             "SELECT COUNT(*) as n,"
-            " SUM(CASE WHEN result='WIN' THEN 1 ELSE 0 END) as wins,"
+            " SUM(CASE WHEN result='WIN'  THEN 1 ELSE 0 END) as wins,"
             " SUM(CASE WHEN result IS NOT NULL AND result != 'VOID' THEN 1 ELSE 0 END) as resolved"
             " FROM sibila_picks WHERE market = 'corners_total' AND placed = 0"
         ).fetchone()
         conn.close()
-        n, resolved, wins = row["n"] or 0, row["resolved"] or 0, row["wins"] or 0
-        wr    = round(wins / resolved, 3) if resolved else None
-        ready = resolved >= CANTERA_LIVE_N and wr is not None and wr >= 0.57
+        n        = row["n"]        or 0
+        resolved = row["resolved"] or 0
+        wins     = row["wins"]     or 0
+        wr       = round(wins / resolved, 3) if resolved else None
+        ready    = resolved >= CANTERA_LIVE_N and wr is not None and wr >= 0.57
         return {"n_shadow": n, "resolved": resolved, "wins": wins,
                 "win_rate": wr, "ready_for_live": ready, "threshold_n": CANTERA_LIVE_N}
     except Exception as e:
