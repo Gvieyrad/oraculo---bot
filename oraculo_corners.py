@@ -1,6 +1,5 @@
-﻿#!/usr/bin/env python3
-# oraculo_corners.py - Corners Cantera Model (GBM)
-# Predicts total corners using rolling team features + GBM regression.
+#!/usr/bin/env python3
+# oraculo_corners.py - Corners Cantera Model (GBM + API-Football reference)
 # CANTERA ONLY: all picks shadow_only=True until n>=60 WR validated.
 import os, json, math, logging, difflib, pickle
 from collections import defaultdict
@@ -18,6 +17,27 @@ CANTERA_LIVE_N   = 60
 _SEASONS         = ("2526", "2425")
 N_ROLL           = 10
 
+# API-Football reference odds (Pinnacle = sharp benchmark)
+_AF_BASE          = "https://v3.football.api-sports.io"
+_AF_BET_CORNERS   = 45   # BET 45: Corners Over Under
+_AF_BOOK_PINNACLE = 4
+_AF_BOOK_BET365   = 8
+
+_LEAGUE_TO_AF_ID = {
+    "E0":  39,  "E1":  40,  "SP1": 140, "D1":  78,  "I1":  135,
+    "F1":  61,  "B1":  144, "N1":  88,  "T1":  203, "P1":  94,
+    "SE1": 179, "D2":  79,  "I2":  136, "F2":  62,
+}
+_AF_VALID_IDS = set(_LEAGUE_TO_AF_ID.values())
+
+# In-process caches (reset each runner invocation)
+_af_fix_cache  = {}   # {date_str: [(af_league_id, fix_id, home, away), ...]}
+_af_odds_cache = {}   # {fix_id: {(line, outcome): p_ref}}
+
+
+# ---------------------------------------------------------------------------
+# Poisson helpers
+# ---------------------------------------------------------------------------
 
 def _poisson_pmf(k, lam):
     if lam <= 0: return 0.0
@@ -42,6 +62,110 @@ def _cache_mtime():
     except Exception:
         return 0.0
 
+
+# ---------------------------------------------------------------------------
+# API-Football helpers (reference odds)
+# ---------------------------------------------------------------------------
+
+def _af_key():
+    try:
+        cfg = json.load(open(os.path.join(SCRIPT_DIR, "oraculo_config.json")))
+        return cfg.get("api_football_key") or cfg.get("rapidapi_key")
+    except Exception:
+        return None
+
+
+def _af_fetch_today(date_str):
+    import requests
+    if date_str in _af_fix_cache:
+        return _af_fix_cache[date_str]
+    api_key = _af_key()
+    if not api_key:
+        _af_fix_cache[date_str] = []
+        return []
+    try:
+        r = requests.get(
+            _AF_BASE + "/fixtures",
+            headers={"x-apisports-key": api_key},
+            params={"date": date_str},
+            timeout=15,
+        )
+        all_fix = r.json().get("response") or []
+        result  = []
+        for f in all_fix:
+            lg_id = (f.get("league") or {}).get("id")
+            if lg_id not in _AF_VALID_IDS:
+                continue
+            fid  = f["fixture"]["id"]
+            home = (f["teams"]["home"]["name"] or "").strip()
+            away = (f["teams"]["away"]["name"] or "").strip()
+            result.append((lg_id, fid, home, away))
+        _af_fix_cache[date_str] = result
+        log.debug("[Corners AF] %d relevant fixtures for %s (%d total)",
+                  len(result), date_str, len(all_fix))
+        return result
+    except Exception as e:
+        log.debug("[Corners AF] fetch_today(%s) error: %s", date_str, e)
+        _af_fix_cache[date_str] = []
+        return []
+
+
+def _af_find_fixture(home_cb, away_cb, af_league_id, date_str):
+    candidates = [(fid, h, a)
+                  for (lg, fid, h, a) in _af_fetch_today(date_str)
+                  if lg == af_league_id]
+    best_score, best_id = 0.0, None
+    for fid, h, a in candidates:
+        sh = difflib.SequenceMatcher(None, home_cb.lower(), h.lower()).ratio()
+        sa = difflib.SequenceMatcher(None, away_cb.lower(), a.lower()).ratio()
+        score = sh * sa
+        if score > best_score:
+            best_score, best_id = score, fid
+    return best_id if best_score >= 0.40 else None
+
+
+def _af_corners_p(fixture_id, line, outcome):
+    import requests
+    if fixture_id not in _af_odds_cache:
+        api_key = _af_key()
+        cache   = {}
+        if api_key:
+            try:
+                r = requests.get(
+                    _AF_BASE + "/odds",
+                    headers={"x-apisports-key": api_key},
+                    params={"fixture": fixture_id, "bet": _AF_BET_CORNERS},
+                    timeout=12,
+                )
+                for entry in (r.json().get("response") or []):
+                    for bk in (entry.get("bookmakers") or []):
+                        if bk.get("id") not in (_AF_BOOK_PINNACLE, _AF_BOOK_BET365):
+                            continue
+                        for bet in (bk.get("bets") or []):
+                            for val in (bet.get("values") or []):
+                                vstr = (val.get("value") or "").lower()
+                                odd  = float(val.get("odd") or 0)
+                                if odd < 1.02:
+                                    continue
+                                try:
+                                    parts = vstr.split()
+                                    oc = parts[0]        # "over" / "under"
+                                    ln = float(parts[1]) # 9.5
+                                    p  = round(1.0 / odd, 4)
+                                    ck = (ln, oc)
+                                    if ck not in cache or p > cache[ck]:
+                                        cache[ck] = p
+                                except (IndexError, ValueError):
+                                    continue
+            except Exception as e:
+                log.debug("[Corners AF] odds(%s) error: %s", fixture_id, e)
+        _af_odds_cache[fixture_id] = cache
+    return _af_odds_cache[fixture_id].get((line, outcome))
+
+
+# ---------------------------------------------------------------------------
+# GBM model
+# ---------------------------------------------------------------------------
 
 class CornersGBM:
 
@@ -113,7 +237,7 @@ class CornersGBM:
             ht, at   = m["home"], m["away"]
             lg, ref  = m["league"], m["referee"]
             hh, ah   = home_hist[ht], away_hist[at]
-            lg_list  = lg_hist[lg][-50:]  if lg_hist[lg]           else []
+            lg_list  = lg_hist[lg][-50:]   if lg_hist[lg]           else []
             ref_list = ref_hist[ref][-30:] if ref and ref_hist[ref] else []
 
             if len(hh) >= MIN_TEAM_MATCHES and len(ah) >= MIN_TEAM_MATCHES:
@@ -242,10 +366,10 @@ class CornersGBM:
             return None, {}
         import numpy as np
 
-        lg_avg   = self.league_avg.get(league or "", self.global_avg)
-        ref_key  = self._fuzzy(referee or "", self.ref_avg)
-        ref_val  = self.ref_avg.get(ref_key, lg_avg) if ref_key else lg_avg
-        has_ref  = 1.0 if ref_key else 0.0
+        lg_avg  = self.league_avg.get(league or "", self.global_avg)
+        ref_key = self._fuzzy(referee or "", self.ref_avg)
+        ref_val = self.ref_avg.get(ref_key, lg_avg) if ref_key else lg_avg
+        has_ref = 1.0 if ref_key else 0.0
 
         hk = self._fuzzy(home_team, self.home_feats)
         ak = self._fuzzy(away_team, self.away_feats)
@@ -265,6 +389,10 @@ class CornersGBM:
                   for line in (8.5, 9.0, 9.5, 10.0, 10.5, 11.0, 11.5)}
         return lam, p_over
 
+
+# ---------------------------------------------------------------------------
+# Cloudbet scanner
+# ---------------------------------------------------------------------------
 
 _COMP_MAP = {
     "E0":  "soccer-england-premier-league",
@@ -327,6 +455,8 @@ def scan_corners(api, state, dry_run=False):
             log.debug("[Corners] %s: %s", comp_key, e)
             continue
 
+        af_lid = _LEAGUE_TO_AF_ID.get(league_code)
+
         for ev in events:
             mkt = ev.get("markets") or {}
             tc  = mkt.get("soccer.total_corners")
@@ -345,6 +475,12 @@ def scan_corners(api, state, dry_run=False):
 
             lg_baseline = model.league_avg.get(league_code, model.global_avg)
 
+            # Pre-fetch AF fixture once per event (shared across all selections)
+            fix_date  = (ev.get("cutoffTime") or "")[:10]
+            af_fix_id = None
+            if af_lid and fix_date:
+                af_fix_id = _af_find_fixture(hn, an, af_lid, fix_date)
+
             for sel in sels:
                 line    = sel["line"]
                 outcome = sel["outcome"]
@@ -359,14 +495,26 @@ def scan_corners(api, state, dry_run=False):
                     continue
                 if model_p is None: continue
 
-                edge = round(model_p - book_p, 4)
-                if edge < MIN_EDGE: continue
-                if model_p < MIN_CONF: continue
+                # Try API-Football reference odds (Pinnacle/Bet365)
+                ref_p = _af_corners_p(af_fix_id, line, outcome) if af_fix_id else None
+
+                if ref_p is not None:
+                    use_edge = round(ref_p - book_p, 4)
+                    use_conf = ref_p
+                    edge_src = "pinnacle"
+                else:
+                    use_edge = round(model_p - book_p, 4)
+                    use_conf = model_p
+                    edge_src = "gbm"
+
+                if use_edge < MIN_EDGE: continue
+                if use_conf < MIN_CONF: continue
 
                 label     = "Corners {} {:.1f}".format(outcome.capitalize(), line)
                 match_str = "{} vs {}".format(hn, an)
-                log.info("[Corners Cantera] %s | %s | edge=%.1f%% p=%.1f%% @%.2f lam=%.1f",
-                         match_str[:35], label, edge * 100, model_p * 100, price, lam)
+                log.info("[Corners Cantera] %s | %s | edge=%.1f%% p=%.1f%% @%.2f lam=%.1f [%s]",
+                         match_str[:35], label, use_edge * 100, use_conf * 100,
+                         price, lam, edge_src)
 
                 picks.append({
                     "sport":        "soccer",
@@ -377,8 +525,8 @@ def scan_corners(api, state, dry_run=False):
                     "price":        price,
                     "odds":         price,
                     "model_prob":   round(model_p, 4),
-                    "confidence":   round(model_p, 4),
-                    "edge":         edge,
+                    "confidence":   round(use_conf, 4),
+                    "edge":         use_edge,
                     "market_url":   sel["market_url"],
                     "comp_key":     comp_key,
                     "event_key":    ev.get("key") or "",
@@ -387,6 +535,8 @@ def scan_corners(api, state, dry_run=False):
                     "_line":        line,
                     "_outcome":     outcome,
                     "_lg_baseline": round(lg_baseline, 2),
+                    "_ref_p":       round(ref_p, 4) if ref_p is not None else None,
+                    "_edge_source": edge_src,
                     "_shadow_only": True,
                     "_source":      "corners_cantera",
                 })
@@ -396,6 +546,10 @@ def scan_corners(api, state, dry_run=False):
                  len(picks), CANTERA_LIVE_N)
     return picks
 
+
+# ---------------------------------------------------------------------------
+# Cantera status
+# ---------------------------------------------------------------------------
 
 def corners_cantera_status():
     try:
