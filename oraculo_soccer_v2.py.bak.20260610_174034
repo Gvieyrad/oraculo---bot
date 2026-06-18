@@ -162,7 +162,6 @@ CB_TO_LEAGUE = {
     'soccer-spain-laliga':                                      'PD',
     'soccer-international-clubs-uefa-champions-league':         'UCL',
     'soccer-international-clubs-uefa-europa-league':            'UCL',
-    'soccer-usa-mls':                                           'MLS',
 }
 
 
@@ -760,8 +759,6 @@ _LEAGUE_O25 = {
     'soccer-italy-serie-b':                0.484,
     'soccer-scotland-premiership':         0.510,
     'soccer-belgium-jupiler':              0.560,
-    # MLS cantera — base rate 2022-2026 (N=2290). Shadow only until N>=30 live picks.
-    'soccer-usa-mls':                      0.588,
 }
 _LEAGUE_O15 = {k: v + 0.22 for k, v in _LEAGUE_O25.items()}
 _DEFAULT_O25 = 0.540

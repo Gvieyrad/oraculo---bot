@@ -12,7 +12,7 @@ Pipeline:
 Run daily from cron (same window as update_wc_standings.py):
   0 */6 * * * cd /home/noc/oraculo_v2 && python3 wc_player_intel.py >> logs/wc_intel.log 2>&1
 """
-import json, os, re, time, logging, datetime, urllib.request, urllib.parse
+import json, os, re, time, logging, datetime, urllib.request, urllib.parse, unicodedata
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('wc_intel')
@@ -197,16 +197,21 @@ RULED_OUT_KWS = [
     'not in squad', 'leaves the squad', 'definitely out',
 ]
 
+def _strip_accents(s):
+    # 2026-06-16: normaliza acentos — 'mbappe' matchea 'mbappe' en titulares en ingles
+    return ''.join(c for c in unicodedata.normalize('NFD', (s or '').lower())
+                   if unicodedata.category(c) != 'Mn')
+
 def extract_injuries_llm(team, headlines, key_players):
     """Keyword-based injury extraction — fast, no LLM required."""
     if not headlines:
         return []
     results = []
     for kp in key_players:
-        name_parts = [p for p in kp['name'].lower().split() if len(p) > 3]
+        name_parts = [_strip_accents(p) for p in kp['name'].split() if len(p) > 3]
         hits = []
         for h in headlines:
-            h_low = h.lower()
+            h_low = _strip_accents(h)
             if any(part in h_low for part in name_parts):
                 if any(kw in h_low for kw in INJURY_KWS):
                     hits.append(h)

@@ -314,13 +314,7 @@ FOOTBALLDATA_LEAGUES = {
     'DED': 'https://www.football-data.co.uk/mmz4281/2526/N1.csv',
     'PPL': 'https://www.football-data.co.uk/mmz4281/2526/P1.csv',
     'TUR': 'https://www.football-data.co.uk/mmz4281/2526/T1.csv',
-    # MLS: /new/ multi-season format — columns Home/HG not HomeTeam/FTHG
-    'MLS': 'https://www.football-data.co.uk/new/USA.csv',
 }
-
-# Leagues using /new/ multi-season format; parser handles Home/HG columns + Season filter
-_FOOTBALLDATA_NEW_FORMAT = {'MLS'}
-_FOOTBALLDATA_MIN_SEASON = 2022  # MLS goal rate shifted upward post-2022
 
 def fetch_footballdata_results(force_refresh=False):
     """Fetch match results from football-data.co.uk for Dixon-Coles training."""
@@ -334,40 +328,23 @@ def fetch_footballdata_results(force_refresh=False):
     import urllib.request, csv, io
     all_matches = []
     for league, url in FOOTBALLDATA_LEAGUES.items():
-        new_fmt = league in _FOOTBALLDATA_NEW_FORMAT
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
             resp = urllib.request.urlopen(req, timeout=15)
             text = resp.read().decode('utf-8', errors='replace')
             reader = csv.DictReader(io.StringIO(text))
             for row in reader:
-                if new_fmt:
-                    # /new/ format: Home/Away/HG/AG + Season column
-                    season = row.get('Season', '')
-                    try:
-                        if season and int(season) < _FOOTBALLDATA_MIN_SEASON:
-                            continue
-                    except ValueError:
-                        pass
-                    home = row.get('Home', '')
-                    away = row.get('Away', '')
-                    hg = row.get('HG', '')
-                    ag = row.get('AG', '')
-                else:
-                    home = row.get('HomeTeam', '')
-                    away = row.get('AwayTeam', '')
-                    hg = row.get('FTHG', '')
-                    ag = row.get('FTAG', '')
+                home = row.get('HomeTeam', '')
+                away = row.get('AwayTeam', '')
+                hg = row.get('FTHG', '')
+                ag = row.get('FTAG', '')
                 date = row.get('Date', '')
                 if home and away and hg and ag:
-                    try:
-                        all_matches.append({
-                            'date': date, 'home': home, 'away': away,
-                            'home_goals': int(hg), 'away_goals': int(ag),
-                            'league': league,
-                        })
-                    except ValueError:
-                        pass
+                    all_matches.append({
+                        'date': date, 'home': home, 'away': away,
+                        'home_goals': int(hg), 'away_goals': int(ag),
+                        'league': league,
+                    })
         except Exception as e:
             log.warning('football-data.co.uk %s failed: %s', league, e)
         time.sleep(1)
@@ -437,7 +414,6 @@ def load_xg_via_proxy():
         'FL1': '/en/comps/13/shooting/Ligue-1-Stats',
         'DED': '/en/comps/23/shooting/Eredivisie-Stats',
         'PPL': '/en/comps/32/shooting/Primeira-Liga-Stats',
-        'MLS': '/en/comps/22/shooting/Major-League-Soccer-Stats',
     }
 
     data = {}

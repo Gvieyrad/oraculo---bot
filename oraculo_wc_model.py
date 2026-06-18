@@ -480,6 +480,9 @@ def _get_pb_model():
         _pb_model_mtime[0] = _mtime
     return _pb_model_cache[0]
 
+import logging as _logging
+log = _logging.getLogger('oraculo')
+
 _PB_NAME_MAP = {
     'USA': 'United States',
     'Republic of Korea': 'South Korea',
@@ -539,9 +542,13 @@ def predict_match(home_team, away_team, neutral=True):
         elo_h = TEAM_PARAMS.get(home_team, {}).get('elo', 1500)
         elo_a = TEAM_PARAMS.get(away_team, {}).get('elo', 1500)
         total = elo_h + elo_a
-        p_h = elo_h / total * 0.75 + 0.125
-        p_a = elo_a / total * 0.75 + 0.125
-        p_d = 1.0 - p_h - p_a
+        # 2026-06-16: p_draw ya no es 0 (antes p_h+p_a=1.0 -> p_d=0 algebraico) + log visibilidad
+        log.warning('[WC] predict fallback: equipo no reconocido por penaltyblog: %s vs %s', home_team, away_team)
+        _pd = max(0.10, 0.26 - abs(elo_h - elo_a) / 3000.0)
+        _rem = 1.0 - _pd
+        p_h = (elo_h / total) * _rem
+        p_a = (elo_a / total) * _rem
+        p_d = _pd
         norm = p_h + p_d + p_a
         return {'p_home': round(p_h/norm, 4), 'p_draw': round(p_d/norm, 4),
                 'p_away': round(p_a/norm, 4), 'xg_home': 1.3, 'xg_away': 1.1}
@@ -610,12 +617,29 @@ def predict_match(home_team, away_team, neutral=True):
     _n3 = p_h + p_d + p_a
     p_h, p_d, p_a = p_h/_n3, p_d/_n3, p_a/_n3
 
+    # Mismatch blowout: DC underestimates xG when ELO gap is large (minnow defenses)
+    # Germany(1937) vs Curacao(1774)=163 diff; Spain(2154) vs Haiti(1821)=333 diff
+    _elo_raw_diff = elo_h - elo_a
+    _elo_abs = abs(_elo_raw_diff)
+    if _elo_abs >= 200:
+        if _elo_abs >= 400:
+            _xg_mult = 1.35   # extreme mismatch (Spain vs Qatar-level)
+        elif _elo_abs >= 300:
+            _xg_mult = 1.20   # strong mismatch (Spain vs Haiti-level)
+        else:
+            _xg_mult = 1.10   # moderate mismatch (Germany vs Curacao)
+        if _elo_raw_diff > 0:
+            xg_h = round(min(4.5, xg_h * _xg_mult), 3)
+        else:
+            xg_a = round(min(4.5, xg_a * _xg_mult), 3)
+
     return {
         'p_home': round(p_h, 4),
         'p_draw': round(p_d, 4),
         'p_away': round(p_a, 4),
         'xg_home': round(xg_h, 3),
         'xg_away': round(xg_a, 3),
+        'elo_diff': int(_elo_raw_diff),
     }
 
 
@@ -695,7 +719,16 @@ def get_player_adjusted_xg(home_team, away_team, neutral=True):
     away_xg_adj = max(0.40, min(4.0, away_xg * a_atk * (2.0 - h_def)))
     home_concerns = [c['player'] for c in h_data.get('concerns', [])]
     away_concerns = [c['player'] for c in a_data.get('concerns', [])]
-    _alt = get_altitude_away_penalty(home_team, away_team)
-    if _alt > 0:
-        away_xg_adj = max(0.30, away_xg_adj * (1.0 - _alt))
+    # altitude already applied inside predict_match; no double-apply here
     return round(home_xg_adj, 3), round(away_xg_adj, 3), home_concerns, away_concerns
+
+def get_elo_mismatch(home_team, away_team):
+    """Returns (elo_diff, level): level 0=competitive, 1=moderate, 2=strong mismatch."""
+    elo_h = TEAM_PARAMS.get(home_team, {}).get('elo', 1500)
+    elo_a = TEAM_PARAMS.get(away_team, {}).get('elo', 1500)
+    diff = abs(elo_h - elo_a)
+    if diff >= 300:
+        return diff, 2   # block Under 2H
+    if diff >= 200:
+        return diff, 1   # warn only
+    return diff, 0       # competitive

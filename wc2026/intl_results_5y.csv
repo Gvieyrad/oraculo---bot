@@ -5445,3 +5445,188 @@ date,home_team,away_team,home_score,away_score,tournament,city,country,neutral
 2026-06-01,Slovakia,Malta,2,1,Friendly,Dunajská Streda,Slovakia,FALSE
 2026-06-01,Turkey,North Macedonia,4,0,Friendly,Istanbul,Turkey,FALSE
 2026-06-01,Maldives,Afghanistan,0,1,Diamond Jubilee International Football Tournament,Malé,Maldives,FALSE
+2021-05-30,China,Guam,7,0,FIFA World Cup qualification,Suzhou,China,FALSE
+2021-06-07,China,Philippines,2,0,FIFA World Cup qualification,Sharjah,United Arab Emirates,TRUE
+2021-06-11,China,Maldives,5,0,FIFA World Cup qualification,Sharjah,United Arab Emirates,TRUE
+2021-06-15,China,Syria,3,1,FIFA World Cup qualification,Suzhou,China,FALSE
+2021-09-02,Australia,China,3,0,FIFA World Cup qualification,Doha,Qatar,TRUE
+2021-09-07,China,Japan,0,1,FIFA World Cup qualification,Doha,Qatar,TRUE
+2021-10-07,China,Vietnam,3,2,FIFA World Cup qualification,Sharjah,United Arab Emirates,TRUE
+2021-10-12,Saudi Arabia,China,3,2,FIFA World Cup qualification,Jeddah,Saudi Arabia,FALSE
+2021-11-11,China,Oman,1,1,FIFA World Cup qualification,Sharjah,United Arab Emirates,TRUE
+2021-11-16,China,Australia,1,1,FIFA World Cup qualification,Sharjah,United Arab Emirates,TRUE
+2022-01-27,Japan,China,2,0,FIFA World Cup qualification,Saitama,Japan,FALSE
+2022-02-01,Vietnam,China,3,1,FIFA World Cup qualification,Hanoi,Vietnam,FALSE
+2022-03-24,China,Saudi Arabia,1,1,FIFA World Cup qualification,Sharjah,United Arab Emirates,TRUE
+2022-03-29,Oman,China,2,0,FIFA World Cup qualification,Muscat,Oman,FALSE
+2022-04-22,Elba Island,Vatican City,4,2,Friendly,Capoliveri,Italy,FALSE
+2022-07-20,China,South Korea,0,3,EAFF Championship,Toyota,Japan,TRUE
+2022-07-24,Japan,China,0,0,EAFF Championship,Toyota,Japan,FALSE
+2022-07-27,China,Hong Kong,1,0,EAFF Championship,Toyota,Japan,TRUE
+2023-03-23,New Zealand,China,0,0,Friendly,Auckland,New Zealand,FALSE
+2023-03-26,New Zealand,China,2,1,Friendly,Wellington,New Zealand,FALSE
+2023-06-16,China,Myanmar,4,0,Friendly,Dalian,China,FALSE
+2023-06-20,China,Palestine,2,0,Friendly,Dalian,China,FALSE
+2023-09-09,China,Malaysia,1,1,Friendly,Chengdu,China,FALSE
+2023-09-12,China,Syria,0,1,Friendly,Chengdu,China,FALSE
+2023-10-10,China,Vietnam,2,0,Friendly,Dalian,China,FALSE
+2023-10-16,China,Uzbekistan,1,2,Friendly,Dalian,China,FALSE
+2023-11-16,Thailand,China,1,2,FIFA World Cup qualification,Bangkok,Thailand,FALSE
+2023-11-21,China,South Korea,0,3,FIFA World Cup qualification,Shenzhen,China,FALSE
+2024-01-01,China,Hong Kong,1,2,Friendly,Abu Dhabi,United Arab Emirates,TRUE
+2024-01-13,China,Tajikistan,0,0,AFC Asian Cup,Doha,Qatar,TRUE
+2024-01-17,Lebanon,China,0,0,AFC Asian Cup,Doha,Qatar,TRUE
+2024-01-22,Qatar,China,1,0,AFC Asian Cup,Al Rayyan,Qatar,FALSE
+2024-03-21,Singapore,China,2,2,FIFA World Cup qualification,Kallang,Singapore,FALSE
+2024-03-26,China,Singapore,4,1,FIFA World Cup qualification,Tianjin,China,FALSE
+2024-06-06,China,Thailand,1,1,FIFA World Cup qualification,Shenyang,China,FALSE
+2024-06-11,South Korea,China,1,0,FIFA World Cup qualification,Seoul,South Korea,FALSE
+2024-09-05,Japan,China,7,0,FIFA World Cup qualification,Saitama,Japan,FALSE
+2024-09-10,China,Saudi Arabia,1,2,FIFA World Cup qualification,Dalian,China,FALSE
+2024-10-10,Australia,China,3,1,FIFA World Cup qualification,Adelaide,Australia,FALSE
+2024-10-15,China,Indonesia,2,1,FIFA World Cup qualification,Qingdao,China,FALSE
+2024-11-14,Bahrain,China,0,1,FIFA World Cup qualification,Riffa,Bahrain,FALSE
+2024-11-19,China,Japan,1,3,FIFA World Cup qualification,Xiamen,China,FALSE
+2025-03-20,Saudi Arabia,China,1,0,FIFA World Cup qualification,Riyadh,Saudi Arabia,FALSE
+2025-03-25,China,Australia,0,2,FIFA World Cup qualification,Hangzhou,China,FALSE
+2025-06-05,Indonesia,China,1,0,FIFA World Cup qualification,Jakarta,Indonesia,FALSE
+2025-06-10,China,Bahrain,1,0,FIFA World Cup qualification,Chongqing,China,FALSE
+2026-01-26,Uzbekistan,China,2,2,Friendly,Dubai,United Arab Emirates,TRUE
+2026-03-27,China,Curaçao,2,0,FIFA Series,Sydney,Australia,TRUE
+2026-03-31,Cameroon,China,2,0,FIFA Series,Melbourne,Australia,TRUE
+2026-06-02,Croatia,Belgium,0,2,Friendly,Rijeka,Croatia,FALSE
+2026-06-02,Georgia,Romania,1,1,Friendly,Tbilisi,Georgia,FALSE
+2026-06-02,Haiti,New Zealand,4,0,Friendly,Fort Lauderdale,United States,TRUE
+2026-06-02,Morocco,Madagascar,4,0,Friendly,Rabat,Morocco,FALSE
+2026-06-02,Wales,Ghana,1,1,Friendly,Cardiff,Wales,FALSE
+2026-06-03,Albania,Israel,0,1,Friendly,Tirana,Albania,FALSE
+2026-06-03,DR Congo,Denmark,0,0,Friendly,Liège,Belgium,TRUE
+2026-06-03,Gibraltar,British Virgin Islands,4,0,Friendly,Europa Point,Gibraltar,FALSE
+2026-06-03,South Korea,El Salvador,1,0,Friendly,Provo,United States,TRUE
+2026-06-03,Luxembourg,Italy,0,1,Friendly,Luxembourg,Luxembourg,FALSE
+2026-06-03,Netherlands,Algeria,0,1,Friendly,Rotterdam,Netherlands,FALSE
+2026-06-03,Panama,Dominican Republic,4,2,Friendly,Panama City,Panama,FALSE
+2026-06-03,Poland,Nigeria,2,2,Friendly,Warsaw,Poland,FALSE
+2026-06-03,Philippines,Guam,5,1,Friendly,Manila,Philippines,FALSE
+2026-06-01,Maldives,Pakistan,0,3,Diamond Jubilee International Football Tournament,Malé,Maldives,FALSE
+2026-06-04,Andorra,Liechtenstein,2,0,Friendly,Encamp,Andorra,FALSE
+2026-06-04,Cambodia,Bhutan,4,0,Friendly,Phnom Penh,Cambodia,FALSE
+2026-06-04,France,Ivory Coast,1,2,Friendly,Nantes,France,FALSE
+2026-06-04,Guatemala,Czech Republic,1,5,Friendly,Harrison,United States,TRUE
+2026-06-04,Iran,Mali,2,0,Friendly,Antalya,Turkey,TRUE
+2026-06-04,Lesotho,Kenya,1,1,Friendly,Pretoria,South Africa,TRUE
+2026-06-04,Mexico,Serbia,5,1,Friendly,Toluca,Mexico,FALSE
+2026-06-04,Northern Ireland,Guinea,1,0,Friendly,La Línea de la Concepción,Spain,TRUE
+2026-06-04,Slovenia,Cyprus,1,1,Friendly,Ljubljana,Slovenia,FALSE
+2026-06-04,Spain,Iraq,1,1,Friendly,A Coruña,Spain,FALSE
+2026-06-04,Sweden,Greece,2,2,Friendly,Solna,Sweden,FALSE
+2026-06-05,Angola,Mauritania,1,1,Friendly,Casablanca,Morocco,TRUE
+2026-06-05,Azerbaijan,Malta,0,2,Friendly,Szombathely,Hungary,TRUE
+2026-06-05,Belarus,Syria,4,1,Friendly,Minsk,Belarus,FALSE
+2026-06-05,Canada,Republic of Ireland,1,1,Friendly,Montreal,Canada,FALSE
+2026-06-05,Georgia,Bahrain,2,0,Friendly,Tbilisi,Georgia,FALSE
+2026-06-05,Haiti,Peru,1,2,Friendly,Miami,United States,TRUE
+2026-06-05,Hong Kong,Mongolia,2,0,Friendly,Hong Kong,Hong Kong,FALSE
+2026-06-05,Hungary,Finland,2,1,Friendly,Budapest,Hungary,FALSE
+2026-06-05,Indonesia,Oman,3,0,Friendly,Jakarta,Indonesia,FALSE
+2026-06-05,Moldova,Bulgaria,2,2,Friendly,Chișinău,Moldova,FALSE
+2026-06-05,Paraguay,Nicaragua,4,0,Friendly,Asunción,Paraguay,FALSE
+2026-06-05,San Marino,Bangladesh,1,2,Friendly,Serravalle,San Marino,FALSE
+2026-06-05,Singapore,China,1,2,Friendly,Singapore,Singapore,FALSE
+2026-06-05,Slovakia,Montenegro,2,2,Friendly,Košice,Slovakia,FALSE
+2026-06-05,Tajikistan,India,3,1,Friendly,Tursunzoda,Tajikistan,FALSE
+2026-06-05,Thailand,Kuwait,2,2,Friendly,Pathum Thani,Thailand,FALSE
+2026-06-05,Russia,Burkina Faso,3,0,Friendly,Volgograd,Russia,FALSE
+2026-06-05,Benin,Niger,1,1,Friendly,Casablanca,Morocco,TRUE
+2026-06-05,Central African Republic,Togo,1,1,Friendly,Mohammedia,Morocco,TRUE
+2026-06-05,Puerto Rico,Saudi Arabia,0,3,Friendly,Austin,United States,TRUE
+2026-06-06,Vanuatu,Fiji,2,1,Friendly,Port Vila,Vanuatu,FALSE
+2026-06-06,Albania,Luxembourg,0,1,Friendly,Tirana,Albania,FALSE
+2026-06-06,Argentina,Honduras,2,0,Friendly,College Station,United States,TRUE
+2026-06-06,Armenia,Kazakhstan,1,1,Friendly,Yerevan,Armenia,FALSE
+2026-06-06,Australia,Switzerland,1,1,Friendly,San Diego,United States,TRUE
+2026-06-06,Belgium,Tunisia,5,0,Friendly,Brussels,Belgium,FALSE
+2026-06-06,Bermuda,Cape Verde,3,0,Friendly,East Hartford,United States,TRUE
+2026-06-06,Bolivia,Scotland,0,4,Friendly,Harrison,United States,TRUE
+2026-06-06,Brazil,Egypt,2,1,Friendly,Cleveland,United States,TRUE
+2026-06-06,Curaçao,Aruba,4,0,Friendly,Willemstad,Curaçao,FALSE
+2026-06-06,England,New Zealand,1,0,Friendly,Tampa,United States,TRUE
+2026-06-06,Sierra Leone,Liberia,1,0,Friendly,Bo,Sierra Leone,FALSE
+2026-06-06,Ethiopia,Malawi,1,0,Friendly,Dire Dawa,Ethiopia,FALSE
+2026-06-06,Gibraltar,Cayman Islands,4,1,Friendly,Gibraltar,Gibraltar,FALSE
+2026-06-06,Jamaica,South Africa,0,1,Friendly,Pachuca,Mexico,TRUE
+2026-06-06,Kyrgyzstan,Palestine,0,0,Friendly,Bishkek,Kyrgyzstan,FALSE
+2026-06-06,Panama,Bosnia and Herzegovina,1,1,Friendly,St. Louis,United States,TRUE
+2026-06-06,Portugal,Chile,2,1,Friendly,Oeiras,Portugal,FALSE
+2026-06-06,Qatar,El Salvador,0,0,Friendly,Los Angeles,United States,TRUE
+2026-06-06,Romania,Wales,2,1,Friendly,Bucharest,Romania,FALSE
+2026-06-06,United States,Germany,1,2,Friendly,Chicago,United States,FALSE
+2026-06-06,British Virgin Islands,Bonaire,2,0,Friendly,Málaga,Spain,TRUE
+2026-06-06,Gibraltar,Cayman Islands,4,1,Friendly,Europa Point,Gibraltar,FALSE
+2026-06-06,Venezuela,Turkey,1,2,Friendly,Fort Lauderdale,United States,TRUE
+2026-06-06,Myanmar,Guam,6,1,Tri-Nations Cup,Manila,Philippines,TRUE
+2026-06-06,Lithuania,Latvia,1,1,Baltic Cup,Kaunas,Lithuania,FALSE
+2026-06-06,Estonia,Faroe Islands,1,0,Baltic Cup,Pärnu,Estonia,FALSE
+2026-06-07,Afghanistan,Pakistan,0,2,Diamond Jubilee International Football Tournament,Malé,Maldives,TRUE
+2026-06-07,Croatia,Slovenia,2,1,Friendly,Varaždin,Croatia,FALSE
+2026-06-07,Ecuador,Guatemala,3,0,Friendly,Columbus,United States,TRUE
+2026-06-07,Greece,Italy,0,1,Friendly,Heraklion,Greece,FALSE
+2026-06-07,Jordan,Colombia,0,2,Friendly,San Diego,United States,TRUE
+2026-06-07,Kosovo,Andorra,3,0,Friendly,Pristina,Kosovo,FALSE
+2026-06-07,Liechtenstein,Cyprus,0,2,Friendly,Vaduz,Liechtenstein,FALSE
+2026-06-07,Morocco,Norway,1,1,Friendly,Harrison,United States,TRUE
+2026-06-07,Denmark,Ukraine,2,1,Friendly,Odense,Denmark,FALSE
+2026-06-08,France,Northern Ireland,3,1,Friendly,Lille,France,FALSE
+2026-06-08,Netherlands,Uzbekistan,2,1,Friendly,New York,United States,TRUE
+2026-06-08,Peru,Spain,1,3,Friendly,Puebla,Mexico,TRUE
+2026-06-08,Mauritania,Niger,1,0,Friendly,Casablanca,Morocco,TRUE
+2026-06-09,Angola,Central African Republic,3,0,Friendly,Casablanca,Morocco,TRUE
+2026-06-09,Argentina,Iceland,3,0,Friendly,Auburn,United States,TRUE
+2026-06-09,Armenia,Moldova,1,1,Friendly,Yerevan,Armenia,FALSE
+2026-06-09,Azerbaijan,San Marino,2,1,Friendly,Szombathely,Hungary,TRUE
+2026-06-09,Belarus,Burkina Faso,2,2,Friendly,Minsk,Belarus,FALSE
+2026-06-09,Cambodia,Hong Kong,2,0,Friendly,Phnom Penh,Cambodia,FALSE
+2026-06-09,China,Thailand,0,0,Friendly,Hangzhou,China,FALSE
+2026-06-09,DR Congo,Chile,1,2,Friendly,Orléans,France,TRUE
+2026-06-09,Equatorial Guinea,Comoros,0,1,Friendly,Marrakesh,Morocco,TRUE
+2026-06-09,Ethiopia,Malawi,1,1,Friendly,Dire Dawa,Ethiopia,FALSE
+2026-06-09,Hungary,Kazakhstan,3,1,Friendly,Debrecen,Hungary,FALSE
+2026-06-09,Indonesia,Mozambique,1,0,Friendly,Jakarta,Indonesia,FALSE
+2026-06-09,Kyrgyzstan,Palestine,0,0,Friendly,Bishkek,Kyrgyzstan,FALSE
+2026-06-09,Saudi Arabia,Senegal,0,0,Friendly,San Antonio,United States,TRUE
+2026-06-09,Tajikistan,India,1,1,Friendly,Hisor,Tajikistan,FALSE
+2026-06-09,Philippines,Myanmar,5,1,Tri-Nations Cup,Manila,Philippines,FALSE
+2026-06-09,Latvia,Faroe Islands,0,1,Baltic Cup,Riga,Latvia,FALSE
+2026-06-09,Estonia,Lithuania,1,0,Baltic Cup,Tallinn,Estonia,FALSE
+2026-06-09,Russia,Trinidad and Tobago,3,0,Friendly,Kaliningrad,Russia,FALSE
+2026-06-09,Togo,Benin,5,1,Friendly,Lomé,Togo,FALSE
+2026-06-09,Liberia,Sierra Leone,3,1,Friendly,Monrovia,Liberia,FALSE
+2026-06-09,Iraq,Venezuela,0,2,Friendly,Bridgeview,United States,TRUE
+2026-06-10,Bolivia,Algeria,0,4,Friendly,Kansas City,United States,TRUE
+2026-06-10,England,Costa Rica,3,0,Friendly,Orlando,United States,TRUE
+2026-06-10,Portugal,Nigeria,2,1,Friendly,Leiria,Portugal,FALSE
+2026-06-10,Afghanistan,Pakistan,0,2,Diamond Jubilee International Football Tournament,Malé,Maldives,TRUE
+2026-06-11,Mexico,South Africa,2,00,FIFA World Cup,Mexico City,Mexico,FALSE
+2026-06-11,South Korea,Czech Republic,2,1,FIFA World Cup,Zapopan,Mexico,TRUE
+2026-06-12,Canada,Bosnia and Herzegovina,1,1,FIFA World Cup,Toronto,Canada,FALSE
+2026-06-12,United States,Paraguay,4,1,FIFA World Cup,Inglewood,United States,FALSE
+2026-06-13,Qatar,Switzerland,1,1,FIFA World Cup,Santa Clara,United States,TRUE
+2026-06-13,Brazil,Morocco,1,1,FIFA World Cup,East Rutherford,United States,TRUE
+2026-06-13,Haiti,Scotland,0,1,FIFA World Cup,Foxborough,United States,TRUE
+2026-06-13,Australia,Turkey,2,0,FIFA World Cup,Vancouver,Canada,TRUE
+2026-06-14,Germany,Curaçao,7,1,FIFA World Cup,Houston,United States,TRUE
+2026-06-14,Ivory Coast,Ecuador,1,0,FIFA World Cup,Philadelphia,United States,TRUE
+2026-06-14,Netherlands,Japan,2,2,FIFA World Cup,Arlington,United States,TRUE
+2026-06-14,Sweden,Tunisia,5,1,FIFA World Cup,Guadalupe,Mexico,TRUE
+2026-06-15,Belgium,Egypt,1,1,FIFA World Cup,Seattle,United States,TRUE
+2026-06-15,Iran,New Zealand,2,2,FIFA World Cup,Inglewood,United States,TRUE
+2026-06-15,Spain,Cape Verde,0,0,FIFA World Cup,Atlanta,United States,TRUE
+2026-06-15,Saudi Arabia,Uruguay,1,1,FIFA World Cup,Miami Gardens,United States,TRUE
+2026-06-16,France,Senegal,3,1,FIFA World Cup,East Rutherford,United States,TRUE
+2026-06-16,Iraq,Norway,1,4,FIFA World Cup,Foxborough,United States,TRUE
+2026-06-16,Argentina,Algeria,3,0,FIFA World Cup,Kansas City,United States,TRUE
+2026-06-16,Austria,Jordan,3,1,FIFA World Cup,Santa Clara,United States,TRUE
+2026-06-17,Portugal,DR Congo,1,1,FIFA World Cup,Houston,United States,TRUE
+2026-06-17,Uzbekistan,Colombia,1,3,FIFA World Cup,Mexico City,Mexico,TRUE
+2026-06-17,England,Croatia,4,2,FIFA World Cup,Arlington,United States,TRUE
+2026-06-17,Ghana,Panama,1,0,FIFA World Cup,Toronto,Canada,TRUE

@@ -37,7 +37,7 @@ log = logging.getLogger('oraculo')
 _DEFAULT_ALPHA = {
     'soccer':   0.60,   # football: mercado muy eficiente, mas peso al bm
     'football': 0.60,
-    'tennis':   0.65,   # tennis: menos liquidez, mas peso al modelo
+    'tennis':   0.35,   # 2026-06-16: 0.65->0.35 (Sibila overconfident +9pp, learned optimal<=0.30)
     'mlb':      0.55,   # mlb: reducido 0.85→0.55 (modelo descalibrado, dar mas peso al mercado)
     'baseball': 0.55,   # alias — reducido junto con mlb
     'default':  0.60,
@@ -195,15 +195,20 @@ def learn_alpha_from_sibila(sibila_db_path: str,
         import sqlite3
         conn = sqlite3.connect(sibila_db_path)
         conn.row_factory = sqlite3.Row
+        # 2026-06-16: dedup match+side+result (MIN ts) — 72%% de Sibila eran re-scans del mismo pick
         q = '''
-            SELECT sport, prob_model AS model_prob, odds AS price, result, clv
-            FROM sibila_picks
-            WHERE result IN ('WIN','LOSS')
-              AND prob_model > 0
-              AND odds > 1.0
+            SELECT sport, model_prob, price, result, clv FROM (
+                SELECT sport, prob_model AS model_prob, odds AS price, result, clv,
+                       MIN(ts) AS ts
+                FROM sibila_picks
+                WHERE result IN ('WIN','LOSS')
+                  AND prob_model > 0
+                  AND odds > 1.0
+                GROUP BY match, side, result
+            )
         '''
         if sport:
-            q += f" AND sport='{sport}'"
+            q += f" WHERE sport='{sport}'"
         rows = conn.execute(q).fetchall()
         conn.close()
     except Exception as e:
@@ -267,12 +272,45 @@ class BenterCalibrator:
     Puede recalibrar automaticamente cuando hay suficientes picks resueltos.
     """
 
+    _ALPHA_PATH = '/home/noc/oraculo_v2/benter_alphas.json'
+    _ALPHA_MAX_AGE = 7 * 24 * 3600  # forzar recalibracion si los alphas tienen >7 dias
+
     def __init__(self, sibila_db: str = None):
-        import time as _t
+        import time as _t, json as _json, os as _os
         self.sibila_db   = sibila_db
-        self._alphas     = dict(_DEFAULT_ALPHA)  # copia mutable
+        self._alphas     = dict(_DEFAULT_ALPHA)  # copia mutable (priors)
         self._last_learn = _t.time()  # no recalibrar inmediatamente al arrancar
         self._learn_ttl  = 24 * 3600  # recalibrar cada 24h
+        # 2026-06-16 Fix A: cargar alphas aprendidos de disco (sobreviven restart)
+        _stale = True
+        try:
+            if _os.path.exists(self._ALPHA_PATH):
+                with open(self._ALPHA_PATH, encoding='utf-8') as _f:
+                    _d = _json.load(_f)
+                _loaded = _d.get('alphas', {})
+                _saved_ts = float(_d.get('ts', 0) or 0)
+                self._alphas.update({k: float(v) for k, v in _loaded.items()})
+                _age = _t.time() - _saved_ts
+                _stale = _age > self._ALPHA_MAX_AGE
+                log.info('[Benter] alphas cargados de disco (edad %.1fd): %s',
+                         _age / 86400.0, _loaded)
+        except Exception as _e:
+            log.warning('[Benter] no se pudo cargar %s: %s', self._ALPHA_PATH, _e)
+        # Si no hay archivo o esta viejo, forzar recalibracion al arrancar (no esperar 24h)
+        if _stale and self.sibila_db:
+            try:
+                if self.recalibrate(force=True):
+                    log.info('[Benter] recalibracion forzada al arranque (alphas ausentes/viejos)')
+            except Exception as _e:
+                log.warning('[Benter] recalibracion de arranque fallo: %s', _e)
+
+    def _save_alphas(self):
+        import time as _t, json as _json
+        try:
+            with open(self._ALPHA_PATH, 'w', encoding='utf-8') as _f:
+                _json.dump({'ts': _t.time(), 'alphas': self._alphas}, _f, indent=2)
+        except Exception as _e:
+            log.warning('[Benter] no se pudo guardar %s: %s', self._ALPHA_PATH, _e)
 
     def recalibrate(self, force: bool = False) -> bool:
         """Aprende alphas optimos de Sibila si hay datos suficientes."""
@@ -289,6 +327,7 @@ class BenterCalibrator:
                 self._alphas[sp] = alpha
                 log.info('[Benter] alpha actualizado: %s → %.2f', sp, alpha)
             self._last_learn = now
+            self._save_alphas()  # 2026-06-16 Fix A: persistir a disco
             return True
         return False
 

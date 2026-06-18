@@ -2,7 +2,7 @@
 """
 oraculo_clv.py — Closing Line Value tracker
 ============================================
-CLV = closing_odds / entry_odds - 1
+CLV = entry_odds / closing_odds - 1
 
 Si CLV promedio > +3%  → edge real, escalar con confianza
 Si CLV promedio < 0%   → ganamos por varianza, corregir modelo
@@ -320,13 +320,13 @@ def get_novig_prob(match: str, sport: str, pick_label: str,
     return None
 
 def compute_clv(entry_odds: float, closing_odds: float) -> float:
-    """CLV = closing_odds / entry_odds - 1
+    """CLV = entry_odds / closing_odds - 1
     Positive = we got better odds than market closed at (we had edge)
     Negative = market was sharper than us
     """
     if not entry_odds or not closing_odds or entry_odds <= 1 or closing_odds <= 1:
         return None
-    return round(closing_odds / entry_odds - 1, 4)
+    return round(entry_odds / closing_odds - 1, 4)  # 2026-06-16: corregido signo
 
 
 def record_closing_for_settled(predictions_file: str):
@@ -637,3 +637,66 @@ class CLVOracle:
             log.debug('CLV cloudbet record error: %s', e)
         if updated:
             log.info('[CLV] Updated %d active bets with Cloudbet closing odds', updated)
+
+    def record_shadow_clv(self, api, sibila_db_path):
+        """2026-06-18: CLV para picks SHADOW abiertos (placed=0) -> cantera medible.
+        Espeja record_cloudbet_clv pero lee filas del DB, agrupa por event_id (1 call
+        por evento), re-captura cada ciclo (ultima antes de resolver = cierre proxy).
+        Acotado a picks de los ultimos 5 dias para limitar carga API."""
+        import sqlite3 as _sq3, json as _json, os as _os
+        from datetime import datetime as _dt, timedelta as _td
+        try:
+            _cfg_path = _os.path.join(_os.path.dirname(__file__), 'cloudbet_config.json')
+            _cb_key = _json.load(open(_cfg_path)).get('api_key', '')
+        except Exception:
+            _cb_key = ''
+        if not _cb_key:
+            return
+        _cutoff = (_dt.utcnow() - _td(days=5)).isoformat()
+        updated = 0
+        try:
+            con = _sq3.connect(sibila_db_path, timeout=10)
+            cur = con.cursor()
+            cur.execute(
+                "SELECT id, event_id, market_url, odds FROM sibila_picks "
+                "WHERE (placed=0 OR placed IS NULL) AND result IS NULL "
+                "AND event_id IS NOT NULL AND event_id!='' "
+                "AND market_url IS NOT NULL AND market_url!='' AND ts > ?", (_cutoff,))
+            rows = cur.fetchall()
+            by_ev = {}
+            for _id, eid, murl, odds in rows:
+                by_ev.setdefault(eid, []).append((_id, murl, float(odds or 0)))
+            import requests as _req
+            for eid, picks in by_ev.items():
+                try:
+                    r = _req.get(
+                        f'https://sports-api.cloudbet.com/pub/v2/odds/events/{eid}',
+                        headers={'accept': 'application/json', 'X-API-Key': _cb_key},
+                        timeout=8)
+                    if r.status_code != 200:
+                        continue
+                    data = r.json()
+                    price_map = {}
+                    for mkt in data.get('markets', {}).values():
+                        for sub in mkt.get('submarkets', {}).values():
+                            for sel in sub.get('selections', []):
+                                mu = sel.get('marketUrl', '')
+                                if mu:
+                                    price_map[mu] = float(sel.get('price', 0) or 0)
+                    for _id, murl, entry_o in picks:
+                        cp = price_map.get(murl, 0.0)
+                        if cp <= 1 or entry_o <= 1:
+                            continue
+                        clv = entry_o / cp - 1.0
+                        cur.execute(
+                            'UPDATE sibila_picks SET closing_odds=?, clv=? WHERE id=?',
+                            (round(cp, 3), round(clv, 4), _id))
+                        updated += 1
+                except Exception:
+                    continue
+            con.commit()
+            con.close()
+        except Exception as e:
+            log.debug('Shadow CLV record error: %s', e)
+        if updated:
+            log.info('[CLV] Updated %d shadow picks with closing odds', updated)

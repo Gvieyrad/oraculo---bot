@@ -4,10 +4,10 @@ Cantera -- sistemas en shadow validation antes de ir live en Oraculo.
 Uso: python3 cantera_status.py
 """
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 
 DB = '/home/noc/oraculo_v2/sibila.db'
-NOW = datetime.utcnow()
+NOW = datetime.now(timezone.utc)
 
 CANTERA = [
     {
@@ -15,42 +15,49 @@ CANTERA = [
         'query': "sport='basketball' AND (league LIKE '%wnba%' OR side LIKE '%Lynx%' OR side LIKE '%Liberty%' OR side LIKE '%Aces%' OR side LIKE '%Mercury%' OR side LIKE '%Sky%')",
         'threshold': 20,
         'note': 'ELO model -- activar live cuando WR>=55%% en 20+ picks, odds<=1.90',
+        'days': 90,
     },
     {
         'name': 'NBA',
-        'query': "sport='basketball' AND league LIKE '%nba%'",
+        'query': "sport='basketball' AND league LIKE '%nba%' AND league NOT LIKE '%wnba%'",
         'threshold': 50,
-        'note': 'ELO model -- fuera de temporada (Oct-Jun)',
+        'note': 'ELO model -- fuera de temporada hasta Oct',
+        'days': 90,
     },
     {
         'name': 'NHL',
         'query': "sport='hockey'",
         'threshold': 50,
-        'note': 'ELO model -- fuera de temporada (Oct-Jun)',
+        'note': 'ELO model -- fuera de temporada hasta Oct',
+        'days': 90,
     },
     {
         'name': 'Soccer Corners',
         'query': "market_type='soccer_corners'",
         'threshold': None,
         'note': 'SHADOW PERMANENTE -- correlation=0.020, sin senal real',
+        'days': 90,
     },
     {
         'name': 'RLM (Sharp Money)',
-        'query': "market_type='rlm_signal' OR market_type='steam_move'",
+        'query': "market_type IN ('rlm_signal','steam_move')",
         'threshold': 30,
         'note': 'Steam moves + public-reverse + multi-book consensus',
+        'days': 90,
     },
     {
-        'name': 'MLB Fade',
-        'query': "market_type='mlb_f5_ml_fade'",
-        'threshold': 20,
-        'note': 'CHW/MIA/CHI/TEX/DET -- activar cuando WR>=60%% en 20+ picks',
+        'name': 'MLB F5 Shadow',
+        'query': "market_type='mlb_f5_ml' AND placed=0",
+        'threshold': 50,
+        'note': 'F5 ML shadow -- activar cuando WR>=55%% en 50+ picks resueltos',
+        'days': 90,
     },
     {
-        'name': 'Soccer Intl',
-        'query': "sport='soccer' AND (league LIKE '%copa-america%' OR league LIKE '%nations-league%')",
+        'name': 'Soccer Intl (MLS)',
+        'query': "sport='soccer' AND placed=0 AND (league LIKE '%mls%' OR league LIKE '%copa-america%' OR league LIKE '%nations-league%' OR league LIKE '%conmebol%' OR league LIKE '%concacaf%')",
         'threshold': 30,
-        'note': 'Copa America + UEFA NL -- shadow hasta validar post-WC',
+        'note': 'MLS + Copa + UEFA NL -- shadow hasta N>=30 WR>=60%%',
+        'days': 180,
     },
 ]
 
@@ -62,11 +69,10 @@ print('  CANTERA -- Shadow Validation Dashboard')
 print('  %s UTC' % NOW.strftime('%Y-%m-%d %H:%M'))
 print('=' * 62)
 
-cutoff_90 = (NOW - timedelta(days=90)).isoformat()
-
 for s in CANTERA:
+    cutoff = (NOW - timedelta(days=s['days'])).strftime('%Y-%m-%d %H:%M:%S')
     q = ("SELECT result, COUNT(*) n FROM sibila_picks "
-         "WHERE (%s) AND ts >= '%s' GROUP BY result" % (s['query'], cutoff_90))
+         "WHERE (%s) AND ts >= '%s' GROUP BY result" % (s['query'], cutoff))
     try:
         rows = {r['result']: r['n'] for r in conn.execute(q).fetchall()}
     except Exception as e:
@@ -74,8 +80,8 @@ for s in CANTERA:
 
     total = sum(rows.values())
     wins = rows.get('WIN', 0)
-    pending = rows.get(None, 0) + rows.get('PENDING', 0) + rows.get('VOID', 0)
-    resolved = total - pending
+    voids = rows.get('VOID', 0)
+    resolved = total - rows.get(None, 0) - voids
     wr = wins / resolved * 100 if resolved > 0 else 0
     thr = s['threshold']
 
@@ -86,7 +92,7 @@ for s in CANTERA:
         status = 'SIN DATOS'
         progress = '(0/%d picks)' % thr
     elif resolved >= thr:
-        badge = 'EVALUAR LIVE' if wr >= 55 else 'n OK / WR bajo'
+        badge = 'EVALUAR LIVE' if wr >= 55 else 'WR insuf (%.0f%%)' % wr
         status = badge
         progress = '(%d picks WR=%.0f%%)' % (resolved, wr)
     else:
@@ -94,8 +100,8 @@ for s in CANTERA:
         progress = '(%d/%d  WR=%.0f%%)' % (resolved, thr, wr)
 
     print()
-    print('  %-20s  %-22s %s' % (s['name'], status, progress))
-    print('  %-20s  %s' % ('', s['note']))
+    print('  %-22s  %-22s %s' % (s['name'], status, progress))
+    print('  %-22s  %s' % ('', s['note']))
 
 print()
 print('=' * 62)

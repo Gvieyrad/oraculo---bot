@@ -142,8 +142,8 @@ def _parse_market(side_str):
             line = max(line_candidates)
         return ('booking_pts', direction, line)
 
-    # Goals FT (no 2H qualifier)
-    if 'goal' in s and 'ft' in s:
+    # Goals FT (no 2H qualifier) — also matches 'Over 3.5 Goals (xG ...)' format
+    if 'goal' in s and '2h' not in s:
         line = next((l for l in line_candidates if 0.5 <= l <= 6.5), None)
         return ('goals_ft', direction, line)
 
@@ -235,6 +235,20 @@ def _eval_result(row, market_kind, direction, line):
 
 # --- WC resolver via ESPN (no API key needed) ----------------------------
 _ESPN_CACHE = {}
+_WC_NORM = {
+    "republic of korea": "South Korea",
+    "usa": "United States",
+    "united states of america": "United States",
+    "czech republic": "Czechia",
+    "ir iran": "Iran",
+    "dr congo": "DR Congo",
+    "congo dr": "DR Congo",
+}
+
+def _norm_wc(name):
+    return _WC_NORM.get(name.lower(), name)
+
+
 
 def _fetch_espn_wc_results(date_str):
     if date_str in _ESPN_CACHE:
@@ -302,6 +316,7 @@ def _fetch_espn_wc_results(date_str):
 
 
 def _find_in_espn_wc(home, away, date_str):
+    home_n, away_n = _norm_wc(home), _norm_wc(away)
     from datetime import datetime as _dt, timedelta as _td
     try:
         tgt = _dt.strptime(date_str[:10], "%Y-%m-%d")
@@ -310,7 +325,7 @@ def _find_in_espn_wc(home, away, date_str):
     for delta in [0, 1, -1]:
         check = (tgt + _td(days=delta)).strftime("%Y-%m-%d")
         for m in _fetch_espn_wc_results(check):
-            if _sim(home, m["home"]) >= 0.5 and _sim(away, m["away"]) >= 0.5:
+            if _sim(home_n, m["home"]) >= 0.5 and _sim(away_n, m["away"]) >= 0.5:
                 return m
     return None
 def resolve_all_pending(dry_run=False):
@@ -372,7 +387,7 @@ def resolve_all_pending(dry_run=False):
             continue
 
         # World Cup: resolve via ESPN (football-data.co.uk has no WC data)
-        if 'world-cup' in league or 'international-world-cup' in league:
+        if league == 'FIFA_WC' or 'world-cup' in league or 'international-world-cup' in league:
             espn_m = _find_in_espn_wc(home, away, ts)
             if espn_m is None:
                 log.info(f'  WC pending (no result yet): {home} vs {away} ({ts})')

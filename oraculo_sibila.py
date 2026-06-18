@@ -153,6 +153,10 @@ def _classify_market(label, sport):
         return 'btts'
     if '1x2' in lbl or 'result' in lbl:
         return 'result_1x2'
+    if 'over 3.5' in lbl or 'o3.5' in lbl:
+        return 'over35'
+    if 'over 4.5' in lbl or 'o4.5' in lbl:
+        return 'over45'
     if 'over' in lbl or 'under' in lbl:
         return 'over_under'
     return 'other'
@@ -181,13 +185,32 @@ def record_pick(pick: dict, placed: bool = False, real_stake: float = None, bet_
         stake = _kelly_stake(edge, odds, vbr)
 
         conn = _get_conn()
+        _mkt_type = pick.get('market_type') or _classify_market(label, sport)
+        _event_id = pick.get('event_id') or pick.get('eid') or ''
+        _mkt_url  = pick.get('market_url') or ''
+        # Dedup: skip if same event+market already recorded (shadow picks only)
+        if not placed:
+            if _event_id and _mkt_url:
+                _exists = conn.execute(
+                    "SELECT 1 FROM sibila_picks WHERE event_id=? AND market_url=? AND placed=0 LIMIT 1",
+                    (_event_id, _mkt_url)
+                ).fetchone()
+            else:
+                # 2026-06-16: fallback dedup sin event_id/url (evita re-insertar mismo pick cada scan)
+                _exists = conn.execute(
+                    "SELECT 1 FROM sibila_picks WHERE match=? AND side=? AND market_type=? AND placed=0 AND date(ts)=date('now') LIMIT 1",
+                    (pick.get('match') or '', label, _mkt_type)
+                ).fetchone()
+            if _exists:
+                return
         conn.execute("""
             INSERT INTO sibila_picks
               (ts, sport, match, league, surface, level, market, side,
                prob_model, prob_book, edge, confidence, odds,
                shadow_stake, shadow_br_before,
-               placed, real_stake, bet_id)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               placed, real_stake, bet_id,
+               market_type, event_id, market_url)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             datetime.now().isoformat(),
             sport,
@@ -207,6 +230,9 @@ def record_pick(pick: dict, placed: bool = False, real_stake: float = None, bet_
             1 if placed else 0,
             round(real_stake, 4) if real_stake else None,
             bet_id,
+            _mkt_type,
+            str(_event_id),
+            _mkt_url,
         ))
         conn.commit()
         conn.close()
@@ -267,16 +293,20 @@ def resolve_pick(bet_id: str = None, match: str = None, label: str = None,
             pnl = round(stake * (odds - 1.0), 4)
         elif result_norm == 'LOSS':
             pnl = round(-stake, 4)
+        elif result_norm == 'HALF_WIN':   # 2026-06-16: handicaps asiaticos medio-ganados
+            pnl = round(stake * (odds - 1.0) / 2.0, 4)
+        elif result_norm == 'HALF_LOSS':
+            pnl = round(-stake / 2.0, 4)
         else:
             pnl = 0.0
             result_norm = 'VOID'
 
         clv = None
         if closing_odds and closing_odds > 1 and odds > 1:
-            clv = round(closing_odds / odds - 1.0, 4)
+            clv = round(odds / closing_odds - 1.0, 4)  # 2026-06-16: entry/closing
 
         vbr_before = row['shadow_br_before'] or _get_virtual_bankroll()
-        new_br = vbr_before + pnl
+        new_br = _get_virtual_bankroll() + pnl  # 2026-06-16: balance actual, no snapshot stale
         _set_virtual_bankroll(new_br)
 
         conn.execute("""
@@ -537,7 +567,7 @@ def resolve_fade_shadow_picks(match: str, bet_team: str, result: str,
                 pnl = 0.0
             clv = None
             if closing_odds and closing_odds > 1 and odds > 1:
-                clv = round(closing_odds / odds - 1.0, 4)
+                clv = round(odds / closing_odds - 1.0, 4)  # 2026-06-16: entry/closing
             conn.execute(
                 "UPDATE sibila_picks SET result=?, pnl=?, resolved_ts=?, "
                 "closing_odds=COALESCE(closing_odds, ?), clv=COALESCE(clv, ?) WHERE id=?",

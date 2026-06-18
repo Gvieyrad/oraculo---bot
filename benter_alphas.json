@@ -1,0 +1,11 @@
+{
+  "ts": 1781625026.6993384,
+  "alphas": {
+    "soccer": 0.6,
+    "football": 0.6,
+    "tennis": 0.3,
+    "mlb": 0.55,
+    "baseball": 0.8,
+    "default": 0.6
+  }
+}

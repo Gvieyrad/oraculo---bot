@@ -4,872 +4,852 @@
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Argentina on alert as 2026 World Cup opener rival Algeria defeat Netherlands 1-0 in friendly - World Soccer Talk",
-      "Emiliano Martínez tells Argentina fans he'll return from injury for World Cup opener - ESPN",
-      "Argentina’s Nicolas Paz provides injury update amid rumors of roster change before 2026 World Cup - bolavip.com",
-      "2026 World Cup Group J Preview: Argentina, Algeria, Austria &amp; Jordan - RotoWire"
+      "Argentina 'calm' with Lionel Messi, Emiliano Martínez and Julián Álvarez fit ahead of Algeria - ESPN",
+      "Will Lionel Messi play for Argentina vs. Algeria? Latest injury update - USA Today",
+      "Argentina begin World Cup defence against confident Algeria - Reuters",
+      "What time is Argentina vs. Algeria? Live stream, TV channel, kickoff schedule for World Cup 2026 match - Yahoo Sports"
     ],
     "key_players": [
       "Islam Slimani",
       "Riyad Mahrez"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Argentina": {
-    "attack_factor": 0.865,
+    "attack_factor": 0.7876,
     "defense_factor": 1.0,
     "concerns": [
       {
+        "player": "Julián Álvarez",
+        "status": "doubtful",
+        "confidence": 0.6,
+        "impact": "-12% attack",
+        "note": "1 hit(s): FIFA World Cup: Argentina receive triple boost as Messi, Alvarez return from inj"
+      },
+      {
         "player": "Lionel Messi",
         "status": "doubtful",
-        "confidence": 0.9,
-        "impact": "-14% attack",
-        "note": "5 hit(s): Messi sits out Argentina’s pre-World Cup friendly due to hamstring strain - Al J"
+        "confidence": 0.7,
+        "impact": "-10% attack",
+        "note": "2 hit(s): Will Lionel Messi play for Argentina vs. Algeria? Latest injury update - USA Tod"
       }
     ],
     "headlines": [
-      "2026 World Cup injuries tracker: Karl ruled out late for Germany - ESPN",
-      "Messi sits out Argentina’s pre-World Cup friendly due to hamstring strain - Al Jazeera",
-      "Lionel Scaloni doesn’t rule out more changes to Argentina’s World Cup squad after Leonardo Balerdi’s injury - World Soccer Talk",
-      "Scaloni gives Messi injury update before Argentina's first World Cup friendly - USA Today"
+      "Argentina 'calm' with Lionel Messi, Emiliano Martínez and Julián Álvarez fit ahead of Algeria - ESPN",
+      "Will Lionel Messi play for Argentina vs. Algeria? Latest injury update - USA Today",
+      "What time is Argentina vs. Algeria? Live stream, TV channel, kickoff schedule for World Cup 2026 match - Yahoo Sports",
+      "Argentina begin World Cup defence against confident Algeria - Reuters"
     ],
     "key_players": [
       "Julián Álvarez",
       "Lionel Messi",
       "Rodrigo De Paul"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Australia": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "2026 World Cup injuries tracker: Karl ruled out late for Germany - ESPN",
-      "Top 2026 World Stories: Injuries and Surprises - Sofascore",
-      "Final friendlies, injuries and heat concerns shape World Cup 2026 - MSN",
-      "FIFA World Cup 2026: Nine injured in shooting near England’s Kansas City base - Sportstar"
+      "World Cup Buzz: Canada Captain Alphonso Davies Remains Limited - FOX Sports",
+      "US upbeat on Pulisic’s fitness ahead of Australia game: ‘Christian will be ready, relax’ - The Guardian",
+      "Christian Pulisic injury news: USMNT teammates say star will ‘be ready’ for Australia - The Athletic - The New York Times",
+      "Christian Pulisic gets injury update before World Cup clash with Australia - Yahoo Sports"
     ],
     "key_players": [
       "Mathew Leckie",
       "Mitchell Duke"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Austria": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
+      "Austria vs Jordan at World Cup 2026: TV channel, how to watch, kick-off time, live stream, referee, predicted line-ups - ESPN",
+      "After 3 Years Away, A Surprise FIFA World Cup Comeback For Austrian Midfielder - FOX Sports",
       "Austria stick with World Cup squad after Baumgartner injury - Reuters",
-      "World Cup 2026: Austria's David Alaba passed fit but Christoph Baumgartner ruled out of tournament - BBC",
-      "Austria won't call up replacement to World Cup squad despite Christoph Baumgartner injury - Flashscore.com",
-      "Argentina rivals Austria suffer major World Cup blow as Christoph Baumgartner is ruled out with injury - World Soccer Talk"
+      "Austria: 2026 World Cup Squad, Fixtures and Schedule - Yahoo Sports"
     ],
     "key_players": [
       "Marcel Sabitzer",
       "Marko Arnautovic"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Belgium": {
-    "attack_factor": 0.7777,
-    "defense_factor": 0.952,
-    "concerns": [
-      {
-        "player": "Romelu Lukaku",
-        "status": "doubtful",
-        "confidence": 0.9,
-        "impact": "-16% attack",
-        "note": "4 hit(s): Romelu Lukaku in Belgium World Cup squad despite injury woes - ESPN"
-      },
-      {
-        "player": "Kevin De Bruyne",
-        "status": "doubtful",
-        "confidence": 0.6,
-        "impact": "-12% attack",
-        "note": "1 hit(s): Belgium name World Cup squad: Romelu Lukaku, Kevin De Bruyne included, several s"
-      }
-    ],
+    "attack_factor": 1.0,
+    "defense_factor": 1.0,
+    "concerns": [],
     "headlines": [
-      "Belgium World Cup 2026 Roster: Garcia's Squad and Kevin De Bruyne's Last World Cup - rg.org",
-      "FIFA World Cup 2026: What you need to know about Belgium - MSN",
-      "Romelu Lukaku in Belgium World Cup squad despite injury woes - ESPN",
-      "Belgium thumps Tunisia in final World Cup warm-up match, Lukaku continues injury comeback - Sportstar"
+      "2026 World Cup: What to know as Belgium, Egypt kick off play in Seattle - The Seattle Times",
+      "World Cup 2026: Belgium vs Egypt lineups – De Bruyne and De Ketelaere lead Serie A contingent - Yahoo Sports",
+      "Belgium vs Egypt at World Cup 2026: TV channel, how to watch, kick-off time, live stream, referee, predicted line-ups - ESPN",
+      "Lineups, uniforms, and referee for Belgium vs Egypt in 2026 World Cup debut - bolavip.com"
     ],
     "key_players": [
       "Romelu Lukaku",
       "Kevin De Bruyne",
       "Jeremy Doku"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Bosnia & Herzegovina": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "A team-by-team guide to the 2026 World Cup: What to expect and who to watch - The Athletic - The New York Times",
-      "World Cup predictions: Picking the winner in every game of the entire tournament - ESPN",
-      "Alphonso Davies provides injury update ahead of Canada’s 2026 World Cup debut vs Bosnia and Herzegovina - World Soccer Talk",
-      "Why Alphonso Davies missing 2026 World Cup opener is huge blow to host Canada - sportingnews.com"
+      "World Cup Buzz: Canada Captain Alphonso Davies Remains Limited - FOX Sports",
+      "Canada vs Bosnia &amp; Herzegovina in FIFA World Cup 2026: TV channel, how to watch, kick-off time, live stream, referee, predicted line-ups - ESPN",
+      "PREVIEW Soccer-Canada's World Cup dreams face first test as injury-hit hosts meet Bosnia - Reuters",
+      "World Cup odds, best bets for United States-Paraguay, Canada-Bosnia and Herzegovina - The Athletic - The New York Times"
     ],
     "key_players": [
       "Edin Džeko",
       "Miralem Pjanić"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Brazil": {
-    "attack_factor": 1.0,
+    "attack_factor": 0.928,
     "defense_factor": 1.0,
-    "concerns": [],
+    "concerns": [
+      {
+        "player": "Rodrygo",
+        "status": "doubtful",
+        "confidence": 0.6,
+        "impact": "-7% attack",
+        "note": "1 hit(s): Injury deprived me of chance to play so I am going to the World Cup to support B"
+      }
+    ],
     "headlines": [
-      "World Cup 2026: Man United-bound Ederson replaces injured Wesley for Brazil - BBC",
-      "Brazil Right Back Wesley To Miss World Cup To Injury, Éderson Named Replacement - FOX Sports",
-      "Brazil star OUT of World Cup after injury left him in tears on the pitch as incoming Man Utd signing Ederson called up - The Sun",
-      "Brazil World Cup 2026 team preview: Players to watch, group matches, squad - Al Jazeera"
+      "World Cup 2026: Injured Neymar to miss Morocco opener, confirms Carlo Ancelotti - BBC",
+      "Injury deprived me of chance to play so I am going to the World Cup to support Brazil | Rodrygo - The Guardian",
+      "World Cup injury tracker: Neymar, Yamal and Pulisic latest updates - The Independent",
+      "Neymar’s injury: Will he play at the 2026 World Cup? - Diario AS"
     ],
     "key_players": [
       "Vinícius Jr",
       "Rodrygo",
       "Lucas Paquetá"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Canada": {
-    "attack_factor": 1.0,
+    "attack_factor": 0.825,
     "defense_factor": 1.0,
-    "concerns": [],
+    "concerns": [
+      {
+        "player": "Alphonso Davies",
+        "status": "doubtful",
+        "confidence": 0.7,
+        "impact": "-18% attack",
+        "note": "2 hit(s): Jesse Marsch Reveals Alphonso Davies Injury Update Ahead of Canada’s World Cup O"
+      }
+    ],
     "headlines": [
-      "Yamal, Williams to be available for Spain’s opening World Cup match - Al Jazeera",
-      "Canada Loses Star Player to Injury on Eve of 2026 World Cup - Sports Illustrated",
-      "2026 World Cup injuries tracker: Karl ruled out late for Germany - ESPN",
-      "Canada’s Moise Bombito set to miss World Cup with leg injury: Who could replace him? - The Athletic - The New York Times"
+      "World Cup Buzz: Canada Captain Alphonso Davies Remains Limited - FOX Sports",
+      "Alphonso Davies still limited in practice as Canada prepares to face Qatar at the World Cup - The Washington Post",
+      "Canada ready to embrace World Cup pressure as injury clouds begin to clear - Reuters",
+      "Jesse Marsch Reveals Alphonso Davies Injury Update Ahead of Canada’s World Cup Opener - Sports Illustrated"
     ],
     "key_players": [
       "Alphonso Davies",
       "Jonathan David",
       "Tajon Buchanan"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Cape Verde": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Yamal, Williams to be available for Spain’s opening World Cup match - Al Jazeera",
-      "Lamine Yamal expected to be in contention for Spain’s World Cup opener, Luis de la Fuente says - The New York Times",
-      "Spain coach expects Lamine Yamal to be fit for World Cup opener - ESPN",
-      "Spain's Wonderkid Lamine Yamal Eyes World Cup Glory Despite Injury Fears - FOX Sports"
+      "Curacao… up? Re-ranking the 48 World Cup teams after day four of the tournament - The Athletic - The New York Times",
+      "Spain held to shock draw by Cape Verde in their World Cup opener - Al Jazeera",
+      "World Cup 2026: Debutants Cape Verde hold European champions Spain to shock draw - France 24",
+      "Why Lamine Yamal Isn’t Playing for Spain vs. Cabo Verde—2026 World Cup Opener - Sports Illustrated"
     ],
     "key_players": [
       "Garry Rodrigues",
       "Ryan Mendes"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Colombia": {
-    "attack_factor": 0.928,
-    "defense_factor": 0.952,
-    "concerns": [
-      {
-        "player": "James Rodríguez",
-        "status": "doubtful",
-        "confidence": 0.8,
-        "impact": "-12% attack",
-        "note": "3 hit(s): James Rodriguez injury update — Colombia star returns to club for training befor"
-      }
-    ],
+    "attack_factor": 1.0,
+    "defense_factor": 1.0,
+    "concerns": [],
     "headlines": [
-      "World Cup predictions: Picking the winner in every game of the entire tournament - ESPN",
-      "Lionel Scaloni doesn’t rule out more changes to Argentina’s World Cup squad after Leonardo Balerdi’s injury - World Soccer Talk",
-      "Inside Colombia's World Cup roster 2026: James Rodriguez set for last dance as Nestor Lorenzo's lynchpin - sportingnews.com",
-      "🤕Alarm in Colombia: one injury concern ahead of the World Cup - OneFootball"
+      "Uzbekistan vs Colombia Prediction: World Cup 2026 Preview &amp; Best Bets - Yahoo Sports",
+      "Brazil vs Morocco World Cup team news: Neymar, start time and how to watch - Al Jazeera",
+      "World Cup 2026 Power Rankings, 48 hours out: Who is No. 1? - ESPN",
+      "Every Major Injury Neymar Suffered at the FIFA World Cup - Yahoo Sports"
     ],
     "key_players": [
       "Luis Díaz",
       "James Rodríguez",
       "Jhon Córdoba"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Croatia": {
-    "attack_factor": 0.928,
-    "defense_factor": 0.952,
-    "concerns": [
-      {
-        "player": "Luka Modrić",
-        "status": "doubtful",
-        "confidence": 0.6,
-        "impact": "-12% attack",
-        "note": "1 hit(s): Luka Modric injury update: Croatia coach Zlatko Dalic speaks ahead of 2026 World"
-      }
-    ],
+    "attack_factor": 1.0,
+    "defense_factor": 1.0,
+    "concerns": [],
     "headlines": [
-      "2026 World Cup injuries tracker: Karl ruled out late for Germany - ESPN",
-      "Nine Injured in Shooting Near FIFA World Cup 2026 Base Camp in Kansas City - Open Magazine",
-      "FIFA World Cup 2026: England full squad list, predicted starting XI, injury status and more - The Times of India",
-      "World Cup 2026 Group L guide: Kane in prolific form, Croatia hero Modric set for swansong - The National"
+      "Saka says he is gambling on fitness but ‘ready to go’ for England’s date with Croatia - The Guardian",
+      "England XI vs Croatia: Confirmed team news, predicted lineup and injury latest for World Cup - London Evening Standard",
+      "2026 World Cup injuries tracker: Timber out for Netherlands - ESPN",
+      "Arsenal star Bukayo Saka provides injury update ahead of England's World Cup opener with Croatia - Metro.co.uk"
     ],
     "key_players": [
       "Luka Modrić",
       "Bruno Petković",
       "Ivan Perišić"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Curacao": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Scotland beat 10-man Curaçao but injury puts Billy Gilmour out of World Cup - The Guardian",
-      "Curacao name World Cup squad: Tahith Chong, Bacuna brothers included - The New York Times",
-      "Billy Gilmour: Scotland midfielder ruled out of World Cup with knee injury - BBC",
-      "Scotland midfielder Billy Gilmour ruled out of 2026 World Cup with knee injury - Flashscore.com"
+      "Curacao… up? Re-ranking the 48 World Cup teams after day four of the tournament - The Athletic - The New York Times",
+      "5 things to know: Japan unfazed by injuries, Curacao make debut against Germany - South China Morning Post",
+      "Germany begin World Cup with crushing win. But did Curacao fall foul of the hydration break? - The Athletic - The New York Times",
+      "Smallest countries in 2026 World Cup: How Curacao, Cape Verde compare to other tiny nations in history - Yahoo Sports"
     ],
     "key_players": [
       "Cuco Martina",
       "Leandro Bacuna"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Czech Republic": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Get your South Africa vs. Czech Republic World Cup 2026 tickets on Tickets MARCA - MARCA",
-      "Czech Republic's final World Cup squad includes 17-year-old Hugo Sochůrek - FOX Sports",
-      "Midfielder Hložek returns from injury in Czech Republic’s preliminary World Cup squad - AP News",
-      "Smicer Hopes for South Korea-Czech Draw - 조선일보"
+      "Bae doubtful for South Korea as World Cup opener with Czech Republic looms - Reuters",
+      "South Korea rally to beat Czechia 2-1 on World Cup opening day - Al Jazeera",
+      "South Korea vs Czechia Preview: Predicted Lineups, Team News &amp; Tactical Analysis | 2026 World Cup Group A - RotoWire",
+      "Injured players return to training for S. Korea ahead of Mexico match - NST Online"
     ],
     "key_players": [
       "Tomáš Souček",
       "Patrik Schick"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "DR Congo": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "World Cup 2026: DR Congo name West Ham's Aaron Wan-Bissaka and Newcastle United's Yoane Wissa in squad - BBC",
-      "DR Congo forced into World Cup squad change after Bushiri ruled out through injury - Flashscore.com",
-      "Are Jamaica out of 2026 World Cup after losing to DR Congo? - bolavip.com",
-      "Al Ahly's Moroccan star sidelined by injury ahead of World Cup - africanfootball.com"
+      "Portugal vs DR Congo Preview: Predicted Lineups, Team News &amp; Tactical Analysis | 2026 World Cup Group K - RotoWire",
+      "DR Congo World Cup 2026 team guide - The Guardian",
+      "DR Congo: 2026 World Cup Squad, Fixtures and Schedule - Yahoo Sports",
+      "Jan Paul van Hecke suffers eye injury during World Cup match against Japan - Crypto Briefing"
     ],
     "key_players": [
       "Cédric Bakambu",
       "Chancel Mbemba"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Ecuador": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Is Moises Caicedo playing today? Predicted lineups for Ecuador vs Guatemala in pre-World Cup 2026 internati... - World Soccer Talk",
-      "Supercomputer Predicts Germany’s 2026 World Cup Chances After Devastating Injury Blow - Sports Illustrated",
-      "Ecuador name World Cup squad: Moises Caicedo, Piero Hincapie and Willian Pacho called up - The New York Times",
-      "Medical cart carrying injured soccer player runs into teammate in insane scene in Ecuadorian league - Fox News"
+      "Injured referee Michael Oliver to miss his first 2026 World Cup match - ESPN",
+      "World Cup 2026: Ivory Coast vs Ecuador lineups – Kossounou and Ndicka on the bench as Yeboah leads Ecuador attack - Yahoo Sports",
+      "World Cup 2026: Injured referee Michael Oliver to miss Ivory Coast v Ecuador - BBC",
+      "Why is Jurrien Timber not participating at the 2026 World Cup with Netherlands? - bolavip.com"
     ],
     "key_players": [
       "Enner Valencia",
       "Moisés Caicedo"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Egypt": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Brazil Right Back Wesley To Miss World Cup To Injury, Éderson Named Replacement - FOX Sports",
-      "Brazil face roster change as Carlo Ancelotti loses Wesley for 2026 World Cup - bolavip.com",
-      "World Cup 2026: Man United-bound Ederson replaces injured Wesley for Brazil - BBC",
-      "Brazil says Neymar, sidelined by a calf injury, isn’t traveling for an exhibition game vs. Egypt - AP News"
+      "2026 World Cup: What to know as Belgium, Egypt kick off play in Seattle - The Seattle Times",
+      "Belgium vs Egypt at World Cup 2026: TV channel, how to watch, kick-off time, live stream, referee, predicted line-ups - ESPN",
+      "Why Romelu Lukaku isn't starting for Belgium in World Cup opener vs. Egypt - Yahoo Sports",
+      "Belgium vs Egypt FIFA World Cup 2026 Preview: Everything you need to know - Goal.com"
     ],
     "key_players": [
       "Mohamed Salah",
       "Omar Marmoush"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "England": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Nine injured in shooting near England’s World Cup base in Kansas City - The New York Times",
-      "2026 World Cup injuries tracker: Karl ruled out late for Germany - ESPN",
-      "World Cup 2026 squad lists: England, Scotland, Brazil, USA, Spain, France, Germany, Netherlands, Argentina, Portugal and more - Sky Sports",
-      "FIFA World Cup 2026: England full squad list, predicted starting XI, injury status and more - The Times of India"
+      "Tino Livramento expected to be ruled out of the World Cup with injury - The Telegraph",
+      "England defender Tino Livramento could miss World Cup 2026 after suffering fresh injury - BBC",
+      "Tino Livramento’s World Cup participation in doubt after fresh injury setback - Crypto Briefing",
+      "Injured Matt Garbett ruled out of New Zealand’s World Cup squad, replaced by Logan Rogerson - Orlando Sentinel"
     ],
     "key_players": [
       "Harry Kane",
       "Jude Bellingham",
       "Bukayo Saka"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "France": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "2026 World Cup injuries tracker: Karl ruled out late for Germany - ESPN",
-      "World Cup 2026 roster rules: when can teams replace injured players? - Diario AS",
-      "Mazraoui and Ezzalzouli injury concerns for Morocco ahead of World Cup opener - Flashscore.com",
-      "Supercomputer Predicts Germany’s 2026 World Cup Chances After Devastating Injury Blow - Sports Illustrated"
+      "World Cup Buzz: Canada Captain Alphonso Davies Remains Limited - FOX Sports",
+      "No thoughts of revenge as France start World Cup against Senegal, says Deschamps - Reuters",
+      "2026 World Cup injuries tracker: Timber out for Netherlands - ESPN",
+      "World Cup 2026 Starting Lineups, Notable Injury News and Potential Replacements - Bleacher Report"
     ],
     "key_players": [
       "Kylian Mbappé",
       "Antoine Griezmann",
       "Aurélien Tchouaméni"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Germany": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "2026 World Cup injuries tracker: Karl ruled out late for Germany - ESPN",
-      "Germany beat USA before World Cup but injuries cast shadow - dw.com",
-      "Deniz Undav reveals how Lennart Karl got injured in Germany training - Bavarian Football Works",
-      "Supercomputer Predicts Germany’s 2026 World Cup Chances After Devastating Injury Blow - Sports Illustrated"
+      "All the latest FIFA World Cup 2026 news - Daily updates and LIVE blog! - bundesliga.com",
+      "World Cup Buzz: Canada Captain Alphonso Davies Remains Limited - FOX Sports",
+      "2026 World Cup injuries tracker: Timber out for Netherlands - ESPN",
+      "Why Marc-André ter Stegen is missing the 2026 World Cup for Germany - World Soccer Talk"
     ],
     "key_players": [
       "Florian Wirtz",
       "Jamal Musiala",
       "Kai Havertz"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Ghana": {
-    "attack_factor": 0.904,
-    "defense_factor": 0.936,
-    "concerns": [
-      {
-        "player": "Mohammed Kudus",
-        "status": "doubtful",
-        "confidence": 0.8,
-        "impact": "-16% attack",
-        "note": "3 hit(s): Mohammed Kudus out of the 2026 World Cup | Ghana loses its star to injury - beIN"
-      }
-    ],
+    "attack_factor": 1.0,
+    "defense_factor": 1.0,
+    "concerns": [],
     "headlines": [
-      "2026 World Cup injuries tracker: Karl ruled out late for Germany - ESPN",
-      "Nine Injured in Shooting Near FIFA World Cup 2026 Base Camp in Kansas City - Open Magazine",
-      "Can Ghana shine at the 2026 FIFA World Cup? - dw.com",
-      "Ghana name World Cup squad after injuries force delay - Reuters"
+      "World Cup 2026: Ghana's Thomas Partey will miss first match after being denied entry into Canada - Yahoo Sports",
+      "2026 World Cup injuries tracker: Timber out for Netherlands - ESPN",
+      "Ghana name World Cup squad after injuries force delay - Reuters",
+      "World Cup 2026 news and live updates - USA, Canada and Mexico latest including Trump, tickets and fans - Sky Sports"
     ],
     "key_players": [
       "Jordan Ayew",
       "Mohammed Kudus"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Haiti": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Scotland at the 2026 World Cup: Schedule, results, how to watch, news, analysis, injuries, more - ESPN",
-      "Argentina to make roster change with Balerdi out of 2026 World Cup: Who could join Messi’s squad? - bolavip.com",
-      "Messi injury scare, Haiti's World Cup return. Check top Miami soccer stories - Miami Herald",
-      "Haiti suffer blow ahead of facing Scotland at World Cup as Steve Clarke urges caution - The Scotsman"
+      "Brazil Prepared to Keep Neymar Sidelined for Group Matches to Prevent Re-Injury - FOX Sports",
+      "New Zealand's Garbett ruled out of World Cup with injury - Reuters",
+      "Brazil Gets Bad News on Neymar Playing in World Cup 2026 - heavy.com",
+      "Haiti vs Scotland at World Cup 2026: TV channel, how to watch, kick-off time, live stream, referee, predicted line-ups - ESPN"
     ],
     "key_players": [
       "Frantzdy Pierrot",
       "James Léandre"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Iran": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Yamal, Williams to be available for Spain’s opening World Cup match - Al Jazeera",
-      "9 injured in shooting near England's World Cup base camp in Kansas City - Firstpost",
-      "Injury concerns for Morocco ahead of their World Cup opener - The Straits Times",
-      "FIFA confirms 2026 World Cup base camps as Iran shifts to Mexico - MSN"
+      "Iran vs New Zealand: World Cup team news, start, lineups and where to watch - Al Jazeera",
+      "England defender Tino Livramento could miss World Cup 2026 after suffering fresh injury - BBC",
+      "Inside Iran’s soccer team: A complete roster and more about 2026 World Cup squad - Yahoo Sports",
+      "Neymar suffers injury setback: When will Brazil star return? - Diario AS"
     ],
     "key_players": [
       "Sardar Azmoun",
       "Mehdi Taremi"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Iraq": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Zidane Iqbal on Iraq's historic World Cup return: 'It was written in the stars' - The National",
-      "Makenzie Replaces Injured Yahya in Iraq’s World Cup Squad - Asharq Al-Awsat | Explore World News Today",
-      "Spain at World Cup 2026: Players to watch, group matches and squad - Al Jazeera",
-      "Why isn’t Lamine Yamal playing for Spain vs Iraq today? Injury update explained - Diario AS"
+      "Makenzie replaces injured Yahya in Iraq's World Cup squad - Reuters",
+      "Iraq vs Norway Preview: Predicted Lineups, Team News &amp; Tactical Analysis | 2026 World Cup Group I - RotoWire",
+      "Norway’s Odegaard dismisses injury concerns before Iraq opener - Crypto Briefing",
+      "Iraq vs Norway prediction, tips and odds | World Cup 2026 - TNT Sports"
     ],
     "key_players": [
       "Aymen Hussein",
       "Amjed Attwan"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Ivory Coast": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Guide to Group E at World Cup 2026 - The New York Times",
-      "Evann Guessand selected in Ivory Coast squad for 2026 World Cup - roundtable.io",
-      "Operi profits from Akpa misfortune - 2026 FIFA World Cup - Cote d'Ivoire - africanfootball.com",
-      "S. Korea taking on Ivory Coast to kick off World Cup year amid injuries, slumps - Yonhap News Agency"
+      "Côte d’Ivoire World Cup 2026 Odds, Predictions &amp; Best Bets - Juvefc.com",
+      "Ivory Coast vs Ecuador Preview: Predicted Lineups, Team News &amp; Tactical Analysis | 2026 World Cup Group E - RotoWire",
+      "Ivory Coast vs Ecuador FIFA World Cup 2026 Preview: Everything you need to know - Goal.com",
+      "Cote d'Ivoire vs Ecuador World Cup 2026 Predictions and Picks - Total Football Analysis"
     ],
     "key_players": [
       "Sébastien Haller",
       "Nicolas Pépé",
       "Franck Kessié"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Japan": {
-    "attack_factor": 0.892,
-    "defense_factor": 1.0,
+    "attack_factor": 0.8378,
+    "defense_factor": 0.968,
     "concerns": [
       {
-        "player": "Kaoru Mitoma",
+        "player": "Takefusa Kubo",
         "status": "doubtful",
         "confidence": 0.6,
-        "impact": "-11% attack",
-        "note": "1 hit(s): Mitoma fails to make Japan’s 2026 World Cup squad due to hamstring injury - Al J"
+        "impact": "-12% attack",
+        "note": "1 hit(s): Fans Target Dumfries Over Kubo Injury - 조선일보"
+      },
+      {
+        "player": "Wataru Endō",
+        "status": "injured",
+        "confidence": 0.8,
+        "impact": "-8% attack",
+        "note": "3 hit(s): FIFA World Cup 2026: Japan dealt gut punch as Samurai Blue lose captain Endo Wat"
       }
     ],
     "headlines": [
-      "2026 World Cup injuries tracker: Karl ruled out late for Germany - ESPN",
-      "Japan Sets Championship Goal Amid Injuries, Historical Struggles - 조선일보",
-      "Top 2026 World Stories: Injuries and Surprises - Sofascore",
-      "FIFA World Cup 2026: Injury concerns for Morocco ahead of opener vs Brazil - Sportstar"
+      "World Cup Buzz: Canada Captain Alphonso Davies Remains Limited - FOX Sports",
+      "FIFA World Cup 2026: Japan dealt gut punch as Samurai Blue lose captain Endo Wataru to foot injury - olympics.com",
+      "Japan’s Wataru Endo retires after injury ends World Cup 2026 dream - Al Jazeera",
+      "Japan captain Wataru Endo out of World Cup with injury, announces international retirement - ESPN"
     ],
     "key_players": [
       "Takefusa Kubo",
       "Kaoru Mitoma",
       "Wataru Endō"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Jordan": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
+      "Austria vs Jordan at World Cup 2026: TV channel, how to watch, kick-off time, live stream, referee, predicted line-ups - ESPN",
       "Jordan World Cup 2026 preview: Players to watch, group matches and squad - Al Jazeera",
-      "Jordan's Sabra ruled out of World Cup with ankle injury - Reuters",
-      "World Cup 2026: Jordan's final 26-man squad includes Mousa Al-Tamari - BBC",
-      "Jordan at FIFA World Cup 2026 — Ibrahim Sabra ruled out of tournament with injury - Sportstar"
+      "Jordan: 2026 World Cup Squad, Fixtures and Schedule - Yahoo Sports",
+      "Austria vs Jordan prediction, tips and odds | World Cup 2026 - TNT Sports"
     ],
     "key_players": [
       "Yazan Al-Naimat",
       "Ahmad Hayel"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Mexico": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Brazil Right Back Wesley To Miss World Cup To Injury, Éderson Named Replacement - FOX Sports",
-      "A team-by-team guide to the 2026 World Cup: What to expect and who to watch - The Athletic - The New York Times",
-      "Can resilient captain Edson Álvarez lead Mexico to the elusive World Cup quarterfinals? - Los Angeles Times",
-      "World Cup predictions: Picking the winner in every game of the entire tournament - ESPN"
+      "World Cup Buzz: Canada Captain Alphonso Davies Remains Limited - FOX Sports",
+      "Will Lionel Messi play for Argentina vs. Algeria? Latest injury update - USA Today",
+      "Years after skull fracture, Mexico’s Raúl Jiménez has his long-awaited World Cup star moment - NBC News",
+      "World Cup 2026: Raul Jimenez completes comeback in Mexico win - BBC"
     ],
     "key_players": [
       "Santiago Giménez",
       "Hirving Lozano",
       "Edson Álvarez"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Morocco": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
-    "headlines": [],
+    "headlines": [
+      "Brazil vs Morocco at World Cup 2026: TV channel, how to watch, kick-off time, live stream, predicted line-ups - ESPN",
+      "Morocco forced into two injury changes ahead of World Cup opener - Reuters",
+      "Vinicius drags low-key Brazil level against dominant Morocco at World Cup - Al Jazeera",
+      "Brazil Gets Bad News on Neymar Playing in World Cup 2026 - heavy.com"
+    ],
     "key_players": [
       "Youssef En-Nesyri",
       "Hakim Ziyech",
       "Sofyan Amrabat"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Netherlands": {
-    "attack_factor": 1.0,
+    "attack_factor": 0.94,
     "defense_factor": 1.0,
-    "concerns": [],
+    "concerns": [
+      {
+        "player": "Memphis Depay",
+        "status": "doubtful",
+        "confidence": 0.6,
+        "impact": "-6% attack",
+        "note": "1 hit(s): Netherlands Injury Report vs. Japan Today: Depay, Verbruggen, Kluivert Updates -"
+      }
+    ],
     "headlines": [
-      "The Netherlands are the World Cup 2026 dark horses people aren't talking about enough - Yahoo Sports",
-      "Netherlands World Cup 2026 Roster: Koeman's Squad and Xavi Simons Update - rg.org",
-      "World Cup 2026 squad lists: England, Scotland, Brazil, USA, Spain, France, Germany, Netherlands, Argentina, Portugal and more - Sky Sports",
-      "Fifa World Cup 2026: What you need to know about Netherlands - BBC"
+      "Who Could Miss Netherlands vs Japan? Latest Injury News and Fitness Updates - heavy.com",
+      "Netherlands hit with World Cup injury crisis ahead of showdown vs. Japan - USA Today",
+      "Netherlands Injury Report vs. Japan Today: Depay, Verbruggen, Kluivert Updates - PrizePicks",
+      "Why Xavi Simons isn't playing for Netherlands at the World Cup - Yahoo Sports"
     ],
     "key_players": [
       "Cody Gakpo",
       "Virgil van Dijk",
       "Memphis Depay"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "New Zealand": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Nine injured in shooting near England’s World Cup base in Kansas City - The New York Times",
-      "Brazil Call Up Ederson After Wesley World Cup Injury - rg.org",
-      "World Cup predictions: Picking the winner in every game of the entire tournament - ESPN",
-      "World Cup 2026: England &amp; Thomas Tuchel must get serious after New Zealand game - BBC"
+      "New Zealand's Garbett ruled out of World Cup with injury - Reuters",
+      "Injured Matt Garbett ruled out of New Zealand's World Cup squad, replaced by Logan Rogerson - The Washington Post",
+      "Iran vs New Zealand: World Cup team news, start, lineups and where to watch - Al Jazeera",
+      "New Zealand Football Federation confirms Matt Garbett out of World Cup due to injury - Crypto Briefing"
     ],
     "key_players": [
       "Chris Wood",
       "Clayton Lewis"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Norway": {
-    "attack_factor": 0.9352,
-    "defense_factor": 0.9568,
-    "concerns": [
-      {
-        "player": "Martin Ødegaard",
-        "status": "doubtful",
-        "confidence": 0.6,
-        "impact": "-11% attack",
-        "note": "1 hit(s): Arsenal star Martin Odegaard details knee injury truth as Norway boss sent messa"
-      }
-    ],
+    "attack_factor": 1.0,
+    "defense_factor": 1.0,
+    "concerns": [],
     "headlines": [
-      "Mazraoui and Ezzalzouli injury concerns for Morocco ahead of World Cup opener - Flashscore.com",
-      "Injury Concerns Hit Morocco Days Before World Cup Clash With Brazil - Morocco World News",
-      "World Cup predictions: Picking the winner in every game of the entire tournament - ESPN",
-      "Ezzalzouli could miss Morocco’s World Cup group-stage matches after knee injury in Norway friendly - HESPRESS English - Morocco News"
+      "World Cup 2026: Norway prepares for first appearance in 28 years - Yahoo Sports",
+      "Morocco cut injured Aguerd, Ezzalzouli in last-minute World Cup reshuffle - ESPN",
+      "Norway’s Odegaard dismisses injury concerns before Iraq opener - Crypto Briefing",
+      "Ezzalzouli could miss Morocco’s World Cup group-stage matches after knee injury in Norway friendly - MSN"
     ],
     "key_players": [
       "Erling Haaland",
       "Martin Ødegaard"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Panama": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Nine Injured in Shooting Near FIFA World Cup 2026 Base Camp in Kansas City - Open Magazine",
-      "Neymar’s status for Brazil’s friendlies against Panama and Egypt emerges amid injury woes ahead of 2026 World Cup - MSN",
-      "England at the 2026 World Cup: Schedule, results, how to watch, news, analysis, injuries, more - ESPN",
-      "World Cup 2026: Injured Brazil forward Neymar could miss start of competition - BBC"
+      "Panama: 2026 World Cup Squad, Fixtures and Schedule - Yahoo Sports",
+      "What happens if a referee gets injured during a 2026 World Cup game? - bolavip.com",
+      "Panama to Win World Cup Odds: 2026 Predictions and Value Bets - Juvefc.com",
+      "Nine Injured in Shooting Near FIFA World Cup 2026 Base Camp in Kansas City - Open Magazine"
     ],
     "key_players": [
       "Ismael Díaz",
       "Rolando Blackburn"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Paraguay": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Paraguay’s Julio Enciso suffers injury one week before World Cup opener vs. USMNT - The Athletic - The New York Times",
-      "World Cup 2026: Paraguay attacker Julio Enciso injured in warm-up friendly - BBC",
-      "USMNT’s First World Cup Opponent Suffers Injury Blow to Star Player - Sports Illustrated",
-      "Paraguay pain: Star player’s World Cup in doubt - Diario AS"
+      "USMNT claims Christian Pulisic is ‘good’ despite not being full World Cup practice participant - New York Post",
+      "Pulisic injury update after USA star was forced off at half-time vs Paraguay - the-sun.com",
+      "USA’s Pulisic shrugs off injury scare after 4-1 World Cup win over Paraguay - Al Jazeera",
+      "Christian Pulisic injury update: USMNT star shares why he left World Cup game - USA Today"
     ],
     "key_players": [
       "Miguel Almirón",
       "Antonio Sanabria"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Portugal": {
-    "attack_factor": 0.92,
+    "attack_factor": 1.0,
     "defense_factor": 1.0,
-    "concerns": [
-      {
-        "player": "Cristiano Ronaldo",
-        "status": "doubtful",
-        "confidence": 0.8,
-        "impact": "-8% attack",
-        "note": "3 hit(s): Cristiano Ronaldo’s Injury More Serious Than Expected as Concerns Grow Months Be"
-      }
-    ],
+    "concerns": [],
     "headlines": [
-      "When is Cristiano Ronaldo’s next game? Portugal star preparing for 2026 World Cup debut - World Soccer Talk",
-      "Argentina to make roster change with Balerdi out of 2026 World Cup: Who could join Messi’s squad? - bolavip.com",
-      "FIFA 2026 World Cup updates: Full list of confirmed players from Portugal, predicted starting XI, injury - The Times of India",
-      "Cristiano Ronaldo’s Injury More Serious Than Expected as Concerns Grow Months Before the 2026 World Cup - beIN SPORTS"
+      "The marquee snubs and injury absences from the 2026 World Cup - NBC 5 Chicago",
+      "Portugal vs DR Congo Preview: Predicted Lineups, Team News &amp; Tactical Analysis | 2026 World Cup Group K - RotoWire",
+      "Portugal vs. DR Congo Prediction: 2026 FIFA World Cup Preview and Pick - VSiN",
+      "When Does Portugal Play at the 2026 FIFA World Cup? Full Fixtures, Dates &amp; Kick-Off Times - Yahoo Sports"
     ],
     "key_players": [
       "Rafael Leão",
       "Bernardo Silva",
       "Cristiano Ronaldo"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Qatar": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Injuries and omissions: Who is not going to the 2026 FIFA World Cup? - Yahoo Sports",
-      "USA's Last Pre-World Cup Test Comes Amid Injury Uncertainty For A Key Defender - FOX Sports",
-      "Argentina to make roster change with Balerdi out of 2026 World Cup: Who could join Messi’s squad? - bolavip.com",
-      "Fifa World Cup 2026: What you need to know about Canada - BBC"
+      "Alphonso Davies still limited in practice as Canada prepares to face Qatar at the World Cup - The Washington Post",
+      "Qatar net late against Switzerland to secure historic first World Cup point - Al Jazeera",
+      "Qatar claim first-ever World Cup point in injury time as Switzerland rue missed chances - Flashscore.com",
+      "Why isn’t Takumi Minamino playing for Japan in 2026 World Cup? - bolavip.com"
     ],
     "key_players": [
       "Akram Afif",
       "Almoez Ali"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Republic of Korea": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "A team-by-team guide to the 2026 World Cup: What to expect and who to watch - The Athletic - The New York Times",
-      "World Cup predictions: Picking the winner in every game of the entire tournament - ESPN",
-      "2026 World Cup Group A preview, predictions - Yahoo Sports",
-      "Japan Sets Championship Goal Amid Injuries, Historical Struggles - 조선일보"
+      "World Cup 2026 schedule: Here's how to watch every match for free - Yahoo Sports",
+      "Blog: The FC Bayern players at World Cup 2026 - FC Bayern",
+      "Will Lionel Messi play for Argentina vs. Algeria? Latest injury update - USA Today",
+      "South Korea rally to beat Czechia 2-1 on World Cup opening day - Al Jazeera"
     ],
     "key_players": [
       "Son Heung-min",
       "Lee Kang-in"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Saudi Arabia": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Spain coach expects Lamine Yamal to be fit for World Cup opener - ESPN",
-      "World Cup 2026 Group H guide: Yamal injury worries Spain, Saudi Arabia make big call on coach - The National",
-      "Fifa World Cup 2026: What you need to know about Spain - BBC",
-      "'I cried into my parents' arms' - Chelsea's Estevao Willian opens up on heartbreaking injury that denied him World Cup 'dream' with Brazil - Goal.com"
+      "World Cup Buzz: Canada Captain Alphonso Davies Remains Limited - FOX Sports",
+      "Gimenez benched, Araujo not in squad as Uruguay take on Saudi Arabia - Reuters",
+      "Saudi Arabia vs Uruguay at World Cup 2026: TV channel, how to watch, kick-off time, live stream, referee, predicted line-ups - ESPN",
+      "Why Sebastian Caceres is wearing a mask in Uruguay vs Saudi Arabia at 2026 World Cup - bolavip.com"
     ],
     "key_players": [
       "Salem Al-Dawsari",
       "Firas Al-Buraikan"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Scotland": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Scotland at the 2026 World Cup: Schedule, results, how to watch, news, analysis, injuries, more - ESPN",
-      "Scotland pull out of behind-closed-doors friendly with Norway - Flashscore.com",
-      "Meet Scotland's 2026 World Cup squad: All 26 players picked by Steve Clarke and why - ESPN",
-      "World Cup 2026: Man United-bound Ederson replaces injured Wesley for Brazil - BBC"
+      "'My Scotland career was over': Craig Gordon on journey from double leg-break to 2026 World Cup's oldest player - ESPN",
+      "Neymar’s injury: Will he play at the 2026 World Cup? - Diario AS",
+      "World Cup injury tracker: Lamine Yamal, Neymar and Christian Pulisic latest updates - Yahoo Sports",
+      "World Cup 2026 news and live updates - USA, Canada and Mexico latest including Trump, tickets and fans - Sky Sports"
     ],
     "key_players": [
       "Andy Robertson",
       "Scott McTominay",
       "Che Adams"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Senegal": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "USA's Last Pre-World Cup Test Comes Amid Injury Uncertainty For A Key Defender - FOX Sports",
-      "2026 World Cup: Are US stadiums unprepared? Viral Senegal ball bounce clip sparks pitch fears - Truth or Fake - France 24",
-      "Chris Richards out for Senegal friendly, USMNT World Cup status remains uncertain - The Athletic - The New York Times",
-      "Idrissa Gueye Returns For Senegal Ahead Of World Cup Opener - Africa Top Sports"
+      "No thoughts of revenge as France start World Cup against Senegal, says Deschamps - Reuters",
+      "Experts update France vs. Senegal predictions after key William Saliba injury update - Syracuse.com",
+      "France vs Senegal at World Cup 2026: TV channel, how to watch, kick-off time, live stream, referee, predicted line-ups - ESPN",
+      "France vs Senegal World Cup preview for MetLife Stadium match - Bergen Record"
     ],
     "key_players": [
       "Sadio Mané",
       "Nicolas Jackson",
       "Idrissa Gana Gueye"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "South Africa": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "2026 World Cup injuries tracker: Karl ruled out late for Germany - ESPN",
-      "A team-by-team guide to the 2026 World Cup: What to expect and who to watch - The Athletic - The New York Times",
-      "Mazraoui and Ezzalzouli injury concerns for Morocco ahead of World Cup opener - Flashscore.com",
-      "Japan Sets Championship Goal Amid Injuries, Historical Struggles - 조선일보"
+      "World Cup Buzz: Canada Captain Alphonso Davies Remains Limited - FOX Sports",
+      "Why Edinson Cavani isn’t playing for Uruguay at the 2026 World Cup - bolavip.com",
+      "Mexico vs. South Africa - Kick-off time, team news, how to watch FIFA World Cup opener - ESPN",
+      "Neymar ruled out of Brazil's World Cup 2026 opener against Morocco - olympics.com"
     ],
     "key_players": [
       "Percy Tau",
       "Lyle Foster"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Spain": {
-    "attack_factor": 0.84,
+    "attack_factor": 1.0,
     "defense_factor": 1.0,
-    "concerns": [
-      {
-        "player": "Lamine Yamal",
-        "status": "doubtful",
-        "confidence": 0.8,
-        "impact": "-16% attack",
-        "note": "3 hit(s): Spain's Wonderkid Lamine Yamal Eyes World Cup Glory Despite Injury Fears - FOX S"
-      }
-    ],
+    "concerns": [],
     "headlines": [
-      "Yamal, Williams to be available for Spain’s opening World Cup match - Al Jazeera",
-      "Lamine Yamal expected to be in contention for Spain’s World Cup opener, Luis de la Fuente says - The New York Times",
-      "2026 World Cup injuries tracker: Karl ruled out late for Germany - ESPN",
-      "Spain's Wonderkid Lamine Yamal Eyes World Cup Glory Despite Injury Fears - FOX Sports"
+      "World Cup Buzz: Canada Captain Alphonso Davies Remains Limited - FOX Sports",
+      "Lamine Yamal, Nico Williams set for limited role in Spain’s World Cup opener – Luis de la Fuente - The New York Times",
+      "Why Lamine Yamal Isn’t Playing for Spain vs. Cabo Verde—2026 World Cup Opener - Sports Illustrated",
+      "Lamine Yamal reacts to Spain’s disappointing draw with Cape Verde at World Cup 2026 - Yahoo Sports"
     ],
     "key_players": [
       "Lamine Yamal",
       "Pedri",
       "Álvaro Morata"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Sweden": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "FC Dallas defender Herman Johansson makes Sweden's 2026 World Cup roster - MLSsoccer.com",
-      "Sweden's injured Holm misses World Cup, Johansson called up - Reuters",
-      "11 EFL players to look out for at the World Cup - BBC",
-      "Who are the star players missing from World Cup 2026? - Al Jazeera"
+      "2026 World Cup: Tunisia manager Sabri Lamouchi expected to be fired after 5-1 loss to Sweden - Yahoo Sports",
+      "Why Dejan Kulusevski isn’t playing for Sweden at the 2026 World Cup - bolavip.com",
+      "World Cup 2026 team sack manager after only one game - The Independent",
+      "Seven things for Tottenham Hotspur fans to look out for at the 2026 World Cup - The Athletic - The New York Times"
     ],
     "key_players": [
       "Victor Lindelöf",
       "Alexander Isak",
       "Dejan Kulusevski"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Switzerland": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Noah Okafor makes injury comeback with Switzerland minutes before World Cup - OneFootball",
-      "Granit Xhaka to captain Switzerland as World Cup squad revealed - ESPN",
-      "2026 World Cup Group B Preview: Canada, Bosnia, Qatar &amp; Switzerland - RotoWire",
-      "Sweden's injured Holm misses World Cup, Johansson called up - Reuters"
+      "Qatar net late against Switzerland to secure historic first World Cup point - Al Jazeera",
+      "Switzerland devastated as 'proud' Qatar win 1st World Cup point - ESPN",
+      "Qatar claim first-ever World Cup point in injury time as Switzerland rue missed chances - Flashscore.com",
+      "Why Xherdan Shaqiri isn't playing for Switzerland at the World Cup - Yahoo Sports"
     ],
     "key_players": [
       "Breel Embolo",
       "Granit Xhaka",
       "Xherdan Shaqiri"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Tunisia": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Fifa World Cup 2026: What you need to know about Tunisia - BBC",
-      "Tunisia 2026 World Cup Preview: Overlooked But Won’t Go Down Without a Fight - Sports Illustrated",
-      "Belgium thumps Tunisia in final World Cup warm-up match, Lukaku continues injury comeback - Sportstar",
-      "2026 World Cup Group F Preview: Netherlands, Japan, Sweden &amp; Tunisia - RotoWire"
+      "World Cup Buzz: Canada Captain Alphonso Davies Remains Limited - FOX Sports",
+      "2026 World Cup: Tunisia manager Sabri Lamouchi expected to be fired after 5-1 loss to Sweden - Yahoo Sports",
+      "Fans Target Dumfries Over Kubo Injury - 조선일보",
+      "Tunisia’s FIFA ranking: What’s their position during the 2026 World Cup? - bolavip.com"
     ],
     "key_players": [
       "Wahbi Khazri",
       "Youssef Msakni"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Turkey": {
-    "attack_factor": 0.88,
+    "attack_factor": 1.0,
     "defense_factor": 1.0,
-    "concerns": [
-      {
-        "player": "Arda Güler",
-        "status": "doubtful",
-        "confidence": 0.6,
-        "impact": "-12% attack",
-        "note": "1 hit(s): Arda Guler injury is huge blow for Real Madrid and USMNT World Cup rival Turkey "
-      }
-    ],
+    "concerns": [],
     "headlines": [
-      "USA’s World Cup Group D rivals Turkey and Paraguay are battling injury worries - The Athletic - The New York Times",
-      "Arda Guler injury is huge blow for Real Madrid and USMNT World Cup rival Turkey - USA Today",
-      "Kenan Yildiz is out with an injury: Turkey fears for the World Cup prospects of the Juventus star - Goal.com",
-      "Turkey Boosted as Brighton Star Ferdi Kadioglu Races to Full Fitness for World Cup Opener - turkish-football.com"
+      "Guler leads Turkey back to World Cup promised land in Australia opener - Reuters",
+      "World Cup Group D view from Turkey: young team can shake off ‘dark horses’ tag | Emre Sarigul - The Guardian",
+      "Turkey World Cup 2026 Odds, Predictions &amp; Best Bets - Yahoo Sports",
+      "Turkey’s Vincenzo Montella says ‘no excuses’ if team fail to shine in USMNT’s World Cup group - The New York Times"
     ],
     "key_players": [
       "Hakan Çalhanoğlu",
       "Arda Güler",
       "Kerem Aktürkoğlu"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "USA": {
-    "attack_factor": 1.0,
+    "attack_factor": 0.824,
     "defense_factor": 1.0,
-    "concerns": [],
+    "concerns": [
+      {
+        "player": "Christian Pulisic",
+        "status": "doubtful",
+        "confidence": 0.8,
+        "impact": "-18% attack",
+        "note": "3 hit(s): Christian Pulisic injury news: USMNT teammates say star will ‘be ready’ for Aust"
+      }
+    ],
     "headlines": [
-      "2026 World Cup injuries tracker: Karl ruled out late for Germany - ESPN",
-      "USWNT Visits World Cup Hosts for Two Friendlies - U.S. Soccer",
-      "USMNT’s Miles Robinson tells CNN he is ‘honored’ for a second World Cup chance - CNN",
-      "Why Chris Richards’ ankle is the single biggest World Cup question looming over the USMNT - The New York Times"
+      "World Cup Buzz: Canada Captain Alphonso Davies Remains Limited - FOX Sports",
+      "USMNT claims Christian Pulisic is ‘good’ despite not being full World Cup practice participant - New York Post",
+      "2026 World Cup Predictions - Silver Bulletin",
+      "Christian Pulisic injury news: USMNT teammates say star will ‘be ready’ for Australia - The Athletic - The New York Times"
     ],
     "key_players": [
       "Christian Pulisic",
       "Gio Reyna",
       "Tim Weah"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Uruguay": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Barcelona star Ronald Araujo suffers injury before World Cup 2026 as Uruguay issue statement - MSN",
-      "2026 World Cup injuries tracker: Karl ruled out late for Germany - ESPN",
-      "Barcelona star Ronald Araujo suffers injury before World Cup 2026 as Uruguay issue statement - Barca Blaugranes",
-      "World Cup 2026 injury absences: Which key players will miss out? - Yahoo Sports"
+      "Soccer-Bielsa takes blame for Uruguay injuries ahead of World Cup but defends protocols - Reuters",
+      "Saudi Arabia vs Uruguay at World Cup 2026: TV channel, how to watch, kick-off time, live stream, referee, predicted line-ups - ESPN",
+      "Why Sebastian Caceres is wearing a mask in Uruguay vs Saudi Arabia at 2026 World Cup - bolavip.com",
+      "Saudi Arabia vs. Uruguay Prediction, Picks, Lineups for World Cup 2026 - PrizePicks"
     ],
     "key_players": [
       "Darwin Núñez",
       "Federico Valverde",
       "Luis Suárez"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   },
   "Uzbekistan": {
     "attack_factor": 1.0,
     "defense_factor": 1.0,
     "concerns": [],
     "headlines": [
-      "Canada Beats Uzbekistan 2-0 In World Cup Friendly - rg.org",
-      "World Cup 2026 squads confirmed as legends chase history - MSN",
-      "Which countries are making their World Cup debut in 2026? - bolavip.com",
-      "Uzbekistan Discover World Cup 2026 Opponents - Kursiv Media Казахстан: последние новости Казахстана и мира"
+      "Uzbekistan vs Colombia Prediction: World Cup 2026 Preview &amp; Best Bets - Yahoo Sports",
+      "Netherlands Injury Report vs. Japan Today: Depay, Verbruggen, Kluivert Updates - PrizePicks",
+      "Uzbekistan: 2026 World Cup Squad, Fixtures and Schedule - Yahoo Sports",
+      "Dutch beat Uzbekistan but lose keeper before World Cup - DutchNews.nl"
     ],
     "key_players": [
       "Eldor Shomurodov",
       "Jaloliddin Masharipov"
     ],
-    "updated": "2026-06-08 12:00"
+    "updated": "2026-06-18 12:15"
   }
 }
