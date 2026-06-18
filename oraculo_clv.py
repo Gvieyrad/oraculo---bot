@@ -676,6 +676,16 @@ class CLVOracle:
                     if r.status_code != 200:
                         continue
                     data = r.json()
+                    # Guard pre-game: una vez iniciado el evento los precios son in-play
+                    # (F5 ML se mueve violento con cada carrera) -> seria basura, no cierre.
+                    _ct = str(data.get("cutoffTime", "") or "")
+                    if _ct:
+                        try:
+                            _ko = _dt.fromisoformat(_ct.replace("Z", "+00:00"))
+                            if _dt.now(_ko.tzinfo) >= _ko:
+                                continue
+                        except Exception:
+                            pass
                     price_map = {}
                     for mkt in data.get('markets', {}).values():
                         for sub in mkt.get('submarkets', {}).values():
