@@ -63,3 +63,5 @@ calibration_data.json
 learned_rules.json
 _*.py
 oraculo_config.json
+*.bak.*
+*.bak_*
