@@ -32,6 +32,14 @@ CANTERA = [
         'days': 90,
     },
     {
+        'name': 'Tennis Total Games',
+        'query': "market_type='tennis_total_games'",
+        'threshold': 40,
+        'killed': True,
+        'note': 'DESCARTADO 2026-06-19 backtest: no predictivo (corr=0.04, dir 48.7%%, bias +1.7). No perseguir.',
+        'days': 90,
+    },
+    {
         'name': 'NBA',
         'query': "sport='basketball' AND league LIKE '%nba%' AND league NOT LIKE '%wnba%'",
         'threshold': 50,
