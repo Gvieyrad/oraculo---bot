@@ -110,7 +110,7 @@ WC_MIN_EDGE = 0.10    # 10% — conservative; result_1x2 historical ROI -28.2%
 WC_MIN_CONF = 0.62    # 2026-06-12: raised from 0.55 — picks must exceed DC model avg accuracy (60.9%); revisit at n=20 settled
 WC_STAKE_PCT = 0.02   # fixed 2% of wc_reserve per bet
 WC_START_DATE = '2026-06-11'
-TENNIS_MAX_EDGE = 0.18         # Cap: 0.20+ bucket is -7.8% ROI — model overestimates extreme edges
+TENNIS_MAX_EDGE = 0.25         # 2026-06-19: subido de 0.18 -> reabrir zona edge 18-25% (+27% ROI live n=19) a $1 stake; >=25% sigue bloqueado en run_cycle
 TENNIS_PLATT_A = 0.3872  # 2026-06-09: composite refit on 98 sibila_picks; 2-stage correction avg→0.673=WR
 TENNIS_PLATT_B = -0.0457  # was A=0.6218 B=-0.0276 (single-stage, still 8.7pp over); composite closes gap
 SHARP_REF_ENABLED = True       # Pre-placement check: skip if model differs from Pinnacle no-vig by >10%
@@ -5713,6 +5713,9 @@ def run_cycle(dry_run=False):
                              and float(p.get('price', 0) or 0) >= 1.50)
                     # h2h: DESACTIVADO 2026-06-02 — WR=52.6%, ROI=-7.6% Sibila n=38 placed; win_set (WR=65.7%) es el mercado
                     and p.get('market_type') not in ('', None)]
+    # 2026-06-19: tennis a $1 fijo (bajo riesgo, mantener activo + juntar data live)
+    for _tp in tennis_picks:
+        _tp['_max_stake'] = 1.00
     # Platt calibration shadow log — N=54 Sibila tws, A=0.357 B=0.088 — log only, no placement effect
     try:
         from oraculo_tws_calibrator import shadow_log_platt as _tws_platt_shadow

@@ -77,15 +77,49 @@ def fit_tennis_calibrator(sibila_db, since_date, dry_run=False):
     return iso
 
 
+def validate_forward(sibila_db, since_date, thr=0.10):
+    """Aplica el calibrador a tennis resuelto desde since_date y compara
+    seleccion calibrada (cal_edge>=thr) vs cruda. Para validacion FORWARD,
+    correr con --since posterior a la fecha de fit."""
+    import sqlite3
+    con = sqlite3.connect(sibila_db)
+    rows = con.execute(
+        "SELECT prob_model, odds, result FROM sibila_picks "
+        "WHERE sport='tennis' AND result IN ('WIN','LOSS') AND prob_model>0 AND odds>1 AND ts>=?",
+        (since_date,)).fetchall()
+    con.close()
+    if not os.path.exists(CALIB_PATH):
+        print('[validate] no hay calibrador fitteado'); return
+    def sel(edge_list):
+        bets = [(o, w) for e, o, w in edge_list if e >= thr]
+        if not bets: return 0, 0.0, 0.0
+        n = len(bets); pnl = sum((o-1) if w else -1 for o, w in bets)
+        wr = sum(1 for o, w in bets if w)/n
+        return n, wr*100, pnl/n*100
+    raw, cal = [], []
+    for p, o, r in rows:
+        p = float(p); o = float(o); w = (r == 'WIN')
+        raw.append((p*o-1, o, w))
+        cp = calibrate_tennis_prob(p)
+        cal.append((cp*o-1, o, w))
+    rn, rwr, rroi = sel(raw); cn, cwr, croi = sel(cal)
+    print('[validate] desde %s | %d picks resueltos | umbral edge>=%.2f' % (since_date, len(rows), thr))
+    print('  CRUDO     bets=%3d WR=%5.1f%% ROI=%+6.1f%%' % (rn, rwr, rroi))
+    print('  CALIBRADO bets=%3d WR=%5.1f%% ROI=%+6.1f%%' % (cn, cwr, croi))
+
+
 if __name__ == '__main__':
     import argparse
     ap = argparse.ArgumentParser()
     ap.add_argument('--fit', action='store_true')
     ap.add_argument('--since', default='2026-06-17')
     ap.add_argument('--dry-run', action='store_true')
+    ap.add_argument('--validate', action='store_true')
     a = ap.parse_args()
     db = os.path.join(SCRIPT_DIR, 'sibila.db')
-    if a.fit:
+    if a.validate:
+        validate_forward(db, a.since)
+    elif a.fit:
         fit_tennis_calibrator(db, a.since, dry_run=a.dry_run)
     else:
         for _p in (0.5, 0.6, 0.7, 0.8, 0.9):
