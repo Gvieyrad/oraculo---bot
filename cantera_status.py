@@ -18,6 +18,20 @@ CANTERA = [
         'days': 90,
     },
     {
+        'name': 'BTTS high-xG (WC)',
+        'query': "market_type='btts_highxg'",
+        'threshold': 40,
+        'note': 'Backtest knockout BTTS=56%% (+EV si odds>=1.80). Dispara en octavos WC (~26-jun, ambos xG>=1.4).',
+        'days': 90,
+    },
+    {
+        'name': 'sets_under grass/hard',
+        'query': "market_type='sets_under' AND COALESCE(surface,'') != 'clay'",
+        'threshold': 20,
+        'note': 'Solo grass/hard (CLAY = desastre confirmado 0/10). Activar live WR>=60%% en 20+.',
+        'days': 90,
+    },
+    {
         'name': 'NBA',
         'query': "sport='basketball' AND league LIKE '%nba%' AND league NOT LIKE '%wnba%'",
         'threshold': 50,
@@ -46,18 +60,19 @@ CANTERA = [
         'days': 90,
     },
     {
-        'name': 'MLB F5 Shadow',
-        'query': "market_type='mlb_f5_ml' AND placed=0",
-        'threshold': 50,
-        'note': 'F5 ML shadow -- activar cuando WR>=55%% en 50+ picks resueltos',
-        'days': 90,
-    },
-    {
         'name': 'Soccer Intl (MLS)',
         'query': "sport='soccer' AND placed=0 AND (league LIKE '%mls%' OR league LIKE '%copa-america%' OR league LIKE '%nations-league%' OR league LIKE '%conmebol%' OR league LIKE '%concacaf%')",
         'threshold': 30,
         'note': 'MLS + Copa + UEFA NL -- shadow hasta N>=30 WR>=60%%',
         'days': 180,
+    },
+    {
+        'name': 'MLB F5 Shadow',
+        'query': "market_type='mlb_f5_ml' AND placed=0",
+        'threshold': 50,
+        'killed': True,
+        'note': 'MATADO 2026-06-18 por CLV -- shadow WR 56%% es ARTEFACTO; live real WR 24-33%%, CLV -0.325, -$87. NO REACTIVAR.',
+        'days': 90,
     },
 ]
 
@@ -85,7 +100,10 @@ for s in CANTERA:
     wr = wins / resolved * 100 if resolved > 0 else 0
     thr = s['threshold']
 
-    if thr is None:
+    if s.get('killed'):
+        status = 'XX MATADO (CLV) -- NO REACTIVAR'
+        progress = '(shadow %d WR=%.0f%% = ARTEFACTO)' % (resolved, wr) if resolved else ''
+    elif thr is None:
         status = 'SHADOW PERMANENTE'
         progress = ''
     elif resolved == 0:
@@ -100,7 +118,7 @@ for s in CANTERA:
         progress = '(%d/%d  WR=%.0f%%)' % (resolved, thr, wr)
 
     print()
-    print('  %-22s  %-22s %s' % (s['name'], status, progress))
+    print('  %-22s  %-30s %s' % (s['name'], status, progress))
     print('  %-22s  %s' % ('', s['note']))
 
 print()
