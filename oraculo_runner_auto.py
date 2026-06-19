@@ -3555,6 +3555,17 @@ def check_results(api, state):
         if any(s.get('bet_id') == bet_id for s in state.get('settled_today', [])):
             continue
 
+        # 2026-06-18: guard resultado liquidado desconocido -- no romper P&L ni dropear el bet
+        _KNOWN_RESULTS = ('WIN', 'LOSS', 'VOID', 'PUSH', 'HALF_WIN', 'HALF_LOSS', 'PARTIAL')
+        if result not in _KNOWN_RESULTS:
+            _unk = state.setdefault('unknown_result_ids', [])
+            if bet_id not in _unk:
+                log.error('[SETTLE] resultado liquidado desconocido (%s) bet %s -- NO removido', result, bet_id[:12])
+                try: send_telegram('Oraculo: resultado settle desconocido (%s) bet %s' % (result, bet_id[:12]))
+                except Exception: pass
+                _unk.append(bet_id)
+            continue
+
         # Find in active bets
         matched_active = None
         for ab in state['active_bets']:

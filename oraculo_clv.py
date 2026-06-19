@@ -537,6 +537,10 @@ class CLVOracle:
         try:
             match  = pick.get('match', '')
             sport  = pick.get('sport', 'tennis')
+            # 2026-06-18: skip baseball -- solo se apuesta F5, pero TheOddsAPI h2h
+            # devuelve el ML de juego completo (mercado distinto) -> closing basura.
+            if sport in ('baseball', 'mlb'):
+                return {}
             ts_str = pick.get('ts') or ''
             closing = _fetch_closing_odds(match, sport, ts_str)
             if not closing or closing <= 1:
