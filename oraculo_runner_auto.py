@@ -505,6 +505,7 @@ def load_state():
         'daily_pnl': 0.0, 'total_pnl': 42.83,
         'wins': 13, 'losses': 1, 'consecutive_losses': 0,
         'bets_placed_today': 0,
+        'last_bet_ts': None,
         'bankroll_by_currency': {'USDC': INITIAL_DEPOSIT_USDC, 'USDT': INITIAL_DEPOSIT_USDT},
     }
     try:
@@ -4580,6 +4581,7 @@ def _save_bet(state, bet_id, match, label, sport, odds, stake, edge=0,
     }
     entry.update(extra)
     state['active_bets'].append(entry)
+    state['last_bet_ts'] = entry['placed']  # monitor anti-paralisis 48h
     save_state(state)
     log.info('[_save_bet] Saved bet %s | %s | $%.2f', bet_id[:12], label[:25], stake)
     return True
@@ -5578,6 +5580,15 @@ def _health_check(state):
                     issues.append('wc_player_factors stale %.0fh (cron lesiones?)' % _ah2)
         except Exception:
             pass
+        # Monitor anti-paralisis (2026-06-19): 0 apuestas en 48h
+        _lbt = state.get('last_bet_ts')
+        if _lbt:
+            try:
+                _bh = (datetime.now() - datetime.fromisoformat(_lbt)).total_seconds() / 3600.0
+                if _bh > 48:
+                    issues.append('0 apuestas hace %.0fh -- verificar si es correcto (mercados -EV) o roto (scan/filtros)' % _bh)
+            except Exception:
+                pass
         if issues:
             _today = datetime.now().strftime('%Y-%m-%d')
             if state.get('_last_health_alert') != _today:
