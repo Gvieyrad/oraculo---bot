@@ -11,6 +11,13 @@ NOW = datetime.now(timezone.utc)
 
 CANTERA = [
     {
+        'name': 'Rugby NRL',
+        'query': "market_type='rugby_ml'",
+        'threshold': 30,
+        'note': 'ELO NRL (backtest 63.8%% acc out-of-sample, calibrado). Shadow hasta CLV+ vs Cloudbet. Markets abren ~horario (gana volumen jun 23-28).',
+        'days': 90,
+    },
+    {
         'name': 'WNBA',
         'query': "sport='basketball' AND (league LIKE '%wnba%' OR side LIKE '%Lynx%' OR side LIKE '%Liberty%' OR side LIKE '%Aces%' OR side LIKE '%Mercury%' OR side LIKE '%Sky%')",
         'threshold': 20,

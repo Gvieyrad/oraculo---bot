@@ -5909,6 +5909,53 @@ def run_cycle(dry_run=False):
     except Exception as _de:
         log.debug("Darts scan error: %s", _de)
 
+    # 3f. CANTERA rugby-league NRL shadow (2026-06-21: ELO backtest 63.8%% acc, no live hasta CLV+)
+    try:
+        import oraculo_rugby as _rug
+        _rug_elo = _rug.load_elo()
+        if _rug_elo is not None and _SIBILA_ENABLED:
+            _rug_evs = api.get_odds('rugby-league-international-nrl') or []
+            _rug_n = 0
+            for _rev in _rug_evs:
+                _rh = (_rev.get('home') or {}).get('name', '')
+                _ra = (_rev.get('away') or {}).get('name', '')
+                if not _rh or not _ra:
+                    continue
+                _ml = None
+                for _mk, _mv in _rev.get('markets', {}).items():
+                    if 'outright' in _mk:
+                        continue
+                    for _sub in _mv.get('submarkets', {}).values():
+                        _outs = {}
+                        for _s in _sub.get('selections', []):
+                            _outs[_s.get('outcome')] = (float(_s.get('price', 0) or 0), _s.get('marketUrl', ''))
+                        if 'home' in _outs and 'away' in _outs and _outs['home'][0] > 1 and _outs['away'][0] > 1:
+                            _ml = _outs
+                            break
+                    if _ml:
+                        break
+                if not _ml:
+                    continue
+                _ph = _rug_elo.predict(_rh, _ra)
+                _reid = str(_rev.get('id', ''))
+                for _side, _p in (('home', _ph), ('away', 1 - _ph)):
+                    _pr, _murl = _ml[_side]
+                    _edge = round(_p * _pr - 1.0, 4)
+                    if _edge >= 0.05 and _p >= 0.50:
+                        _sibila_record({
+                            'match': '%s vs %s' % (_rh, _ra), 'league': 'rugby-league-nrl',
+                            'event_id': _reid, 'market_url': _murl, 'price': _pr,
+                            'label': 'NRL ML %s (elo %.0f%%)' % (_side, _p * 100),
+                            'model_prob': round(_p, 4), 'edge': _edge,
+                            'sport': 'rugby', '_shadow_only': True, 'market_type': 'rugby_ml',
+                        })
+                        _rug_n += 1
+                        break
+            if _rug_n:
+                log.info('[Rugby NRL cantera] %d shadow picks', _rug_n)
+    except Exception as _rge:
+        log.debug('rugby scan error: %s', _rge)
+
     # 3b. Filter tennis picks through LLM (quality gate)
     if tennis_picks:
         try:
