@@ -5,7 +5,7 @@ Resolves: Goals 2H Over/Under X.5 and Booking pts Over/Under X.5.
 Cannot resolve: Corner N, Last corner, First booking (sequence markets).
 """
 import sys, os, sqlite3, requests, csv, io, re, logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 
 log = logging.getLogger('soccer_resolver')
@@ -97,14 +97,19 @@ def _find_in_csv(rows, home, away, date_str):
         score = hs * as_
         if tgt:
             d_str = row.get('Date', '')
+            row_dt = None
             for fmt in ['%d/%m/%Y', '%Y-%m-%d', '%d/%m/%y']:
                 try:
-                    row_dt = datetime.strptime(d_str, fmt)
-                    if abs((row_dt - tgt).days) <= 2:
-                        score += 0.4
-                    break
+                    row_dt = datetime.strptime(d_str, fmt); break
                 except:
                     pass
+            # 2026-06-22 FIX: floor DURO de fecha — no resolver un pick con un resultado
+            # ANTERIOR a su fecha de log (evitaba matchear amistosos historicos del mismo
+            # matchup, ej Argentina vs Austria mis-resuelto LOSS contra un amistoso viejo).
+            if row_dt is not None and row_dt < tgt - timedelta(days=1):
+                continue
+            if row_dt is not None and abs((row_dt - tgt).days) <= 2:
+                score += 0.4
         if score > best_score:
             best_score = score
             best_row = row
