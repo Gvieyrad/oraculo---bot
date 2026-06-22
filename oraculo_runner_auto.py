@@ -5909,12 +5909,16 @@ def run_cycle(dry_run=False):
     except Exception as _de:
         log.debug("Darts scan error: %s", _de)
 
-    # 3f. CANTERA rugby-league NRL shadow (2026-06-21: ELO backtest 63.8%% acc, no live hasta CLV+)
+    # 3f. CANTERA rugby shadow (2026-06-21: NRL 63.8%% + MLR 66.0%% acc backtest, no live hasta CLV+)
     try:
         import oraculo_rugby as _rug
-        _rug_elo = _rug.load_elo()
-        if _rug_elo is not None and _SIBILA_ENABLED:
-            _rug_evs = api.get_odds('rugby-league-international-nrl') or []
+        _RUG_LEAGUES = (('nrl', 'rugby-league-international-nrl', 'rugby_ml'),
+                        ('mlr', 'rugby-union-international-major-league-rugby', 'rugby_mlr_ml'))
+        for _rlg, _rcomp, _rmt in (_RUG_LEAGUES if _SIBILA_ENABLED else ()):
+            _rug_elo = _rug.load_elo(_rlg)
+            if _rug_elo is None:
+                continue
+            _rug_evs = api.get_odds(_rcomp) or []
             _rug_n = 0
             for _rev in _rug_evs:
                 _rh = (_rev.get('home') or {}).get('name', '')
@@ -5943,16 +5947,16 @@ def run_cycle(dry_run=False):
                     _edge = round(_p * _pr - 1.0, 4)
                     if _edge >= 0.05 and _p >= 0.50:
                         _sibila_record({
-                            'match': '%s vs %s' % (_rh, _ra), 'league': 'rugby-league-nrl',
+                            'match': '%s vs %s' % (_rh, _ra), 'league': _rcomp,
                             'event_id': _reid, 'market_url': _murl, 'price': _pr,
-                            'label': 'NRL ML %s (elo %.0f%%)' % (_side, _p * 100),
+                            'label': '%s ML %s (elo %.0f%%)' % (_rlg.upper(), _side, _p * 100),
                             'model_prob': round(_p, 4), 'edge': _edge,
-                            'sport': 'rugby', '_shadow_only': True, 'market_type': 'rugby_ml',
+                            'sport': 'rugby', '_shadow_only': True, 'market_type': _rmt,
                         })
                         _rug_n += 1
                         break
             if _rug_n:
-                log.info('[Rugby NRL cantera] %d shadow picks', _rug_n)
+                log.info('[Rugby %s cantera] %d shadow picks', _rlg.upper(), _rug_n)
     except Exception as _rge:
         log.debug('rugby scan error: %s', _rge)
 

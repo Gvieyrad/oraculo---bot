@@ -11,6 +11,13 @@ NOW = datetime.now(timezone.utc)
 
 CANTERA = [
     {
+        'name': 'Rugby MLR (union US)',
+        'query': "market_type='rugby_mlr_ml'",
+        'threshold': 30,
+        'note': 'ELO MLR (backtest 66.0%% acc OOS > NRL; liga blanda US). Shadow hasta CLV+. In-season mar-jul.',
+        'days': 90,
+    },
+    {
         'name': 'Rugby NRL',
         'query': "market_type='rugby_ml'",
         'threshold': 30,
