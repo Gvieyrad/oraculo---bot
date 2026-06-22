@@ -416,25 +416,25 @@
   "J": [
     {
       "team": "Argentina",
-      "pts": 3,
-      "w": 1,
+      "pts": 6,
+      "w": 2,
       "d": 0,
       "l": 0,
-      "gf": 3,
+      "gf": 5,
       "ga": 0,
-      "gd": 3,
-      "played": 1
+      "gd": 5,
+      "played": 2
     },
     {
       "team": "Austria",
       "pts": 3,
       "w": 1,
       "d": 0,
-      "l": 0,
+      "l": 1,
       "gf": 3,
-      "ga": 1,
-      "gd": 2,
-      "played": 1
+      "ga": 3,
+      "gd": 0,
+      "played": 2
     },
     {
       "team": "Jordan",

@@ -11,6 +11,13 @@ NOW = datetime.now(timezone.utc)
 
 CANTERA = [
     {
+        'name': 'Under 2.5 intl/WC',
+        'query': "market_type='under25_cantera'",
+        'threshold': 30,
+        'note': 'Backtest 5y intl OOS n=1106: raw p_u25>=0.60 WR 56.7pct, +EV solo odds>=1.80. CLV forward valida; calibrador propio con esta data.',
+        'days': 60,
+    },
+    {
         'name': 'Rugby MLR (union US)',
         'query': "market_type='rugby_mlr_ml'",
         'threshold': 30,

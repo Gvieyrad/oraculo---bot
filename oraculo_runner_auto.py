@@ -1542,6 +1542,21 @@ def scan_football(api, state, dry_run=False):
                                     _ou_pick['_wc_phase_c'] = True  # 2026-06-16: stake fijo conservador (no Kelly completo)
                                 picks.append(_ou_pick)
 
+                # Under 2.5 cantera shadow — 2026-06-22: backtest 5y intl OOS (n=1106): raw p_u25>=0.60 -> WR 56.7%,
+                # +EV SOLO a odds>=1.80 (a odds cortas el mercado lo come). Junta data REAL del bot + CLV
+                # para fittear calibrador propio luego (el backtest uso un Poisson proxy, no el DC real).
+                if _SIBILA_ENABLED and 'under' in odds_ou:
+                    _pr_u, _mu_u = odds_ou['under']
+                    # 2026-06-22: shadow loguea TODO p_u25>=0.60 (odd grabada); la regla odds>=1.80
+                    # (donde es +EV) se aplica OFFLINE — sino logueaba ~0 (los unders cantados pagan corto).
+                    if p_u25 >= 0.60:
+                        _sibila_record({
+                            'match': match_label, 'league': intl_league, 'event_id': eid,
+                            'market_url': _mu_u, 'price': _pr_u, 'label': 'Under 2.5 [cantera]',
+                            'model_prob': round(p_u25, 4), 'edge': round(p_u25 * _pr_u - 1, 4),
+                            'sport': 'soccer', 'intl': True, '_shadow_only': True,
+                            'market_type': 'under25_cantera'})
+
                 # Over 3.5 shadow (WC only — Cantera until n>=20 settled picks; backtest WC2022 P>=62%: 3W/1L=75% WR)
                 if _is_wc and 'over' in odds_ou35 and _SIBILA_ENABLED:
                     _pr35, _mu35 = odds_ou35['over']
