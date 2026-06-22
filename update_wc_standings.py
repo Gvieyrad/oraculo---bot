@@ -67,7 +67,7 @@ def fetch_football_data(token):
     for standing in d.get('standings', []):
         grp = standing.get('group', '')
         # Group names like "GROUP_A" → "A"
-        grp = re.sub(r'.*_', '', grp).upper()
+        grp = re.sub(r'(?i)^group[\s_]*', '', grp).strip().upper()  # "Group A"/"GROUP_A" -> "A"
         if not grp:
             continue
         table = []

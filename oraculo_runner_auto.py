@@ -111,6 +111,7 @@ WC_MIN_CONF = 0.62    # 2026-06-12: raised from 0.55 — picks must exceed DC mo
 WC_STAKE_PCT = 0.02   # fixed 2% of wc_reserve per bet
 WC_START_DATE = '2026-06-11'
 TENNIS_MAX_EDGE = 0.25         # 2026-06-19: subido de 0.18 -> reabrir zona edge 18-25% (+27% ROI live n=19) a $1 stake; >=25% sigue bloqueado en run_cycle
+TENNIS_CALIBRATION_LIVE = True   # 2026-06-22: tennis live usa prob CALIBRADA (isotonic) en vez de raw -EV; rollback=False
 TENNIS_PLATT_A = 0.3872  # 2026-06-09: composite refit on 98 sibila_picks; 2-stage correction avg→0.673=WR
 TENNIS_PLATT_B = -0.0457  # was A=0.6218 B=-0.0276 (single-stage, still 8.7pp over); composite closes gap
 SHARP_REF_ENABLED = True       # Pre-placement check: skip if model differs from Pinnacle no-vig by >10%
@@ -5715,31 +5716,55 @@ def run_cycle(dry_run=False):
     #   Revisit: need 30+ hard/grass resolved picks; do NOT unblock for clay GS tourneys
     # tennis_team_win_set: tactical pool mode — edge>=8% AND odds>=1.35
     # (relaxed from 18%/1.40 while WC reserve locks USDC; $40 USDT tactical pool rotates Roland Garros picks)
-    tennis_picks = [p for p in tennis_picks
-                    if p.get('market_type') not in ('tennis_exact_sets', 'sets_under',
-                                                    'tennis_winner_and_total')  # w+total: 0W/1L, complex market
-                    # tennis_team_win_set: edge>=10% AND odds 1.40-1.90
-                    # EXCLUIR 0.15-0.18: valle de la muerte WR=42.9% ROI=-34% n=7 (2026-06-02)
-                    # 0.12-0.15 WR=75% y 0.18+ WR=75% son buenos; 0.15-0.18 es anomalia del modelo
-                    and not (p.get('market_type') == 'tennis_team_win_set'
-                             and (float(p.get('edge', 0) or 0) < 0.10
-                                  or float(p.get('price', 0) or 0) < 1.40
-                                  or float(p.get('price', 0) or 0) > 1.90
-                                  or (0.15 <= float(p.get('edge', 0) or 0) < 0.18)))
-                    # tennis_team_win_set (no): favor wins set — floor 1.50 (50% WR at odds<=1.50, 75% at >1.50)
-                    and not (p.get('market_type') == 'tennis_team_win_set'
-                             and '(no)' in str(p.get('label', '') or p.get('side', '') or '')
-                             and float(p.get('price', 0) or 0) <= 1.50)
-                    # 2026-06-17: edge>25%% en UNDERDOGS (odds>=1.50) = sobreconfianza del modelo (38%% WR n=16).
-                    # Favoritos high-edge (odds<1.50) se quedan (86%% WR). Bergs @1.73 edge 34.7%% perdio -> esto lo bloquea.
-                    and not (p.get('market_type') == 'tennis_team_win_set'
-                             and float(p.get('edge', 0) or 0) >= 0.25
-                             and float(p.get('price', 0) or 0) >= 1.50)
-                    # h2h: DESACTIVADO 2026-06-02 — WR=52.6%, ROI=-7.6% Sibila n=38 placed; win_set (WR=65.7%) es el mercado
-                    and p.get('market_type') not in ('', None)]
-    # 2026-06-19: tennis a $1 fijo (bajo riesgo, mantener activo + juntar data live)
-    for _tp in tennis_picks:
-        _tp['_max_stake'] = 1.00
+    if TENNIS_CALIBRATION_LIVE:
+        # 2026-06-22: tennis CALIBRADO live (reemplaza raw -EV). Traductor isotonic + gate por edge calibrado.
+        # Raw era -EV (ROI -0.6%, CLV -1.15%, n=273); calibrado OOS +4.7%. Stake $1. Solo team_win_set.
+        # Los filtros raw (valle 0.15-0.18, underdog edge>=0.25) parcheaban la inflacion del modelo crudo;
+        # la calibracion arregla la raiz -> no aplican sobre prob calibrada. Rollback: TENNIS_CALIBRATION_LIVE=False.
+        from oraculo_tennis_calib import calibrate_tennis_prob as _cal_tn
+        _cal_out = []
+        for _p in tennis_picks:
+            if _p.get('market_type') != 'tennis_team_win_set':
+                continue
+            _pr = float(_p.get('price', 0) or 0)
+            _pc = float(_cal_tn(float(_p.get('model_prob', 0) or 0)))
+            _ec = round(_pc * _pr - 1.0, 4)
+            if _ec < 0.10 or _pc < 0.55 or _ec > 0.40 or _pr < 1.40 or _pr > 2.10:
+                continue
+            _p['raw_model_prob_uncal'] = _p.get('raw_model_prob_uncal', _p.get('model_prob'))
+            _p['model_prob'] = round(_pc, 4)
+            _p['edge'] = _ec
+            _p['_max_stake'] = 1.00
+            _p['_calibrated'] = True
+            _cal_out.append(_p)
+        tennis_picks = _cal_out
+        log.info('[tennis CALIBRADO] %d picks live (isotonic, cal_edge>=0.10, $1)', len(tennis_picks))
+    else:
+        tennis_picks = [p for p in tennis_picks
+                        if p.get('market_type') not in ('tennis_exact_sets', 'sets_under',
+                                                        'tennis_winner_and_total')  # w+total: 0W/1L, complex market
+                        # tennis_team_win_set: edge>=10% AND odds 1.40-1.90
+                        # EXCLUIR 0.15-0.18: valle de la muerte WR=42.9% ROI=-34% n=7 (2026-06-02)
+                        # 0.12-0.15 WR=75% y 0.18+ WR=75% son buenos; 0.15-0.18 es anomalia del modelo
+                        and not (p.get('market_type') == 'tennis_team_win_set'
+                                 and (float(p.get('edge', 0) or 0) < 0.10
+                                      or float(p.get('price', 0) or 0) < 1.40
+                                      or float(p.get('price', 0) or 0) > 1.90
+                                      or (0.15 <= float(p.get('edge', 0) or 0) < 0.18)))
+                        # tennis_team_win_set (no): favor wins set — floor 1.50 (50% WR at odds<=1.50, 75% at >1.50)
+                        and not (p.get('market_type') == 'tennis_team_win_set'
+                                 and '(no)' in str(p.get('label', '') or p.get('side', '') or '')
+                                 and float(p.get('price', 0) or 0) <= 1.50)
+                        # 2026-06-17: edge>25%% en UNDERDOGS (odds>=1.50) = sobreconfianza del modelo (38%% WR n=16).
+                        # Favoritos high-edge (odds<1.50) se quedan (86%% WR). Bergs @1.73 edge 34.7%% perdio -> esto lo bloquea.
+                        and not (p.get('market_type') == 'tennis_team_win_set'
+                                 and float(p.get('edge', 0) or 0) >= 0.25
+                                 and float(p.get('price', 0) or 0) >= 1.50)
+                        # h2h: DESACTIVADO 2026-06-02 — WR=52.6%, ROI=-7.6% Sibila n=38 placed; win_set (WR=65.7%) es el mercado
+                        and p.get('market_type') not in ('', None)]
+        # 2026-06-19: tennis a $1 fijo (bajo riesgo, mantener activo + juntar data live)
+        for _tp in tennis_picks:
+            _tp['_max_stake'] = 1.00
     # Platt calibration shadow log — N=54 Sibila tws, A=0.357 B=0.088 — log only, no placement effect
     try:
         from oraculo_tws_calibrator import shadow_log_platt as _tws_platt_shadow

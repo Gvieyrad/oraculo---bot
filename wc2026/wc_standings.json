@@ -2,36 +2,36 @@
   "A": [
     {
       "team": "Mexico",
-      "pts": 0,
-      "w": 0,
+      "pts": 6,
+      "w": 2,
       "d": 0,
       "l": 0,
-      "gf": 0,
+      "gf": 3,
       "ga": 0,
-      "gd": 0,
-      "played": 0
-    },
-    {
-      "team": "South Africa",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gd": 3,
+      "played": 2
     },
     {
       "team": "Republic of Korea",
-      "pts": 0,
-      "w": 0,
+      "pts": 3,
+      "w": 1,
       "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
+      "l": 1,
+      "gf": 2,
+      "ga": 2,
       "gd": 0,
-      "played": 0
+      "played": 2
+    },
+    {
+      "team": "South Africa",
+      "pts": 1,
+      "w": 0,
+      "d": 1,
+      "l": 1,
+      "gf": 1,
+      "ga": 3,
+      "gd": -2,
+      "played": 2
     },
     {
       "team": "Czech Republic",
@@ -48,315 +48,315 @@
   "B": [
     {
       "team": "Canada",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
+      "pts": 4,
+      "w": 1,
+      "d": 1,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
-    },
-    {
-      "team": "Bosnia & Herzegovina",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
-    },
-    {
-      "team": "Qatar",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gf": 7,
+      "ga": 1,
+      "gd": 6,
+      "played": 2
     },
     {
       "team": "Switzerland",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
+      "pts": 4,
+      "w": 1,
+      "d": 1,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gf": 5,
+      "ga": 2,
+      "gd": 3,
+      "played": 2
+    },
+    {
+      "team": "Bosnia & Herzegovina",
+      "pts": 1,
+      "w": 0,
+      "d": 1,
+      "l": 1,
+      "gf": 2,
+      "ga": 5,
+      "gd": -3,
+      "played": 2
+    },
+    {
+      "team": "Qatar",
+      "pts": 1,
+      "w": 0,
+      "d": 1,
+      "l": 1,
+      "gf": 1,
+      "ga": 7,
+      "gd": -6,
+      "played": 2
     }
   ],
   "C": [
     {
       "team": "Brazil",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
+      "pts": 4,
+      "w": 1,
+      "d": 1,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gf": 4,
+      "ga": 1,
+      "gd": 3,
+      "played": 2
     },
     {
       "team": "Morocco",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
+      "pts": 4,
+      "w": 1,
+      "d": 1,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
+      "gf": 2,
+      "ga": 1,
+      "gd": 1,
+      "played": 2
+    },
+    {
+      "team": "Scotland",
+      "pts": 3,
+      "w": 1,
+      "d": 0,
+      "l": 1,
+      "gf": 1,
+      "ga": 1,
       "gd": 0,
-      "played": 0
+      "played": 2
     },
     {
       "team": "Haiti",
       "pts": 0,
       "w": 0,
       "d": 0,
-      "l": 0,
+      "l": 2,
       "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
-    },
-    {
-      "team": "Scotland",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "ga": 4,
+      "gd": -4,
+      "played": 2
     }
   ],
   "D": [
     {
       "team": "USA",
-      "pts": 0,
-      "w": 0,
+      "pts": 6,
+      "w": 2,
       "d": 0,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
-    },
-    {
-      "team": "Paraguay",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gf": 6,
+      "ga": 1,
+      "gd": 5,
+      "played": 2
     },
     {
       "team": "Australia",
-      "pts": 0,
-      "w": 0,
+      "pts": 3,
+      "w": 1,
       "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
+      "l": 1,
+      "gf": 2,
+      "ga": 2,
       "gd": 0,
-      "played": 0
+      "played": 2
+    },
+    {
+      "team": "Paraguay",
+      "pts": 3,
+      "w": 1,
+      "d": 0,
+      "l": 1,
+      "gf": 2,
+      "ga": 4,
+      "gd": -2,
+      "played": 2
     },
     {
       "team": "Turkey",
       "pts": 0,
       "w": 0,
       "d": 0,
-      "l": 0,
+      "l": 2,
       "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "ga": 3,
+      "gd": -3,
+      "played": 2
     }
   ],
   "E": [
     {
       "team": "Germany",
-      "pts": 0,
-      "w": 0,
+      "pts": 6,
+      "w": 2,
       "d": 0,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
-    },
-    {
-      "team": "Curacao",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gf": 9,
+      "ga": 2,
+      "gd": 7,
+      "played": 2
     },
     {
       "team": "Ivory Coast",
-      "pts": 0,
-      "w": 0,
+      "pts": 3,
+      "w": 1,
       "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
+      "l": 1,
+      "gf": 2,
+      "ga": 2,
       "gd": 0,
-      "played": 0
+      "played": 2
     },
     {
       "team": "Ecuador",
-      "pts": 0,
+      "pts": 1,
       "w": 0,
-      "d": 0,
-      "l": 0,
+      "d": 1,
+      "l": 1,
       "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "ga": 1,
+      "gd": -1,
+      "played": 2
+    },
+    {
+      "team": "Curacao",
+      "pts": 1,
+      "w": 0,
+      "d": 1,
+      "l": 1,
+      "gf": 1,
+      "ga": 7,
+      "gd": -6,
+      "played": 2
     }
   ],
   "F": [
     {
       "team": "Netherlands",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
+      "pts": 4,
+      "w": 1,
+      "d": 1,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gf": 7,
+      "ga": 3,
+      "gd": 4,
+      "played": 2
     },
     {
       "team": "Japan",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
+      "pts": 4,
+      "w": 1,
+      "d": 1,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gf": 6,
+      "ga": 2,
+      "gd": 4,
+      "played": 2
     },
     {
       "team": "Sweden",
-      "pts": 0,
-      "w": 0,
+      "pts": 3,
+      "w": 1,
       "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
+      "l": 1,
+      "gf": 6,
+      "ga": 6,
       "gd": 0,
-      "played": 0
+      "played": 2
     },
     {
       "team": "Tunisia",
       "pts": 0,
       "w": 0,
       "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "l": 2,
+      "gf": 1,
+      "ga": 9,
+      "gd": -8,
+      "played": 2
     }
   ],
   "G": [
     {
-      "team": "Belgium",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
-    },
-    {
       "team": "Egypt",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
+      "pts": 4,
+      "w": 1,
+      "d": 1,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gf": 4,
+      "ga": 2,
+      "gd": 2,
+      "played": 2
     },
     {
       "team": "Iran",
-      "pts": 0,
+      "pts": 2,
       "w": 0,
-      "d": 0,
+      "d": 2,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
+      "gf": 2,
+      "ga": 2,
       "gd": 0,
-      "played": 0
+      "played": 2
+    },
+    {
+      "team": "Belgium",
+      "pts": 2,
+      "w": 0,
+      "d": 2,
+      "l": 0,
+      "gf": 1,
+      "ga": 1,
+      "gd": 0,
+      "played": 2
     },
     {
       "team": "New Zealand",
-      "pts": 0,
+      "pts": 1,
       "w": 0,
-      "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "d": 1,
+      "l": 1,
+      "gf": 3,
+      "ga": 5,
+      "gd": -2,
+      "played": 2
     }
   ],
   "H": [
     {
       "team": "Spain",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
+      "pts": 4,
+      "w": 1,
+      "d": 1,
       "l": 0,
-      "gf": 0,
+      "gf": 4,
       "ga": 0,
-      "gd": 0,
-      "played": 0
-    },
-    {
-      "team": "Cape Verde",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
-    },
-    {
-      "team": "Saudi Arabia",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gd": 4,
+      "played": 2
     },
     {
       "team": "Uruguay",
+      "pts": 2,
+      "w": 0,
+      "d": 2,
+      "l": 0,
+      "gf": 3,
+      "ga": 3,
+      "gd": 0,
+      "played": 2
+    },
+    {
+      "team": "Saudi Arabia",
+      "pts": 1,
+      "w": 0,
+      "d": 1,
+      "l": 1,
+      "gf": 1,
+      "ga": 5,
+      "gd": -4,
+      "played": 2
+    },
+    {
+      "team": "Cape Verde",
       "pts": 0,
       "w": 0,
       "d": 0,
@@ -369,186 +369,186 @@
   ],
   "I": [
     {
-      "team": "France",
-      "pts": 0,
-      "w": 0,
+      "team": "Norway",
+      "pts": 3,
+      "w": 1,
       "d": 0,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gf": 4,
+      "ga": 1,
+      "gd": 3,
+      "played": 1
+    },
+    {
+      "team": "France",
+      "pts": 3,
+      "w": 1,
+      "d": 0,
+      "l": 0,
+      "gf": 3,
+      "ga": 1,
+      "gd": 2,
+      "played": 1
     },
     {
       "team": "Senegal",
       "pts": 0,
       "w": 0,
       "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "l": 1,
+      "gf": 1,
+      "ga": 3,
+      "gd": -2,
+      "played": 1
     },
     {
       "team": "Iraq",
       "pts": 0,
       "w": 0,
       "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
-    },
-    {
-      "team": "Norway",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "l": 1,
+      "gf": 1,
+      "ga": 4,
+      "gd": -3,
+      "played": 1
     }
   ],
   "J": [
     {
       "team": "Argentina",
-      "pts": 0,
-      "w": 0,
+      "pts": 3,
+      "w": 1,
       "d": 0,
       "l": 0,
-      "gf": 0,
+      "gf": 3,
       "ga": 0,
-      "gd": 0,
-      "played": 0
-    },
-    {
-      "team": "Algeria",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gd": 3,
+      "played": 1
     },
     {
       "team": "Austria",
-      "pts": 0,
-      "w": 0,
+      "pts": 3,
+      "w": 1,
       "d": 0,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gf": 3,
+      "ga": 1,
+      "gd": 2,
+      "played": 1
     },
     {
       "team": "Jordan",
       "pts": 0,
       "w": 0,
       "d": 0,
-      "l": 0,
+      "l": 1,
+      "gf": 1,
+      "ga": 3,
+      "gd": -2,
+      "played": 1
+    },
+    {
+      "team": "Algeria",
+      "pts": 0,
+      "w": 0,
+      "d": 0,
+      "l": 1,
       "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "ga": 3,
+      "gd": -3,
+      "played": 1
     }
   ],
   "K": [
     {
-      "team": "Portugal",
-      "pts": 0,
-      "w": 0,
+      "team": "Colombia",
+      "pts": 3,
+      "w": 1,
       "d": 0,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
+      "gf": 3,
+      "ga": 1,
+      "gd": 2,
+      "played": 1
+    },
+    {
+      "team": "Portugal",
+      "pts": 1,
+      "w": 0,
+      "d": 1,
+      "l": 0,
+      "gf": 1,
+      "ga": 1,
       "gd": 0,
-      "played": 0
+      "played": 1
     },
     {
       "team": "DR Congo",
-      "pts": 0,
+      "pts": 1,
       "w": 0,
-      "d": 0,
+      "d": 1,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
+      "gf": 1,
+      "ga": 1,
       "gd": 0,
-      "played": 0
+      "played": 1
     },
     {
       "team": "Uzbekistan",
       "pts": 0,
       "w": 0,
       "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
-    },
-    {
-      "team": "Colombia",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "l": 1,
+      "gf": 1,
+      "ga": 3,
+      "gd": -2,
+      "played": 1
     }
   ],
   "L": [
     {
       "team": "England",
-      "pts": 0,
-      "w": 0,
+      "pts": 3,
+      "w": 1,
       "d": 0,
       "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
-    },
-    {
-      "team": "Croatia",
-      "pts": 0,
-      "w": 0,
-      "d": 0,
-      "l": 0,
-      "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gf": 4,
+      "ga": 2,
+      "gd": 2,
+      "played": 1
     },
     {
       "team": "Ghana",
-      "pts": 0,
-      "w": 0,
+      "pts": 3,
+      "w": 1,
       "d": 0,
       "l": 0,
-      "gf": 0,
+      "gf": 1,
       "ga": 0,
-      "gd": 0,
-      "played": 0
+      "gd": 1,
+      "played": 1
     },
     {
       "team": "Panama",
       "pts": 0,
       "w": 0,
       "d": 0,
-      "l": 0,
+      "l": 1,
       "gf": 0,
-      "ga": 0,
-      "gd": 0,
-      "played": 0
+      "ga": 1,
+      "gd": -1,
+      "played": 1
+    },
+    {
+      "team": "Croatia",
+      "pts": 0,
+      "w": 0,
+      "d": 0,
+      "l": 1,
+      "gf": 2,
+      "ga": 4,
+      "gd": -2,
+      "played": 1
     }
   ]
 }
