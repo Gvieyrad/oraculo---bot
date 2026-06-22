@@ -656,7 +656,7 @@ class CLVOracle:
             _cb_key = ''
         if not _cb_key:
             return
-        _cutoff = (_dt.utcnow() - _td(days=5)).isoformat()
+        _cutoff = (_dt.utcnow() - _td(days=14)).isoformat()  # 2026-06-22: 5->14d, captura picks far-ahead (WC pre-event, rugby/BTTS)
         updated = 0
         try:
             con = _sq3.connect(sibila_db_path, timeout=10)
