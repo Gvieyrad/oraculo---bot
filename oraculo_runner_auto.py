@@ -3821,7 +3821,7 @@ def reconcile_bankroll(api, state):
         INITIAL_DEPOSIT = 57.03 + state.get('extra_deposits', 0)
         all_settled_pnl = sum(float(b.get('winLoss', 0)) for b in bets if b.get('isSettled'))
         all_pending_stake = sum(float(b.get('stake', 0)) for b in bets if not b.get('isSettled'))
-        correct_bankroll = INITIAL_DEPOSIT + all_settled_pnl + all_pending_stake + state.get('cumulative_void_returns', 0)
+        correct_bankroll = INITIAL_DEPOSIT + all_settled_pnl + all_pending_stake + state.get('cumulative_void_returns', 0) - state.get('cumulative_withdrawals', 0)  # 2026-06-22: restar retiros (antes no trackeados)
         drift = abs(state['bankroll'] - correct_bankroll)
         if drift > 1.50:  # raised from 0.25 to kill ±$3 tennis-bet oscillation
             log.warning('RECONCILE: Auto-correcting bankroll $%.2f -> $%.2f (drift=$%.2f)',
@@ -5589,6 +5589,30 @@ def _health_check(state):
                     issues.append('0 apuestas hace %.0fh -- verificar si es correcto (mercados -EV) o roto (scan/filtros)' % _bh)
             except Exception:
                 pass
+        # Monitor reconciliacion balance (2026-06-22): detecta retiros/depositos no trackeados (cada 3h)
+        try:
+            import time as _t_bc
+            if _t_bc.time() - float(state.get('_last_balance_check', 0) or 0) > 3 * 3600:
+                import requests as _rq_bc, json as _json_bc
+                _cb_key_bc = _json_bc.load(open(os.path.join(SCRIPT_DIR, 'cloudbet_config.json'))).get('api_key', '')
+                _avail_bc = 0.0
+                _ok_bc = True
+                for _cur_bc in ('USDC', 'USDT'):
+                    _rb = _rq_bc.get('https://sports-api.cloudbet.com/pub/v1/account/currencies/%s/balance' % _cur_bc,
+                                     headers={'X-API-Key': _cb_key_bc, 'Accept': 'application/json'}, timeout=8)
+                    if _rb.status_code == 200:
+                        _avail_bc += float(_rb.json().get('amount', 0) or 0)
+                    else:
+                        _ok_bc = False
+                if _ok_bc:
+                    state['_last_balance_check'] = _t_bc.time()
+                    _pend_bc = sum(b.get('stake', 0) for b in state.get('active_bets', []))
+                    _real_bc = _avail_bc + _pend_bc
+                    _bk_bc = float(state.get('bankroll', 0) or 0)
+                    if _real_bc > 0 and abs(_bk_bc - _real_bc) / _real_bc > 0.05:
+                        issues.append('Bankroll desfasado: bot $%.2f vs real $%.2f (disp $%.2f + pend $%.2f) -- retiro/deposito? reconciliar' % (_bk_bc, _real_bc, _avail_bc, _pend_bc))
+        except Exception as _bce:
+            log.debug('balance reconcile error: %s', _bce)
         if issues:
             _today = datetime.now().strftime('%Y-%m-%d')
             if state.get('_last_health_alert') != _today:
