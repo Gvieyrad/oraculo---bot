@@ -67,3 +67,4 @@ oraculo_config.json
 *.bak_*
 tennis_calibrator.pkl
 lag_measurements.db
+lag_hunter.db
