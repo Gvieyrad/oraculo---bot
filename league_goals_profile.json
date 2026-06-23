@@ -1,0 +1,22 @@
+{
+  "_doc": "Perfil scoring por liga (football-data 7000+ partidos, 2 temp). 2H-U1.5 rate. Para estrategia goals league-aware: Under en bajo-scoring, Over/BTTS en alto-scoring. Generado 2026-06-23.",
+  "under_friendly": {
+    "soccer-france-ligue-2": 0.592,
+    "soccer-england-championship": 0.586,
+    "soccer-italy-serie-a": 0.579,
+    "soccer-portugal-primeira-liga": 0.572,
+    "soccer-belgium-first-division-a": 0.563,
+    "soccer-spain-laliga": 0.559
+  },
+  "over_friendly": {
+    "soccer-germany-bundesliga": 0.471,
+    "soccer-netherlands-eredivisie": 0.495,
+    "soccer-germany-2-bundesliga": 0.502,
+    "soccer-england-premier-league": 0.511,
+    "soccer-turkey-super-lig": 0.515
+  },
+  "neutral": {
+    "soccer-france-ligue-1": 0.534,
+    "soccer-scotland-premiership": 0.526
+  }
+}

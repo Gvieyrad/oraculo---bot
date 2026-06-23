@@ -11,6 +11,20 @@ NOW = datetime.now(timezone.utc)
 
 CANTERA = [
     {
+        'name': 'Goals 2H Under — ligas BAJO scoring (debe ganar)',
+        'query': "market_type='soccer_goals' AND league IN ('soccer-france-ligue-2','soccer-england-championship','soccer-italy-serie-a','soccer-portugal-primeira-liga','soccer-belgium-first-division-a','soccer-spain-laliga')",
+        'threshold': 30,
+        'note': 'League-aware: 2H Under en ligas bajo-scoring (2H-U1.5 56-59%, football-data). Hipotesis: gana mas que en ligas altas. Valida en agosto.',
+        'days': 120,
+    },
+    {
+        'name': 'Goals 2H Under — ligas ALTO scoring (control, deberia perder)',
+        'query': "market_type='soccer_goals' AND league IN ('soccer-germany-bundesliga','soccer-netherlands-eredivisie','soccer-germany-2-bundesliga','soccer-england-premier-league','soccer-turkey-super-lig')",
+        'threshold': 30,
+        'note': 'Control: 2H Under en ligas alto-scoring (Bundesliga 3.19 gol/part). Si pierde vs bajo-scoring -> filtro league-aware validado.',
+        'days': 120,
+    },
+    {
         'name': 'Under 2.5 intl/WC',
         'query': "market_type='under25_cantera'",
         'threshold': 30,

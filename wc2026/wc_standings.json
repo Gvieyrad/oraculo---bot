@@ -381,25 +381,25 @@
     },
     {
       "team": "Norway",
-      "pts": 3,
+      "pts": 4,
       "w": 1,
-      "d": 0,
+      "d": 1,
       "l": 0,
       "gf": 4,
       "ga": 1,
       "gd": 3,
-      "played": 1
+      "played": 2
     },
     {
       "team": "Senegal",
-      "pts": 0,
+      "pts": 1,
       "w": 0,
-      "d": 0,
+      "d": 1,
       "l": 1,
       "gf": 1,
       "ga": 3,
       "gd": -2,
-      "played": 1
+      "played": 2
     },
     {
       "team": "Iraq",
