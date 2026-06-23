@@ -4,7 +4,7 @@ GATEADO: HUNTER_LIVE=False => dry-run (loguea spots + captura CLV del cierre, NO
 Validacion: si CLV agregado de los spots es +, el lag es real -> flip HUNTER_LIVE=True.
 Reusa oraculo_lag_finder (signal). Cron cada 3h (reemplaza al lag_finder)."""
 import json, os, uuid, sqlite3, requests
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import oraculo_lag_finder as LF
 
 HUNTER_LIVE   = False   # <<< GATE: True = apuesta REAL. False = dry-run + captura CLV.
@@ -69,14 +69,22 @@ def hunt():
     c = _db()
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     placed = c.execute("SELECT COUNT(*) FROM hunts WHERE live=1 AND ts LIKE ?", (today+'%',)).fetchone()[0]
-    n_spots = n_act = 0
+    n_spots = n_act = n_pairs = n_cb_priced = n_pin_calls = n_inwin = 0
+    WINDOW_H = 3  # solo gastar cuota Pinnacle en partidos a <=3h del kickoff (cuando CB abre match_odds)
+    now_n = datetime.utcnow(); win_end = now_n + timedelta(hours=WINDOW_H)
     for sport, slug, lab, tier in LF.LEAGUES:
-        pin, _ = LF.fetch_pinnacle(sport); cb = LF.fetch_cb_events(slug)
+        cb = [e for e in LF.fetch_cb_events(slug) if now_n <= e['time'] <= win_end]  # CB es gratis
+        if not cb:
+            continue  # nada en ventana pre-kickoff -> no llamar Pinnacle (ahorra cuota)
+        n_inwin += len(cb)
+        pin, _ = LF.fetch_pinnacle(sport); n_pin_calls += 1  # cuota: solo si hay algo en ventana
         for pe, ce, sc in LF.match_events(pin, cb):
+            n_pairs += 1
             po = pe['odds']
             if 'draw' not in po: continue
             cpr = cb_odds_urls(ce['id'])
             if not cpr: continue
+            n_cb_priced += 1
             ov = sum(1/po[k] for k in ('home','draw','away'))
             if not (1.01 <= ov <= 1.12): continue
             fair = {k: (1/po[k])/ov for k in ('home','draw','away')}
@@ -98,8 +106,8 @@ def hunt():
     upd = capture_closing(c)
     c.close()
     mode = 'LIVE' if HUNTER_LIVE else 'DRY-RUN'
-    print('[lag_hunter %s %s] spots edge>=%.0f%%: %d | apostados: %d | CLV actualizados: %d' % (
-        mode, datetime.now(timezone.utc).strftime('%m-%d %H:%M'), MIN_EDGE*100, n_spots, n_act, upd))
+    print('[lag_hunter %s %s] en_ventana(<=%dh): %d | pin_calls: %d | pares: %d | cb_cotizados: %d | spots edge>=%.0f%%: %d | apostados: %d | CLV act: %d' % (
+        mode, datetime.now(timezone.utc).strftime('%m-%d %H:%M'), WINDOW_H, n_inwin, n_pin_calls, n_pairs, n_cb_priced, MIN_EDGE*100, n_spots, n_act, upd))
 
 if __name__ == '__main__':
     hunt()

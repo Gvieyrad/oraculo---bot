@@ -4091,7 +4091,7 @@ def _learn_tennis_result(match_name, result, label):
 # ---------------------------------------------------------------------------
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '')
 TELEGRAM_CHAT_ID = '1521532947'
-TELEGRAM_ENABLED = True
+TELEGRAM_ENABLED = False  # 2026-06-23: apagado (usuario usa WhatsApp; quita superficie del bot interactivo + token publico)
 
 def send_telegram(msg):
     """Send alert via Telegram. Fire-and-forget."""
@@ -6741,6 +6741,13 @@ def run_loop():
                     _capture_closing_odds(api, state)
                 except Exception as _clv_e:
                     log.debug('CLV capture skipped: %s', _clv_e)
+                # 2026-06-23: shadow CLV tambien en el check de 30min (no solo en run_cycle 1h).
+                # Cloudbet cotiza tenis tarde -> ventana pre-kickoff angosta; 1h/captura perdia ~50%.
+                try:
+                    from oraculo_clv import CLVOracle as _CLVShadowMid
+                    _CLVShadowMid(odds_api_key='').record_shadow_clv(api, os.path.join(SCRIPT_DIR, 'sibila.db'))
+                except Exception as _shmid_e:
+                    log.debug('Shadow CLV (mid) skipped: %s', _shmid_e)
                 settled = check_results(api, state)
                 # Soccer shadow resolver (runs when CSV data available)
                 if now - last_soccer_resolve >= 3600:

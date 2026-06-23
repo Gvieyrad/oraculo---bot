@@ -437,24 +437,24 @@
       "played": 2
     },
     {
-      "team": "Jordan",
-      "pts": 1,
-      "w": 0,
-      "d": 1,
+      "team": "Algeria",
+      "pts": 3,
+      "w": 1,
+      "d": 0,
       "l": 1,
-      "gf": 1,
-      "ga": 3,
+      "gf": 2,
+      "ga": 4,
       "gd": -2,
       "played": 2
     },
     {
-      "team": "Algeria",
-      "pts": 1,
+      "team": "Jordan",
+      "pts": 0,
       "w": 0,
-      "d": 1,
-      "l": 1,
-      "gf": 0,
-      "ga": 3,
+      "d": 0,
+      "l": 2,
+      "gf": 2,
+      "ga": 5,
       "gd": -3,
       "played": 2
     }
