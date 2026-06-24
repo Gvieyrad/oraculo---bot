@@ -26,6 +26,7 @@ LEAGUES = [
     ('soccer_conmebol_copa_sudamericana','soccer-international-clubs-copa-sudamericana','Sudamer', 'minor'),
     ('soccer_usa_mls',                   'soccer-usa-mls',                            'MLS',      'minor'),
     ('soccer_japan_j_league',            'soccer-japan-j-league',                     'JLeague',  'minor'),
+    ('soccer_fifa_world_cup',            'soccer-international-world-cup',            'WC2026',   'major'),
 ]
 
 SUFFIX = {'fk','fc','aa','sk','il','if','cf','sc','ec','ac','afc','cd','ca','sca','bk','ab','idrottsforening'}

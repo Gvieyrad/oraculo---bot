@@ -2111,10 +2111,7 @@ def scan_tennis(api, state, dry_run=False):
             log.info('  [SKIP] AutoAnalyzer block (%s): %s', 
                      next(b for b in _dyn_tennis_blocks if b in comp_key and b != 'wta'), comp_key[:40])
             continue
-        # Block WTA: Sibila 62.1% WR break-even (29 picks) — shadow-only until 50+ clean picks
-        if 'wta' in comp_key:
-            log.debug('  [SKIP] WTA blocked (shadow-only): %s', comp_key)
-            continue
+        # WTA re-enabled 2026-06-24: calibrated gate (cal_edge>=0.05) supersedes old block
         events = api.get_odds(comp_key)
         if not events:
             continue

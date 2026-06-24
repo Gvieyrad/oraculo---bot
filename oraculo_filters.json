@@ -7,14 +7,13 @@
   },
   "tennis": {
     "blocked_comp_substrings": [
-      "wta",
       "wta-rome-italy",
       "wta-foggia"
     ],
     "blocked_comp_substrings_reason": {
-      "wta": "Sibila 62.1% WR break-even (29 picks) \u2014 shadow-only until 50+ clean picks",
-      "wta-rome-italy": "WTA Rome Italy: 6W/18 (33% WR, z=-2.61, p=0.009) \u2014 estadisticamente significativo",
-      "wta-foggia": "WTA Foggia Italy: 0W/2 (0% WR) \u2014 patron Italy consistente"
+      "wta-rome-italy": "WTA Rome Italy: 6W/18 (33% WR, z=-2.61, p=0.009) — estadisticamente significativo",
+      "wta-foggia": "WTA Foggia Italy: 0W/2 (0% WR) — patron Italy consistente",
+      "wta_REMOVED_20260624": "Sibila 62.1% WR break-even (29 picks) — shadow-only until 50+ clean picks -- RE-ENABLED: calibrated gate supersedes"
     },
     "max_odds": {
       "tennis_winner": 2.1,
