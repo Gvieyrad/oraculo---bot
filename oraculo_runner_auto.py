@@ -5744,7 +5744,7 @@ def run_cycle(dry_run=False):
             _pr = float(_p.get('price', 0) or 0)
             _pc = float(_cal_tn(float(_p.get('model_prob', 0) or 0)))
             _ec = round(_pc * _pr - 1.0, 4)
-            if _ec < 0.10 or _pc < 0.55 or _ec > 0.40 or _pr < 1.40 or _pr > 2.10:
+            if _ec < 0.05 or _pc < 0.55 or _ec > 0.40 or _pr < 1.40 or _pr > 2.10:
                 continue
             _p['raw_model_prob_uncal'] = _p.get('raw_model_prob_uncal', _p.get('model_prob'))
             _p['model_prob'] = round(_pc, 4)
@@ -5753,7 +5753,7 @@ def run_cycle(dry_run=False):
             _p['_calibrated'] = True
             _cal_out.append(_p)
         tennis_picks = _cal_out
-        log.info('[tennis CALIBRADO] %d picks live (isotonic, cal_edge>=0.10, $1)', len(tennis_picks))
+        log.info('[tennis CALIBRADO] %d picks live (isotonic, cal_edge>=0.05, $1)', len(tennis_picks))
     else:
         tennis_picks = [p for p in tennis_picks
                         if p.get('market_type') not in ('tennis_exact_sets', 'sets_under',
