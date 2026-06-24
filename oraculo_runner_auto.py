@@ -6386,6 +6386,18 @@ def run_cycle(dry_run=False):
                         return False
                     return True
 
+                def _goals2h_under_odds_ok(p):
+                    # 2026-06-23 backtest (n=23): 2H Under 1.5 GANA a odds<=1.65 (WR 75-80%%, ROI +16-23%%),
+                    # PIERDE a odds>=1.65 (WR 13-20%%, ROI -74%%). Cap para cortar la banda perdedora.
+                    # Solo afecta colocacion; Sibila sigue grabando todas para seguir validando.
+                    lbl = str(p.get('label', '') or p.get('side', '')).lower()
+                    if 'goals 2h' in lbl and 'under 1.5' in lbl:
+                        _od = float(p.get('price', p.get('odds', 0)) or 0)
+                        if _od > 1.65:
+                            log.info('[Soccer Goals] BLOCKED 2H Under 1.5 @%.2f >1.65 (backtest odds-cap)', _od)
+                            return False
+                    return True
+
                 _gp_csv = [p for p in _goal_picks
                            if (p.get('_csv_form')
                                or p.get('league') == 'soccer-international-world-cup'
@@ -6394,7 +6406,8 @@ def run_cycle(dry_run=False):
                                    and p.get('edge', 0) >= 0.14
                                    and p.get('conf', 0) >= 0.72)
                                or _goals2h_under_ok(p))
-                           and _goals_over_line_ok(p)]
+                           and _goals_over_line_ok(p)
+                           and _goals2h_under_odds_ok(p)]
                 # Skip picks with kickoff >48h away (allows next-day matches, prevents weeks-long capital lock-up)
                 from datetime import datetime as _dt, timezone as _tz, timedelta as _td
                 _now_utc = _dt.now(_tz.utc)
