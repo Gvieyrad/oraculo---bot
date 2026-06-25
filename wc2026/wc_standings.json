@@ -186,17 +186,28 @@
   "E": [
     {
       "team": "Germany",
-      "pts": 7,
+      "pts": 6,
       "w": 2,
-      "d": 1,
-      "l": 0,
-      "gf": 9,
-      "ga": 2,
-      "gd": 7,
+      "d": 0,
+      "l": 1,
+      "gf": 10,
+      "ga": 4,
+      "gd": 6,
       "played": 3
     },
     {
       "team": "Ivory Coast",
+      "pts": 6,
+      "w": 2,
+      "d": 0,
+      "l": 1,
+      "gf": 4,
+      "ga": 2,
+      "gd": 2,
+      "played": 3
+    },
+    {
+      "team": "Ecuador",
       "pts": 4,
       "w": 1,
       "d": 1,
@@ -207,25 +218,14 @@
       "played": 3
     },
     {
-      "team": "Ecuador",
-      "pts": 2,
-      "w": 0,
-      "d": 2,
-      "l": 1,
-      "gf": 0,
-      "ga": 1,
-      "gd": -1,
-      "played": 3
-    },
-    {
       "team": "Curacao",
-      "pts": 2,
+      "pts": 1,
       "w": 0,
-      "d": 2,
-      "l": 1,
+      "d": 1,
+      "l": 2,
       "gf": 1,
-      "ga": 7,
-      "gd": -6,
+      "ga": 9,
+      "gd": -8,
       "played": 3
     }
   ],
