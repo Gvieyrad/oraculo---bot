@@ -1128,6 +1128,16 @@ def scan_soccer_goals(api, state, comp_keys=None, dry_run=False,
             if not home or not away:
                 continue
 
+            # Skip far-future matches (>14d) -- prevents PL 2026/27 season noise
+            _ko_raw = ev.get('cutoffTime', '')
+            if _ko_raw:
+                try:
+                    _ko_dt = datetime.strptime(_ko_raw[:19].replace('Z', ''), '%Y-%m-%dT%H:%M:%S')
+                    if (_ko_dt - datetime.utcnow()).total_seconds() > 14 * 86400:
+                        continue
+                except Exception:
+                    pass
+
             # Referee goal-rate multiplier (improves xg calibration)
             _league_code = CB_TO_LEAGUE.get(comp_key, '_')
             _referee = _fetch_referee(home, away, _league_code) or ''
