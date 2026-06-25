@@ -70,7 +70,7 @@ def hunt():
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     placed = c.execute("SELECT COUNT(*) FROM hunts WHERE live=1 AND ts LIKE ?", (today+'%',)).fetchone()[0]
     n_spots = n_act = n_pairs = n_cb_priced = n_pin_calls = n_inwin = 0
-    WINDOW_H = 3  # solo gastar cuota Pinnacle en partidos a <=3h del kickoff (cuando CB abre match_odds)
+    WINDOW_H = 48  # 2026-06-25: ampliado 3->48h -- CB abre R16 markets 2-3 dias antes, no 3h antes
     now_n = datetime.utcnow(); win_end = now_n + timedelta(hours=WINDOW_H)
     for sport, slug, lab, tier in LF.LEAGUES:
         cb = [e for e in LF.fetch_cb_events(slug) if now_n <= e['time'] <= win_end]  # CB es gratis
