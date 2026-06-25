@@ -3836,6 +3836,12 @@ def reconcile_bankroll(api, state):
         all_pending_stake = sum(float(b.get('stake', 0)) for b in bets if not b.get('isSettled'))
         correct_bankroll = INITIAL_DEPOSIT + all_settled_pnl + all_pending_stake + state.get('cumulative_void_returns', 0) - state.get('cumulative_withdrawals', 0)  # 2026-06-22: restar retiros (antes no trackeados)
         drift = abs(state['bankroll'] - correct_bankroll)
+        # 2026-06-25: sanity guard -- API partial data can drop correct_bankroll >25%.
+        # Skip rather than corrupt state with a bad API response.
+        _bk_now = state['bankroll']
+        if _bk_now > 0 and correct_bankroll < _bk_now * 0.72:
+            log.warning('RECONCILE: SKIPPED sanity fail (correct=$%.2f < 72%% local=$%.2f) -- API stale', correct_bankroll, _bk_now)
+            return
         if drift > 1.50:  # raised from 0.25 to kill ±$3 tennis-bet oscillation
             log.warning('RECONCILE: Auto-correcting bankroll $%.2f -> $%.2f (drift=$%.2f)',
                         state['bankroll'], correct_bankroll, drift)
@@ -5599,7 +5605,11 @@ def _health_check(state):
             try:
                 _bh = (datetime.now() - datetime.fromisoformat(_lbt)).total_seconds() / 3600.0
                 if _bh > 48:
-                    issues.append('0 apuestas hace %.0fh -- verificar si es correcto (mercados -EV) o roto (scan/filtros)' % _bh)
+                    _has_pending = len(state.get('active_bets', [])) > 0
+                    if not _has_pending:
+                        issues.append('0 apuestas nueva hace %.0fh (sin bets pendientes) -- revisar' % _bh)
+                    else:
+                        log.debug('[HEALTH] sin bet nueva %.0fh pero %d bets activas -- OK', _bh, len(state.get('active_bets', [])))
             except Exception:
                 pass
         # Monitor reconciliacion balance (2026-06-22): detecta retiros/depositos no trackeados (cada 3h)
@@ -6416,12 +6426,15 @@ def run_cycle(dry_run=False):
                         _ko = _dt.fromisoformat(ct.replace('Z', '+00:00'))
                         _delta = (_ko - _now_utc).total_seconds()
                         if _delta > 48 * 3600:
-                            log.debug('[Soccer Goals] skip far-future match (%.0fh): %s', _delta/3600, p.get('match','?'))
+                            log.info('[Soccer Goals] HELD kickoff>48h (%.0fh): %s', _delta/3600, p.get('match','?'))
                             return False
                         return True
                     except Exception:
                         return True
+                _n_before_48h = len(_gp_csv)
                 _gp_csv = [p for p in _gp_csv if _kicks_within_48h(p)]
+                if _n_before_48h > len(_gp_csv):
+                    log.info('[Soccer Goals] %d picks held (kickoff >48h), %d within window', _n_before_48h - len(_gp_csv), len(_gp_csv))
                 if _gp_csv:
                     global MAX_TOTAL_EXPOSURE
                     _saved_exp = MAX_TOTAL_EXPOSURE
