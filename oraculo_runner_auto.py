@@ -6450,10 +6450,10 @@ def run_cycle(dry_run=False):
                             _lbl2 = str(_gp2.get("label","")).lower()
                             if 'goals 2h' in _lbl2 and 'under' in _lbl2 \
                                     and _gp2.get("league") in _GOALS2H_DOMESTIC:
-                                _gp2.setdefault("_max_stake", 1.00)
+                                _gp2.setdefault("_max_stake", 2.00)
                                 log.debug("[Soccer Goals 2H Under] dom cap $1 (calibrating): %s", _gp2.get("match","?"))
                             else:
-                                _gp2.setdefault("_max_stake", 1.00)
+                                _gp2.setdefault("_max_stake", 2.00)
                                 log.debug("[Soccer Goals] intl cap $1 (calibrating): %s", _gp2.get("match","?"))
                     try:
                         placed += place_bets(api, state, _gp_csv, [], dry_run)
