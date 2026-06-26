@@ -66,8 +66,8 @@ SPORT_KELLY = {             # Per-sport Kelly fractions
     'soccer':       0.20,
     'soccer_under': 0.25,  # 2026-05-22: U2.5 +25.5% ROI, U1.5 +47.3% -> boost Kelly
 }
-MIN_STAKE = 0.50            # Minimum bet $0.50
-MAX_STAKE_ABS = 3.0         # 2026-06-17: hard cap $3 per bet (user rule, bajado de $5)
+MIN_STAKE = 2.00            # 2026-06-26: subido $0.50→$2 (4/4 WC MD3 wins)
+MAX_STAKE_ABS = 5.0         # 2026-06-26: subido $3→$5 (mayor room Kelly WC R16)
 CIRCUIT_BREAKER = 10.0      # Stop if bankroll < $10
 LOSS_STREAK_LIMIT = 5       # Reduce stake after 5 consecutive losses
 LOSS_STREAK_FACTOR = 0.50   # Reduce to 50%
