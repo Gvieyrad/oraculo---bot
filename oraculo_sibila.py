@@ -311,7 +311,9 @@ def resolve_pick(bet_id: str = None, match: str = None, label: str = None,
 
         conn.execute("""
             UPDATE sibila_picks
-            SET result=?, pnl=?, resolved_ts=?, closing_odds=?, clv=?
+            SET result=?, pnl=?, resolved_ts=?,
+                closing_odds=COALESCE(?, closing_odds),
+                clv=COALESCE(?, clv)
             WHERE id=?
         """, (result_norm, pnl, datetime.now().isoformat(), closing_odds, clv, rid))
         conn.commit()
