@@ -122,9 +122,9 @@ WC_1X2_XG_RATIO = 2.5     # 2026-06-18: MD2 fix – 3.0 was mutually exclusive w
 WC_1X2_MIN_PROB = 0.80    # 2026-06-12: cantera gate – only clear heavy favorites
 CB_BASE = 'https://sports-api.cloudbet.com'
 # Initial deposits (known constants for bankroll reconciliation)
-INITIAL_DEPOSIT = 57.03        # Total initial deposit (USDC + USDT)
-INITIAL_DEPOSIT_USDC = 34.56   # 57.03 x 39.98/65.98 -- proportional split
-INITIAL_DEPOSIT_USDT = 22.47   # 57.03 x 26.00/65.98 -- proportional split
+INITIAL_DEPOSIT = 100.0        # Total initial deposit (USDC + USDT)
+INITIAL_DEPOSIT_USDC = 100.0   # 57.03 x 39.98/65.98 -- proportional split
+INITIAL_DEPOSIT_USDT = 0.0   # 57.03 x 26.00/65.98 -- proportional split
 
 # Markets (V3: no BTTS)
 LEAGUE_MARKETS = {
@@ -3213,6 +3213,11 @@ def place_bets(api, state, picks, parlays, dry_run=False):
         if p.get('market_type') == 'tennis_exact_sets':
             log.info('  [SKIP] tennis_exact_sets disabled real WR=0%%: %s', p.get('match','')[:35])
             continue
+        # 3b. tennis odds trap @1.50-1.69: backtest ROI=-16.5%% (N=33 historico 2026)
+        if p.get('sport') == 'tennis' and 1.50 <= _odds_float < 1.70:
+            log.info('  [SKIP] tennis odds trap @1.50-1.69 (ROI=-16.5%%%%): %s @%.2f',
+                     p.get('match','')[:30], _odds_float)
+            continue
         # 4. tennis_winner_and_total (Games O/U): capped at $1 per bet
         # 2. Match Winner: stake reducido al 50% vs Sets Under
         _stake_factor = 0.5 if _is_winner_mkt else 1.0
@@ -3831,7 +3836,7 @@ def reconcile_bankroll(api, state):
         }
 
         # Auto-correct bankroll if drift > $0.25
-        INITIAL_DEPOSIT = 57.03 + state.get('extra_deposits', 0)
+        INITIAL_DEPOSIT = 100.0 + state.get('extra_deposits', 0)
         all_settled_pnl = sum(float(b.get('winLoss', 0)) for b in bets if b.get('isSettled'))
         all_pending_stake = sum(float(b.get('stake', 0)) for b in bets if not b.get('isSettled'))
         correct_bankroll = INITIAL_DEPOSIT + all_settled_pnl + all_pending_stake + state.get('cumulative_void_returns', 0) - state.get('cumulative_withdrawals', 0)  # 2026-06-22: restar retiros (antes no trackeados)
@@ -4158,7 +4163,7 @@ def send_whatsapp(msg):
         plain = msg.replace("*", "")
         _wq.post(
             "http://127.0.0.1:3001/send",
-            json={"chatId": "120363427170639397@g.us", "message": plain},
+            json={"chatId": "120363407028799408@g.us", "message": "[Terra] " + plain},
             timeout=5)
     except Exception:
         pass
@@ -5639,7 +5644,7 @@ def _health_check(state):
         if issues:
             _today = datetime.now().strftime('%Y-%m-%d')
             if state.get('_last_health_alert') != _today:
-                send_whatsapp('🚨 Oraculo HEALTH ALERT:' + chr(10) + '- ' + (chr(10)+'- ').join(issues))
+                send_whatsapp('🚨 Terra HEALTH ALERT:' + chr(10) + '- ' + (chr(10)+'- ').join(issues))
                 state['_last_health_alert'] = _today
             for _i in issues:
                 log.warning('[HEALTH] %s', _i)
@@ -6609,13 +6614,13 @@ def run_loop():
                 pass
         def _serve_dashboard():
             try:
-                srv = HTTPServer(('0.0.0.0', 8889), _DashHandler)
+                srv = HTTPServer(('0.0.0.0', 8890), _DashHandler)
                 srv.serve_forever()
             except Exception:
                 pass
         _dt = threading.Thread(target=_serve_dashboard, daemon=True)
         _dt.start()
-        log.info('Dashboard server started on port 8889')
+        log.info('Dashboard server started on port 8890')
     except Exception as e:
         log.debug('Dashboard server failed: %s', e)
 
@@ -6901,7 +6906,7 @@ if __name__ == '__main__':
     import subprocess as _sp, signal as _sig
     _mypid = os.getpid()
     try:
-        _procs = _sp.check_output(['pgrep', '-f', 'oraculo_runner_auto.py'], text=True).split()
+        _procs = _sp.check_output(['pgrep', '-f', '/home/noc/terra_v2/oraculo_runner_auto.py'], text=True).split()
         for _pid in _procs:
             if int(_pid) != _mypid:
                 os.kill(int(_pid), _sig.SIGTERM)
