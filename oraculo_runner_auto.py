@@ -3213,6 +3213,11 @@ def place_bets(api, state, picks, parlays, dry_run=False):
         if p.get('market_type') == 'tennis_exact_sets':
             log.info('  [SKIP] tennis_exact_sets disabled real WR=0%%: %s', p.get('match','')[:35])
             continue
+        # 3b. tennis odds trap @1.50-1.69: backtest ROI=-16.5%% (N=33 historico 2026)
+        if p.get('sport') == 'tennis' and 1.50 <= _odds_float < 1.70:
+            log.info('  [SKIP] tennis odds trap @1.50-1.69 (ROI=-16.5%%%%): %s @%.2f',
+                     p.get('match','')[:30], _odds_float)
+            continue
         # 4. tennis_winner_and_total (Games O/U): capped at $1 per bet
         # 2. Match Winner: stake reducido al 50% vs Sets Under
         _stake_factor = 0.5 if _is_winner_mkt else 1.0
@@ -6901,7 +6906,7 @@ if __name__ == '__main__':
     import subprocess as _sp, signal as _sig
     _mypid = os.getpid()
     try:
-        _procs = _sp.check_output(['pgrep', '-f', 'oraculo_runner_auto.py'], text=True).split()
+        _procs = _sp.check_output(['pgrep', '-f', '/home/noc/oraculo_v2/oraculo_runner_auto.py'], text=True).split()
         for _pid in _procs:
             if int(_pid) != _mypid:
                 os.kill(int(_pid), _sig.SIGTERM)
