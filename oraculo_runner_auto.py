@@ -1869,6 +1869,14 @@ def scan_football(api, state, dry_run=False):
     if _pinn_blended:
         log.info('WC Pinnacle blend: %d picks updated', _pinn_blended)
 
+    # Record cantera shadow picks BEFORE edge filter (exempt from live 8% threshold)
+    if _SIBILA_ENABLED:
+        _cantera_sh = [p for p in picks if p.get('_shadow_only')]
+        for _cp in _cantera_sh:
+            _sibila_record(_cp)
+        if _cantera_sh:
+            log.info('[cantera] %d shadow picks pre-filter -> Sibila', len(_cantera_sh))
+
     # Higher minimum edge for soccer (8%) to avoid marginal bets
     _pre_filter = len(picks)
     picks = [p for p in picks if p.get("edge", 0) >= 0.08]
