@@ -1166,6 +1166,14 @@ def scan_football(api, state, dry_run=False):
                         _hcity = ''
                         _alt = 0
                     if _alt >= 2000:
+                        # Check away team altitude: zero adj if also adapted (>=2000m)
+                        try:
+                            _acity = next(
+                                (c for t, c in _PC.items()
+                                 if t.lower() in away.lower() or away.lower() in t.lower()), '')
+                            _away_alt = _PA.get(_acity, 0)
+                        except Exception:
+                            _away_alt = 0
                         dc_mkt = markets.get('soccer.double_chance', {})
                         _hd_price = None
                         _hd_murl = None
@@ -1179,6 +1187,8 @@ def scan_football(api, state, dry_run=False):
                             _alt_adj = (0.12 if _alt > 3500 else
                                         0.07 if _alt > 2800 else
                                         0.04 if _alt >= 2000 else 0.0)
+                            if _away_alt >= 2000:
+                                _alt_adj = 0.0  # away also altitude-adapted
                             _p1x = min(0.88, _p1x_base + _alt_adj)
                             try:
                                 from oraculo_peru import predict_peru, load_peru_matches
