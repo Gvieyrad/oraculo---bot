@@ -69,6 +69,10 @@ TEAM_CITY = {
     'Univ San Martin': 'Lima',
     'Deportivo Municipal': 'Lima',
     'Los Chankas': 'Andahuaylas',
+    'FC Cajamarca': 'Cajamarca',
+    'Juan Pablo II': 'Cajamarca',
+    'Asociacion Deportiva Tarma': 'Tarma',
+    'Deportivo Binacional': 'Juliaca',
 }
 
 
