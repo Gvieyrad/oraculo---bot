@@ -112,7 +112,14 @@ WC_MIN_CONF = 0.62    # 2026-06-12: raised from 0.55 — picks must exceed DC mo
 WC_STAKE_PCT = 0.06   # 2026-06-28: subido 2%→6% (stake WC $2→$6)
 WC_START_DATE = '2026-06-11'
 TENNIS_MAX_EDGE = 0.25         # 2026-06-19: subido de 0.18 -> reabrir zona edge 18-25% (+27% ROI live n=19) a $1 stake; >=25% sigue bloqueado en run_cycle
-TENNIS_CALIBRATION_LIVE = True   # 2026-06-22: tennis live usa prob CALIBRADA (isotonic) en vez de raw -EV; rollback=False
+TENNIS_CALIBRATION_LIVE = False  # 2026-07-02: rollback — calibrador colapsado (2 valores); live WR=69.7%>breakeven; raw mode restaurado
+RECONCILE_AUTO_CORRECT_ENABLED = True  # 2026-07-06: re-enabled after rewriting reconcile_bankroll()
+                                        # to compare against the real Cloudbet wallet balance instead of
+                                        # get_bets(limit=50)'s truncated settled-PnL sum (that version
+                                        # drifted bankroll upward every cycle -- +$8.54 phantom gain over
+                                        # 3 hours on 2026-07-05). Verified: wallet-derived drift computed
+                                        # correctly as $28.30 ($156.48 local vs $184.78 real) before
+                                        # re-enabling. See memory oraculo_reconcile_bankroll_bug.
 TENNIS_PLATT_A = 0.3872  # 2026-06-09: composite refit on 98 sibila_picks; 2-stage correction avg→0.673=WR
 TENNIS_PLATT_B = -0.0457  # was A=0.6218 B=-0.0276 (single-stage, still 8.7pp over); composite closes gap
 SHARP_REF_ENABLED = True       # Pre-placement check: skip if model differs from Pinnacle no-vig by >10%
@@ -528,6 +535,30 @@ class CloudbetAPI:
         except Exception as e:
             log.error('Get bets error: %s', e)
         return []
+
+    def get_balance(self, currency):
+        """Fetch available account balance for a currency (v1, X-API-Key)."""
+        try:
+            r = self.v4.get(f'{CB_BASE}/pub/v1/account/currencies/{currency}/balance', timeout=15)
+            if r.status_code == 200:
+                data = r.json() if r.text.strip() else {}
+                return float(data.get('amount', 0) or 0)
+            log.warning('Get balance HTTP %d for %s: %s', r.status_code, currency, r.text[:200] if r.text else '')
+        except Exception as e:
+            log.error('Get balance error for %s: %s', currency, e)
+        return None
+
+    def get_total_balance(self, currencies=('USDC', 'USDT')):
+        """Sum available balance across currencies (assumes ~1:1 stablecoin parity).
+        Returns None if any currency fetch fails, so callers skip rather than
+        reconcile against a partial/wrong total."""
+        total = 0.0
+        for cur in currencies:
+            bal = self.get_balance(cur)
+            if bal is None:
+                return None
+            total += bal
+        return total
 
 # ---------------------------------------------------------------------------
 # State management
@@ -1187,8 +1218,8 @@ def scan_football(api, state, dry_run=False):
                             _alt_adj = (0.12 if _alt > 3500 else
                                         0.07 if _alt > 2800 else
                                         0.04 if _alt >= 2000 else 0.0)
-                            if _away_alt >= 2000:
-                                _alt_adj = 0.0  # away also altitude-adapted
+                            if _away_alt >= 2000 and (_alt - _away_alt) < 400:
+                                _alt_adj = 0.0  # near-same altitude, no home edge
                             _p1x = min(0.88, _p1x_base + _alt_adj)
                             try:
                                 from oraculo_peru import predict_peru, load_peru_matches
@@ -2826,9 +2857,12 @@ def scan_tennis(api, state, dry_run=False):
         from oraculo_wnba import train_wnba_elo, scan_wnba
         _wnba_elo = train_wnba_elo()
         if _wnba_active and _wnba_elo and len(_wnba_elo.ratings) >= 8:
-            _wnba_picks = scan_wnba(api, state, _wnba_elo, shadow=True)
+            # 2026-07-06: promoted to live -- cantera 19/20 WR=68% (>55% threshold), odds<=1.90
+            # and edge/prob gates already enforced unconditionally inside scan_wnba(). $1 stake
+            # (scan_wnba's own _max_stake default). See memory oraculo_wnba_promoted_live.
+            _wnba_picks = scan_wnba(api, state, _wnba_elo, shadow=False)
             if _wnba_picks:
-                log.info('[WNBA] %d picks (SHADOW):', len(_wnba_picks))
+                log.info('[WNBA] %d picks (LIVE):', len(_wnba_picks))
                 for _wp in _wnba_picks:
                     log.info('  [WNBA] %s | %s | edge=%.1f%% conf=%.0f%% @%.3f',
                              _wp['match'][:35], _wp['label'], _wp['edge']*100,
@@ -2837,7 +2871,6 @@ def scan_tennis(api, state, dry_run=False):
                     for _wp in _wnba_picks:
                         _wp['market_type'] = 'wnba_1x2'  # 2026-06-16: tag para tracking cantera (umbral 40)
                         _sibila_record(_wp)
-                # shadow=True so these never reach place_bets
                 picks.extend(_wnba_picks)
     except Exception as e:
         log.debug('WNBA scan error: %s', e)
@@ -3151,6 +3184,8 @@ def place_bets(api, state, picks, parlays, dry_run=False):
         _cal_factors = _load_calibration()
         if _cal_factors:
             for _p in picks:
+                if _p.get("_calibrated"):
+                    continue  # isotonic-calibrated; skip double-application
                 _mtype = _p.get("market_type") or _p.get("sport") or "unknown"
                 _cf = _cal_factors.get(_mtype, _cal_factors.get("unknown", 1.0))
                 if isinstance(_cf, (int, float)) and 0.5 < _cf < 2.0 and _cf != 1.0:
@@ -3250,10 +3285,11 @@ def place_bets(api, state, picks, parlays, dry_run=False):
     parlay_reserve = remaining * 0.10 if parlays else 0
     straight_remaining = remaining - parlay_reserve
     consecutive_fails = 0
+    log.info("[TRACE-PB] picks=%d straight_rem=%.2f rem=%.2f daily=%.2f", len(picks), straight_remaining, remaining, state["daily_staked"])
 
 
     for p in picks[:MAX_BETS_PER_SCAN]:
-        if straight_remaining < MIN_STAKE:
+        if straight_remaining < 1.00:  # 1.00 = min tennis _max_stake (was MIN_STAKE=2.00, killed  picks)
             break
         # Skip shadow-only picks (WNBA, NHL until validated)
         if p.get('shadow') or p.get('_shadow_only'):
@@ -3261,8 +3297,11 @@ def place_bets(api, state, picks, parlays, dry_run=False):
             continue
         # Skip previously rejected combos
         dedup_key = f"{p['event_id']}|{p.get('market_url', '')}|{p['label']}"
+        if p.get('market_type') == 'tennis_team_win_set':
+            log.info("[TRACE-TWS] label=%s dedup_in_rej=%s shadow=%s", str(p.get('label',''))[:35], dedup_key in _rejected_keys, bool(p.get('shadow') or p.get('_shadow_only')))
         if dedup_key in _rejected_keys:
             continue
+        log.info("[TRACE-A] post-dedup %s murl=%s", str(p.get("label",""))[:20], str(p.get("market_url",""))[:30])
         # Skip events and markets restricted by Cloudbet for this account
         _murl_pick = p.get('market_url', '')
         _restricted_pfx = state.get('restricted_market_prefixes', [])
@@ -3340,12 +3379,14 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                                state.get('consecutive_losses', 0),
                                sport=p.get('sport', ''))
         stake = round(stake * _stake_factor, 2)
+        log.info('[TRACE-STAKE] %s stake=%.2f factor=%.1f mtype=%s', str(p.get('label',''))[:25], stake, _stake_factor, p.get('market_type',''))
         if stake <= 0:
             if p.get('_force_validation') and p.get('_max_stake'):
                 # Explicit validation bet only — NOT triggered by _max_stake alone
                 stake = p['_max_stake']
                 log.debug('_max_stake forced: PortfolioKelly=0, using $%.2f validation stake', stake)
             else:
+                log.info('[TRACE-SKIP-STAKE0] stake=0 for %s (kelly=%s)', p.get('label','')[:25], _pk_result)
                 continue
         # Hard cap per pick (applied BEFORE dead-zone so cap is respected)
         if p.get('_max_stake'):
@@ -3527,6 +3568,13 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                 _retry_ev_mkt = f"{p.get('event_id','')}|{p.get('market_url','')}"
                 if _retry_ev_mkt.strip('|'):
                     active_ev_markets.add(_retry_ev_mkt)
+                _log_prediction(p['match'], p['label'],
+                               p.get('raw_model_prob', p['model_prob']),
+                               p['edge'], p['price'], stake, bet_id, p.get('sport', 'soccer'),
+                               signal=p.get('signal', 'model'),
+                               league=p.get('league', ''),
+                               event_id=p.get('event_id', ''),
+                               market_type=p.get('market_type'))
                 if _SIBILA_ENABLED:
                     _sibila_placed(p['match'], p['label'], bet_id, stake)
             else:
@@ -3633,15 +3681,26 @@ def check_results(api, state):
     # Phantom cleanup: bets con cutoff_time vencido >24h sin resultado
     from datetime import timedelta as _td
     _phantom_cut = (datetime.utcnow() - _td(hours=24)).isoformat()
-    _ab_before = len(state.get('active_bets', []))
+    _phantom_removed = [
+        b for b in state.get('active_bets', [])
+        if b.get('cutoff_time') and str(b.get('cutoff_time', '')) <= _phantom_cut
+    ]
     state['active_bets'] = [
         b for b in state.get('active_bets', [])
         if not b.get('cutoff_time') or str(b.get('cutoff_time', '')) > _phantom_cut
     ]
-    _ab_removed = _ab_before - len(state['active_bets'])
+    _ab_removed = len(_phantom_removed)
     if _ab_removed > 0:
-        log.warning('Phantom cleanup: %d bet(s) con cutoff_time vencido eliminados', _ab_removed)
-        _save_state(state)
+        _phantom_total = sum(float(b.get('stake', 0) or 0) for b in _phantom_removed)
+        _today_str = datetime.utcnow().isoformat()[:10]
+        _phantom_today = sum(
+            float(b.get('stake', 0) or 0) for b in _phantom_removed
+            if str(b.get('placed_at', b.get('placed', '')))[:10] == _today_str
+        )
+        state['bankroll'] = state.get('bankroll', 0) + _phantom_total
+        state['daily_staked'] = max(0, state.get('daily_staked', 0) - _phantom_today)
+        log.warning('Phantom cleanup: %d bet(s) eliminados, $%.2f restaurado al bankroll', _ab_removed, _phantom_total)
+        save_state(state)
     # Warn about stale pending bets (>7 days old)
     from datetime import timedelta
     _today = datetime.now().isoformat()[:10]
@@ -3923,38 +3982,47 @@ def check_results(api, state):
 # Bankroll reconciliation
 # ---------------------------------------------------------------------------
 def reconcile_bankroll(api, state):
-    """Reconcile local bankroll with Cloudbet actual balance."""
+    """Reconcile local bankroll with Cloudbet actual balance.
+
+    2026-07-06: rewritten. The previous version recomputed 'correct_bankroll'
+    from get_bets(limit=50)'s settled P&L -- that call silently truncates to
+    the 50 MOST RECENT bets (confirmed: this account has settled 450+), so
+    all_settled_pnl was never the true all-time PnL. As older losing bets
+    aged out of the 50-item window and newer winners entered, the 'correction'
+    drifted the bankroll upward every cycle on a sliding-window artifact
+    (+$8.54 phantom gain over 3 hours on 2026-07-05, no real money involved).
+    Now compares against the REAL Cloudbet wallet balance (ground truth,
+    needs no bet-history reconstruction) instead. total_pnl is no longer
+    touched here -- it's already tracked correctly per-bet at settlement
+    time (verified during 2026-07 audit), so re-deriving it from the same
+    truncated bet list was redundant and shared the same bug.
+    """
     try:
         bets = api.get_bets(limit=50, days_back=120)
         if not bets:
             return
-        # Sum all pending stakes
         pending_stake = sum(float(b.get('stake', 0)) for b in bets if not b.get('isSettled'))
-        # Sum all settled P&L
-        settled_pnl = sum(float(b.get('winLoss', 0)) for b in bets if b.get('isSettled'))
-        settled_stakes = sum(float(b.get('stake', 0)) for b in bets
-                            if b.get('isSettled') and b.get('result') == 'LOSS')
 
-        # Log discrepancy if any
         local_bankroll = state['bankroll']
         local_active = sum(b.get('stake', 0) for b in state.get('active_bets', []))
         if abs(local_active - pending_stake) > 1.0:
             log.warning('RECONCILE: local active=$%.2f vs API pending=$%.2f (diff=$%.2f)',
                         local_active, pending_stake, local_active - pending_stake)
-        # Store for dashboard
+
+        real_balance = api.get_total_balance()
+        if real_balance is None:
+            log.debug('RECONCILE: wallet balance fetch failed, skipping this cycle')
+            return
+        correct_bankroll = real_balance + local_active
+
         state['_reconcile'] = {
             'api_pending_stake': round(pending_stake, 2),
-            'api_settled_pnl': round(settled_pnl, 2),
+            'real_wallet_balance': round(real_balance, 2),
             'local_bankroll': round(local_bankroll, 2),
             'local_active_stake': round(local_active, 2),
             'checked': datetime.now().isoformat(),
         }
 
-        # Auto-correct bankroll if drift > $0.25
-        INITIAL_DEPOSIT = 57.03 + state.get('extra_deposits', 0)
-        all_settled_pnl = sum(float(b.get('winLoss', 0)) for b in bets if b.get('isSettled'))
-        all_pending_stake = sum(float(b.get('stake', 0)) for b in bets if not b.get('isSettled'))
-        correct_bankroll = INITIAL_DEPOSIT + all_settled_pnl + all_pending_stake + state.get('cumulative_void_returns', 0) - state.get('cumulative_withdrawals', 0)  # 2026-06-22: restar retiros (antes no trackeados)
         drift = abs(state['bankroll'] - correct_bankroll)
         # 2026-06-25: sanity guard -- API partial data can drop correct_bankroll >25%.
         # Skip rather than corrupt state with a bad API response.
@@ -3963,24 +4031,20 @@ def reconcile_bankroll(api, state):
             log.warning('RECONCILE: SKIPPED sanity fail (correct=$%.2f < 72%% local=$%.2f) -- API stale', correct_bankroll, _bk_now)
             return
         if drift > 1.50:  # raised from 0.25 to kill ±$3 tennis-bet oscillation
-            log.warning('RECONCILE: Auto-correcting bankroll $%.2f -> $%.2f (drift=$%.2f)',
-                        state['bankroll'], correct_bankroll, drift)
-            if drift > 5.0:
-                _rmsg = ('Oraculo RECONCILE ALERT | drift=$%.2f'
-                         ' local=$%.2f -> correct=$%.2f'
-                         ' settled=$%.2f pending=$%.2f') % (
-                         drift, state['bankroll'], correct_bankroll,
-                         all_settled_pnl, all_pending_stake)
-                send_telegram(_rmsg)
-            state['bankroll'] = round(correct_bankroll, 2)
-            # Sync total_pnl to match API-derived settled PnL (avoids silent drift accumulation)
-            api_total_pnl = round(all_settled_pnl, 2)
-            local_pnl = round(state.get('total_pnl', 0), 2)
-            pnl_drift = abs(local_pnl - api_total_pnl)
-            if pnl_drift > 0.25:
-                log.warning('RECONCILE: total_pnl drift local=$%.2f vs api=$%.2f — correcting',
-                            local_pnl, api_total_pnl)
-                state['total_pnl'] = api_total_pnl
+            if RECONCILE_AUTO_CORRECT_ENABLED:
+                log.warning('RECONCILE: Auto-correcting bankroll $%.2f -> $%.2f (drift=$%.2f, wallet=$%.2f + active=$%.2f)',
+                            state['bankroll'], correct_bankroll, drift, real_balance, local_active)
+                if drift > 5.0:
+                    _rmsg = ('Oraculo RECONCILE ALERT | drift=$%.2f'
+                             ' local=$%.2f -> correct=$%.2f'
+                             ' wallet=$%.2f active=$%.2f') % (
+                             drift, state['bankroll'], correct_bankroll, real_balance, local_active)
+                    send_telegram(_rmsg)
+                state['bankroll'] = round(correct_bankroll, 2)
+            else:
+                log.info('RECONCILE: drift=$%.2f detected (local=$%.2f wallet-derived=$%.2f) -- '
+                         'auto-correct disabled, no changes applied',
+                         drift, state['bankroll'], correct_bankroll)
         # bankroll_by_currency is maintained by settlement code (WIN/LOSS adjustments).
         # Reconciler does NOT overwrite it — the per-currency formula requires per-currency
         # initial deposit constants that are structurally inconsistent with the total.
@@ -5798,15 +5862,6 @@ def run_cycle(dry_run=False):
     # 2026-05-13: scan with dry_run=True so picks populate Sibila even when betting is off.
     # Then discard football_picks=[] so place_bets / parlay builders don't try to bet.
     football_picks = scan_football(api, state, dry_run=dry_run)  # 2026-05-29: F2 enable live
-    # Peru DC cantera: record shadow picks BEFORE F2/FaseB filter (shadow picks exempt from live filters)
-    if _SIBILA_ENABLED:
-        _peru_dc_shadow = [p for p in football_picks
-                           if p.get('_shadow_only') and p.get('league') == 'PER'
-                           and p.get('market_type') == 'double_chance']
-        for _pp in _peru_dc_shadow:
-            _sibila_record(_pp)
-        if _peru_dc_shadow:
-            log.info('[PER DC cantera] %d picks shadowed to Sibila', len(_peru_dc_shadow))
     if not SOCCER_ENABLED:
         football_picks = []
     # Fase B 2026-05-22: drop over/under picks below raw 0.65 model_prob
@@ -5892,8 +5947,16 @@ def run_cycle(dry_run=False):
         log.info('[tennis CALIBRADO] %d picks live (isotonic, cal_edge>=0.05, $1)', len(tennis_picks))
     else:
         tennis_picks = [p for p in tennis_picks
-                        if p.get('market_type') not in ('tennis_exact_sets', 'sets_under',
+                        if p.get('market_type') not in ('tennis_exact_sets',
                                                         'tennis_winner_and_total')  # w+total: 0W/1L, complex market
+                        # sets_under: LIVE 2026-07-05 — cantera grass/hard paso umbral (WR=65% n=31, >=60% en 20+)
+                        # Mismo filtro que el shadow record (surface!=clay, non-challenger, edge>=0.10, prob>=0.55)
+                        # clay sigue BLOQUEADO — WR=9.1% (11 RG picks all LOSS)
+                        and not (p.get('market_type') == 'sets_under'
+                                 and (p.get('surface', 'hard') == 'clay'
+                                      or 'challenger' in (p.get('league', '') or '').lower()
+                                      or float(p.get('edge', 0) or 0) < 0.10
+                                      or float(p.get('model_prob', 0) or 0) < 0.55))
                         # tennis_team_win_set: edge>=10% AND odds 1.40-1.90
                         # EXCLUIR 0.15-0.18: valle de la muerte WR=42.9% ROI=-34% n=7 (2026-06-02)
                         # 0.12-0.15 WR=75% y 0.18+ WR=75% son buenos; 0.15-0.18 es anomalia del modelo
@@ -5913,9 +5976,10 @@ def run_cycle(dry_run=False):
                                  and float(p.get('price', 0) or 0) >= 1.50)
                         # h2h: DESACTIVADO 2026-06-02 — WR=52.6%, ROI=-7.6% Sibila n=38 placed; win_set (WR=65.7%) es el mercado
                         and p.get('market_type') not in ('', None)]
-        # 2026-06-19: tennis a $1 fijo (bajo riesgo, mantener activo + juntar data live)
+        # 2026-07-02: stake $2 (84 bets live WR=66.7%% n suficiente; antes $1 para acumular data)
+        # 2026-07-05: sets_under grass/hard promovido a vivo, stake $2 (cantera WR=65% n=31)
         for _tp in tennis_picks:
-            _tp['_max_stake'] = 1.00
+            _tp['_max_stake'] = 2.00 if _tp.get('market_type') in ('tennis_team_win_set', 'sets_under') else 1.00
     # Platt calibration shadow log — N=54 Sibila tws, A=0.357 B=0.088 — log only, no placement effect
     try:
         from oraculo_tws_calibrator import shadow_log_platt as _tws_platt_shadow
@@ -6454,7 +6518,7 @@ def run_cycle(dry_run=False):
         # CSL post-WC: CSL_ENABLED gates this (set True post-Jul 19 2026)
         if CSL_ENABLED and 'soccer-china-chinese-super-league' not in _goals_comps:
             _goals_comps.append('soccer-china-chinese-super-league')
-        _goal_picks = _scan_goals(api, state, comp_keys=_goals_comps, dry_run=dry_run, min_edge=0.12, min_conf=0.70)
+        _goal_picks = _scan_goals(api, state, comp_keys=_goals_comps, dry_run=dry_run, min_edge=0.12, min_conf=0.65)
         if _goal_picks:
             log.info('[Soccer Goals] %d picks found', len(_goal_picks))
             if _SIBILA_ENABLED:
@@ -6514,6 +6578,10 @@ def run_cycle(dry_run=False):
                     lbl = str(p.get('label', '')).lower()
                     if p.get('market_type') != 'soccer_goals':
                         return True
+                    # Block Goals FT Under (2026-07-03: 0W/1L, full-game uncertainty too high)
+                    if 'goals ft' in lbl and 'under' in lbl:
+                        log.info('[Soccer Goals] BLOCKED Goals FT Under (0W/1L gate): %s', p.get('match','?'))
+                        return False
                     if 'over' not in lbl or 'goals 2h' in lbl:
                         return True
                     m = _re2.search(r'over\s*(\d+\.?\d*)', lbl)
@@ -6540,14 +6608,16 @@ def run_cycle(dry_run=False):
 
                 _gp_csv = [p for p in _goal_picks
                            if (p.get('_csv_form')
-                               or p.get('league') == 'soccer-international-world-cup'
+                               or (p.get('league') == 'soccer-international-world-cup'
+                   and (float(p.get('conf', 0)) >= 0.70 or float(p.get('edge', 0)) >= 0.20))
                                or (p.get('league') in _CONMEBOL_COMPS
                                    and p.get('league') not in _INTL_SHADOW_COMPS
                                    and p.get('edge', 0) >= 0.14
                                    and p.get('conf', 0) >= 0.72)
                                or _goals2h_under_ok(p))
                            and _goals_over_line_ok(p)
-                           and _goals2h_under_odds_ok(p)]
+                           and _goals2h_under_odds_ok(p)
+                           and (_tfm is None or _tfm.should_place(p))]
                 # Skip picks with kickoff >48h away (allows next-day matches, prevents weeks-long capital lock-up)
                 from datetime import datetime as _dt, timezone as _tz, timedelta as _td
                 _now_utc = _dt.now(_tz.utc)
@@ -6558,8 +6628,9 @@ def run_cycle(dry_run=False):
                     try:
                         _ko = _dt.fromisoformat(ct.replace('Z', '+00:00'))
                         _delta = (_ko - _now_utc).total_seconds()
-                        if _delta > 55 * 3600:
-                            log.info('[Soccer Goals] HELD kickoff>55h (%.0fh): %s', _delta/3600, p.get('match','?'))
+                        _max_h = 80 if p.get("league", "") == "soccer-international-world-cup" else 55
+                        if _delta > _max_h * 3600:
+                            log.info("[Soccer Goals] HELD kickoff>%dh (%.0fh): %s", _max_h, _delta/3600, p.get("match","?"))
                             return False
                         return True
                     except Exception:
@@ -6573,20 +6644,30 @@ def run_cycle(dry_run=False):
                     _saved_exp = MAX_TOTAL_EXPOSURE
                     MAX_TOTAL_EXPOSURE = min(0.70, MAX_TOTAL_EXPOSURE + 0.10)
                     # Tag under picks for higher Kelly (soccer_under: 0.25 vs soccer: 0.20)
+                    # 2026-07-06: SPORT_KELLY['soccer_under']=0.25 was backtested on FULL-TIME
+                    # Under (U2.5 +25.5% ROI, U1.5 +47.3%, comment above at line ~67) but the tag
+                    # matched ANY "under" label -- in practice every real bet tagged so far has
+                    # been 2H Under (12/12, WR=50%, -40.9% ROI, $18 staked -> -$7.37), which never
+                    # had that backtest support. 2H Under now keeps the base 'soccer' Kelly (0.20)
+                    # until it earns its own validated boost.
                     for _gp2 in _gp_csv:
-                        if "under" in str(_gp2.get("label","")).lower():
+                        _lbl_lower = str(_gp2.get("label","")).lower()
+                        _is_2h = "2h" in _lbl_lower or "second_half" in _lbl_lower
+                        if "under" in _lbl_lower and not _is_2h:
                             _gp2["sport"] = "soccer_under"
                     # Goals 2H Under doméstico sin CSV: cap $1 (calibrando — shadow ROI=-27.8%, N live=9)
                     # Otros sin CSV (intl): cap $1 hasta N live>=25
                     for _gp2 in _gp_csv:
+                        _sg_edge = float(_gp2.get("edge", 0) or 0)
+                        _sg_stake = 4.00  # 2026-07-03: raised from 2.00 (22-bet soccer WR=78.6%+)
                         if not _gp2.get("_csv_form"):
                             _lbl2 = str(_gp2.get("label","")).lower()
                             if 'goals 2h' in _lbl2 and 'under' in _lbl2 \
                                     and _gp2.get("league") in _GOALS2H_DOMESTIC:
-                                _gp2.setdefault("_max_stake", 2.00)
+                                _gp2.setdefault("_max_stake", _sg_stake)
                                 log.debug("[Soccer Goals 2H Under] dom cap $1 (calibrating): %s", _gp2.get("match","?"))
                             else:
-                                _gp2.setdefault("_max_stake", 2.00)
+                                _gp2.setdefault("_max_stake", _sg_stake)
                                 log.debug("[Soccer Goals] intl cap $1 (calibrating): %s", _gp2.get("match","?"))
                         _gp2.setdefault("_force_validation", True)  # Jun 28: cal factor 0.74 deflates prob->Kelly=0
                     _n_placed_goals = 0
@@ -6718,6 +6799,54 @@ def _prune_odds_history():
         log.warning('odds_history prune failed: %s', _e)
 
 # ---------------------------------------------------------------------------
+# Startup self-check
+# ---------------------------------------------------------------------------
+def _startup_self_check():
+    """Verify critical Sibila/resolver functions actually exist at import time.
+
+    2026-07-06: added after finding two safety features (clv_report,
+    the rugby resolver) silently dead for weeks -- an ImportError inside a
+    try/except caught by 'except Exception: log.debug(...)' every cycle,
+    invisible unless someone was reading debug-level logs. This runs ONCE at
+    startup and alerts loudly (log.error + Telegram) instead of failing quiet.
+    Uses importlib on modules already imported earlier in this file, so this
+    is a cache lookup only -- no re-execution of module-level code, no new
+    network calls, no side effects.
+    """
+    import importlib
+    checks = [
+        ('oraculo_sibila', 'clv_report'),
+        ('oraculo_sibila', 'record_pick'),
+        ('oraculo_sibila', 'mark_placed'),
+        ('oraculo_sibila', 'resolve_pick'),
+        ('soccer_sibila_resolver', 'resolve_all_pending'),
+        ('mlb_sibila_resolver', 'resolve_all_pending'),
+        ('tennis_sibila_resolver', 'resolve_all_pending'),
+        ('wnba_sibila_resolver', 'resolve_wnba_pending'),
+        ('nba_sibila_resolver', 'resolve_nba_pending'),
+        ('nhl_sibila_resolver', 'resolve_nhl_pending'),
+        ('oraculo_clv', 'CLVOracle'),
+    ]
+    problems = []
+    for mod_name, fn_name in checks:
+        try:
+            mod = importlib.import_module(mod_name)
+            if not hasattr(mod, fn_name):
+                problems.append('%s.%s MISSING' % (mod_name, fn_name))
+        except Exception as e:
+            problems.append('%s import failed: %s' % (mod_name, e))
+    if problems:
+        msg = 'ORACULO STARTUP CHECK FAILED:\n' + '\n'.join(problems)
+        log.error(msg)
+        try:
+            send_telegram(msg)
+        except Exception:
+            pass
+    else:
+        log.info('[startup self-check] all %d critical functions OK', len(checks))
+
+
+# ---------------------------------------------------------------------------
 # 24/7 loop
 # ---------------------------------------------------------------------------
 def run_loop():
@@ -6729,6 +6858,7 @@ def run_loop():
     log.info('  Min edge: %.0f%% | Min conf: %.0f%%', MIN_EDGE * 100, MIN_CONF * 100)
     log.info('  Circuit breaker: $%.2f', CIRCUIT_BREAKER)
     log.info('*' * 60)
+    _startup_self_check()
 
     # Start interactive Telegram bot
     if TELEGRAM_ENABLED:
