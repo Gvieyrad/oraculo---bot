@@ -48,7 +48,7 @@ except Exception:
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-SCAN_INTERVAL = 3600        # 1 hour between market scans
+SCAN_INTERVAL = 1800        # 2026-07-09: 30 min between market scans (was 1h)
 RESULT_INTERVAL = 1800      # 30 min between result checks
 MIN_EDGE = 0.08             # 8% minimum edge — subido de 5%: modelo sobre-estima edge (13.6% declarado vs -7% ROI real)
 MIN_CONF = 0.70             # 2026-06-12: backtest n=367 — prob>=70% ROI=+47% vs +1.3% baseline
@@ -66,7 +66,7 @@ SPORT_KELLY = {             # Per-sport Kelly fractions
     'soccer':       0.20,
     'soccer_under': 0.25,  # 2026-05-22: U2.5 +25.5% ROI, U1.5 +47.3% -> boost Kelly
 }
-MIN_STAKE = 2.00            # 2026-06-26: subido $0.50→$2 (4/4 WC MD3 wins)
+MIN_STAKE = 3.00            # 2026-07-12: subido de 2 a 3 a pedido (sets_under 6W-0L-1P real, agregado sistema -34.80 en 487)
 MAX_STAKE_ABS = 6.0         # 2026-06-28: subido $5→$6 (WC_STAKE_PCT 6%)
 CIRCUIT_BREAKER = 10.0      # Stop if bankroll < $10
 LOSS_STREAK_LIMIT = 5       # Reduce stake after 5 consecutive losses
@@ -76,6 +76,9 @@ MAX_PER_MATCH = 1           # Max 1 bet per match (avoid correlated exposure)
 MAX_EXPOSURE_PER_MATCH = 0.10  # Max 10% of bankroll on a single match
 MAX_EXPOSURE_PER_EVENT = 0.05  # Max 5% of bankroll per event_id (cross-cycle)
 MAX_TOTAL_EXPOSURE = 0.30     # Max 30% of bankroll in pending bets — reduced from 60% (crash prevention)
+MARKET_TYPE_EXPOSURE_CAP = {
+    'sets_under': 10.0,  # 2026-07-12: flat $ cap after 16 simultaneous bets (17.9% bankroll) on thin real sample
+}
 TENNIS_BUDGET_RESERVE = 0.30  # Reserve 30% of daily budget for tennis
 PARLAYS_ENABLED = False     # Disabled 2026-05-12: 1W/5L, ROI -61.8%, -$15.12 (stale 87.5% WR was sample bias)
 PARLAY_MIN_LEGS = 2         # 2-leg parlays only (3+ leg hit rate too low)
@@ -3249,6 +3252,7 @@ def place_bets(api, state, picks, parlays, dry_run=False):
     active_ev_markets = set()  # event_id|market_url — stable dedup (label can change between scans)
     active_matches = {}  # match_name -> total staked
     active_events = {}   # event_id -> total staked (cross-cycle)
+    active_by_market_type = {}  # market_type -> total staked (cross-cycle)
     for ab in state.get('active_bets', []):
         ak = f"{ab.get('match','')}|{ab.get('label','')}"
         active_keys.add(ak)
@@ -3262,6 +3266,9 @@ def place_bets(api, state, picks, parlays, dry_run=False):
         eid = _ab_eid
         if eid:
             active_events[eid] = active_events.get(eid, 0) + ab.get('stake', 0)
+        _ab_mtype = ab.get('market_type', '')
+        if _ab_mtype:
+            active_by_market_type[_ab_mtype] = active_by_market_type.get(_ab_mtype, 0) + ab.get('stake', 0)
 
     # Sibila safety check: matches with open live bets (placed=1, result IS NULL)
     _sibila_open_matches = set()
@@ -3347,6 +3354,15 @@ def place_bets(api, state, picks, parlays, dry_run=False):
             log.info('  [SKIP] Match exposure $%.2f >= max $%.2f: %s',
                      match_exposure, max_match_exposure, match_name[:35])
             continue
+        # Skip if market-type exposure exceeds a hard flat-$ cap (2026-07-12)
+        _mtype_pick = p.get('market_type', '')
+        _mtype_cap = MARKET_TYPE_EXPOSURE_CAP.get(_mtype_pick)
+        if _mtype_cap is not None:
+            _mtype_exp = active_by_market_type.get(_mtype_pick, 0)
+            if _mtype_exp + MIN_STAKE > _mtype_cap:
+                log.info('  [SKIP] Market-type %s exposure $%.2f >= cap $%.2f: %s',
+                         _mtype_pick, _mtype_exp, _mtype_cap, match_name[:35])
+                continue
         # --- Aprendizajes de errores (2026-04-28) ---
         # 1. Match Winner con odds > 2.0: ROI -51%, skip
         _is_winner_mkt = any(w in (p.get('label') or '') for w in ('Winner:', 'winner/', 'home', 'away', 'moneyline'))
@@ -3507,6 +3523,8 @@ def place_bets(api, state, picks, parlays, dry_run=False):
             send_whatsapp(_wa_bet_msg(p, stake, state['daily_pnl']))
             match_bets_this_cycle[p['match']] = match_bets_this_cycle.get(p['match'], 0) + 1
             active_matches[p['match']] = active_matches.get(p['match'], 0) + stake
+            if p.get('market_type',''):
+                active_by_market_type[p['market_type']] = active_by_market_type.get(p['market_type'], 0) + stake
             if p.get('event_id',''):
                 active_events[p['event_id']] = active_events.get(p['event_id'], 0) + stake
             _placed_ev_mkt = f"{p.get('event_id','')}|{p.get('market_url','')}"
@@ -3563,6 +3581,8 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                 send_whatsapp(_wa_bet_msg(p, stake, state['daily_pnl']))
                 match_bets_this_cycle[p['match']] = match_bets_this_cycle.get(p['match'], 0) + 1
                 active_matches[p['match']] = active_matches.get(p['match'], 0) + stake
+                if p.get('market_type',''):
+                    active_by_market_type[p['market_type']] = active_by_market_type.get(p['market_type'], 0) + stake
                 if p.get('event_id',''):
                     active_events[p['event_id']] = active_events.get(p['event_id'], 0) + stake
                 _retry_ev_mkt = f"{p.get('event_id','')}|{p.get('market_url','')}"
@@ -3823,23 +3843,51 @@ def check_results(api, state):
         })
         _log_settlement(bet_id, result, wl)
         if matched_active:
-            _write_bet_history(
-                bet_id=bet_id,
-                match=matched_active.get('match', ''),
-                league=matched_active.get('league', ''),
-                sport=matched_active.get('sport', ''),
-                label=matched_active.get('label', ''),
-                market_type=matched_active.get('market_type', ''),
-                placed_at=matched_active.get('placed', ''),
-                settled_at=datetime.now().isoformat(),
-                stake=float(matched_active.get('stake', 0) or 0),
-                price=float(matched_active.get('price', 0) or 0),
-                model_prob=float(matched_active.get('model_prob', 0) or 0),
-                edge=float(matched_active.get('edge', 0) or 0),
-                result=result,
-                pnl=float(wl),
-                currency=matched_active.get('currency', 'USDC'),
-            )
+            _bh_match = matched_active.get('match', '')
+            _bh_league = matched_active.get('league', '')
+            _bh_sport = matched_active.get('sport', '')
+            _bh_label = matched_active.get('label', '')
+            _bh_market_type = matched_active.get('market_type', '')
+            _bh_placed_at = matched_active.get('placed', '')
+            _bh_stake = float(matched_active.get('stake', 0) or 0)
+            _bh_price = float(matched_active.get('price', 0) or 0)
+            _bh_model_prob = float(matched_active.get('model_prob', 0) or 0)
+            _bh_edge = float(matched_active.get('edge', 0) or 0)
+            _bh_currency = matched_active.get('currency', 'USDC')
+        else:
+            # 2026-07-10: bet settled but no longer in active_bets (phantom-cleaned
+            # or never persisted at placement) -- reconstruct from raw Cloudbet
+            # payload so it still lands in bet_history (fixes wins/losses counter
+            # drift vs bet_history row count).
+            _bh_sel = b.get('selection', {}) or {}
+            _bh_match = _bh_sel.get('eventName', _bh_sel.get('eventId', ''))
+            _bh_league = ''
+            _bh_sport = ''
+            _bh_label = _bh_sel.get('marketUrl', '')
+            _bh_market_type = ''
+            _bh_placed_at = ''
+            _bh_stake = stake
+            _bh_price = float(b.get('price', 0) or 0)
+            _bh_model_prob = 0.0
+            _bh_edge = 0.0
+            _bh_currency = b.get('currency', 'USDC')
+        _write_bet_history(
+            bet_id=bet_id,
+            match=_bh_match,
+            league=_bh_league,
+            sport=_bh_sport,
+            label=_bh_label,
+            market_type=_bh_market_type,
+            placed_at=_bh_placed_at,
+            settled_at=datetime.now().isoformat(),
+            stake=_bh_stake,
+            price=_bh_price,
+            model_prob=_bh_model_prob,
+            edge=_bh_edge,
+            result=result,
+            pnl=float(wl),
+            currency=_bh_currency,
+        )
         # CLV Oracle: calcular CLV con Betfair/Pinnacle como referencia
         _clv_data = {}
         if _CLV_ORACLE_ENABLED and matched_active:

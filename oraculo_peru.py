@@ -30,6 +30,8 @@ ALTITUDE = {
     'Cajamarca': 2750,
     'Cajabamba': 2650,
     'Andahuaylas': 2926,
+    'Huanuco': 1894,  # 2026-07-12: Alianza Universidad (promoted)
+    'Moquegua': 1410,  # 2026-07-12: Deportivo Moquegua (promoted)
     'Cutervo': 2637,
     'Arequipa': 2335,
     'Moyobamba': 860,
@@ -73,6 +75,20 @@ TEAM_CITY = {
     'Juan Pablo II': 'Cajamarca',
     'Asociacion Deportiva Tarma': 'Tarma',
     'Deportivo Binacional': 'Juliaca',
+    'Alianza Universidad': 'Huanuco',  # 2026-07-12: promoted, Liga 1 2025/2026
+    'Deportivo Moquegua': 'Moquegua',  # 2026-07-12: promoted, Liga 1 2025/2026
+}
+
+# CB API name -> cached PER_all.json name (different naming conventions)
+TEAM_CB_ALIASES = {
+    'CS Cienciano': 'Cienciano',
+    'Cusco FC': 'Cusco',
+    'Los Chankas CYC': 'Club Deportivo Los Chankas',
+    'Universitario de Deportes': 'Universitario',
+    'Universidad Tecnica de Cajamarca': 'UTC Cajamarca',
+    'Sport Boys Association': 'Sport Boys',
+    'Asociacion Deportiva Tarma': 'ADT',
+    'Atletico Grau de Sullana': 'Atletico Grau',
 }
 
 
@@ -128,6 +144,9 @@ def build_peru_features(match, context):
     ht = match.get('home_team', '')
     at = match.get('away_team', '')
     venue_city = match.get('venue_city', '')
+    # Normalize CB API names to cached PER_all.json names for form lookup
+    ht_norm = TEAM_CB_ALIASES.get(ht, ht)
+    at_norm = TEAM_CB_ALIASES.get(at, at)
 
     # Altitude features
     venue_alt = get_altitude(venue_city)
@@ -147,16 +166,16 @@ def build_peru_features(match, context):
 
     # Form features from context
     home_recent = [m for m in context
-                   if m.get('home_team') == ht or m.get('away_team') == ht][-10:]
+                   if m.get('home_team') == ht_norm or m.get('away_team') == ht_norm][-10:]
     away_recent = [m for m in context
-                   if m.get('home_team') == at or m.get('away_team') == at][-10:]
+                   if m.get('home_team') == at_norm or m.get('away_team') == at_norm][-10:]
 
     # Home form
     h_wins = h_goals = h_conceded = h_matches = 0
     for m in home_recent:
         hs = m.get('home_score', 0) or 0
         as_ = m.get('away_score', 0) or 0
-        if m.get('home_team') == ht:
+        if m.get('home_team') == ht_norm:
             h_goals += hs
             h_conceded += as_
             if hs > as_:
@@ -173,7 +192,7 @@ def build_peru_features(match, context):
     for m in away_recent:
         hs = m.get('home_score', 0) or 0
         as_ = m.get('away_score', 0) or 0
-        if m.get('home_team') == at:
+        if m.get('home_team') == at_norm:
             a_goals += hs
             a_conceded += as_
             if hs > as_:
