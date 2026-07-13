@@ -78,6 +78,7 @@ MAX_EXPOSURE_PER_EVENT = 0.05  # Max 5% of bankroll per event_id (cross-cycle)
 MAX_TOTAL_EXPOSURE = 0.30     # Max 30% of bankroll in pending bets — reduced from 60% (crash prevention)
 MARKET_TYPE_EXPOSURE_CAP = {
     'sets_under': 10.0,  # 2026-07-12: flat $ cap after 16 simultaneous bets (17.9% bankroll) on thin real sample
+    'double_chance': 10.0,  # 2026-07-12: peru_dc just went live (2 usd/bet), cap concurrent exposure pre-emptively
 }
 TENNIS_BUDGET_RESERVE = 0.30  # Reserve 30% of daily budget for tennis
 PARLAYS_ENABLED = False     # Disabled 2026-05-12: 1W/5L, ROI -61.8%, -$15.12 (stale 87.5% WR was sample bias)
@@ -1245,7 +1246,7 @@ def scan_football(api, state, dry_run=False):
                                     'model_prob': _p1x,
                                     'edge': _dc_edge,
                                     'sport': 'soccer',
-                                    '_shadow_only': True,
+                                    '_max_stake': 2.00,  # 2026-07-12: live, capped at 2 USD (was shadow-only)
                                     'market_type': 'double_chance',
                                 })
                     continue
