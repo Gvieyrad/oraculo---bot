@@ -177,9 +177,12 @@ def fetch_wnba_results(force: bool = False) -> list:
 
 
 def train_wnba_elo(force: bool = False) -> WNBAElo:
-    """Train WNBA Elo from ESPN results. Uses cache unless forced."""
+    """Train WNBA Elo from ESPN results. Uses cache unless forced or stale."""
     elo = WNBAElo()
-    if not force and elo.load() and len(elo.ratings) >= 8:
+    # 2026-07-13: ported fix from oraculo_v2 -- cache had no TTL, froze ratings
+    # indefinitely after first save. Match the 6h TTL fetch_wnba_results() uses.
+    cache_age = (time.time() - os.path.getmtime(WNBA_ELO_CACHE)) if os.path.exists(WNBA_ELO_CACHE) else 1e18
+    if not force and cache_age < 21600 and elo.load() and len(elo.ratings) >= 8:
         log.info('WNBA Elo loaded from cache (%d teams)', len(elo.ratings))
         return elo
 

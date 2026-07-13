@@ -201,9 +201,12 @@ def fetch_nhl_results(force: bool = False) -> list:
 
 
 def train_nhl_elo(force: bool = False) -> NHLElo:
-    """Train NHL Elo from ESPN results. Uses cache unless forced."""
+    """Train NHL Elo from ESPN results. Uses cache unless forced or stale."""
     elo = NHLElo()
-    if not force and elo.load() and len(elo.ratings) >= 28:
+    # 2026-07-13: same missing-TTL bug found and fixed in oraculo_wnba.py --
+    # cache never expired once saved. Match the 6h TTL fetch_nhl_results() uses.
+    cache_age = (time.time() - os.path.getmtime(NHL_ELO_CACHE)) if os.path.exists(NHL_ELO_CACHE) else 1e18
+    if not force and cache_age < 21600 and elo.load() and len(elo.ratings) >= 28:
         log.info('NHL Elo loaded from cache (%d teams)', len(elo.ratings))
         return elo
 
