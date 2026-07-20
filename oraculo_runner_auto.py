@@ -66,8 +66,8 @@ SPORT_KELLY = {             # Per-sport Kelly fractions
     'soccer':       0.20,
     'soccer_under': 0.25,  # 2026-05-22: U2.5 +25.5% ROI, U1.5 +47.3% -> boost Kelly
 }
-MIN_STAKE = 3.00            # 2026-07-12: subido de 2 a 3 a pedido (sets_under 6W-0L-1P real, agregado sistema -34.80 en 487)
-MAX_STAKE_ABS = 6.0         # 2026-06-28: subido $5→$6 (WC_STAKE_PCT 6%)
+MIN_STAKE = 4.00            # 2026-07-13: subido de 3 a 4 a pedido, post-fix WNBA/NHL/rugby/WTA (ultimos 7d: 13W-5L +6.84)
+MAX_STAKE_ABS = 7.0         # 2026-07-13: subido 6 a 7 a pedido
 CIRCUIT_BREAKER = 10.0      # Stop if bankroll < $10
 LOSS_STREAK_LIMIT = 5       # Reduce stake after 5 consecutive losses
 LOSS_STREAK_FACTOR = 0.50   # Reduce to 50%
@@ -92,8 +92,8 @@ SOCCER_ENABLED = True          # Re-enabled: 86% WR on 14 real bets, +$185 PnL
 SOCCER_GOALS_ENABLED = True    # Re-enabled: referee goal-rate multiplier + stricter thresholds (P3.1)
 CSL_ENABLED = False             # 2026-06-28: post-WC activation (Jul 19+)
 MLB_ENABLED = True             # 2026-06-01: re-enabled; 2026-06-02: f5_ml ACTIVADO LIVE (shadow WR=58.1% n=210 > umbral 54%/30)
-MLB_F5_ML_ENABLED = False        # 2026-06-12: CANTERA — real WR=24% n=25 vs shadow WR=58%; revalidar con n>=50
-MLB_F5_TOTAL_ENABLED = False  # 2026-06-11: N=78 WR=59% ROI=+1.7% — insignificante, riesgo no justificado
+MLB_F5_ML_ENABLED = True         # 2026-07-14: reactivado a pedido, $0.50 stake (revalidado n=457 shadow post-disable, WR=51%)
+MLB_F5_TOTAL_ENABLED = True   # 2026-07-14: reactivado a pedido, $0.50 stake (nunca estuvo en vivo, shadow WR=71.7% n=67 pero sin track record real)
 MLB_PROB_CALIBRATION = 0.85      # Systematic overestimation correction: raw WR 36.3% vs implied 43.6%
 MLB_MIN_EDGE = 0.15              # 2026-05-22: raised from 0.08 global — ROI -9.3% on 102 real picks
 MLB_F5_ML_MIN_EDGE = 0.08        # 2026-06-02: f5_ml lower threshold — shadow WR=58.1% n=210 picks
@@ -716,6 +716,68 @@ def _get_dynamic_kelly_fraction(base_frac=KELLY_FRAC, window=20):
 
 
 
+def _auto_kill_check(state, dry_run=True):
+    """
+    2026-07-17: kill-switch automatico por market_type -- hasta ahora, un
+    mercado sabido malo (ej. baseball F5 ML, MATADO en cantera_status.py
+    desde 2026-06-18) solo se cortaba si alguien lo notaba a mano; la marca
+    de cantera_status.py es texto informativo, no esta conectada a
+    restricted_market_prefixes. Esta funcion lee sibila_picks (placed=1,
+    settled) -- misma fuente que _auto_tune_strategy -- agrupa por
+    market_type, calcula ROI real (no CLV: sets_under tiene CLV negativo
+    pero ROI real positivo, restringir por CLV solo daria un falso positivo)
+    y agrega el prefix de market_url correspondiente a
+    restricted_market_prefixes si ROI < -15% con n >= 20.
+    dry_run=True (default): solo loguea que HARIA, no toca el estado --
+    correr asi varios dias antes de confiar en el criterio.
+    """
+    try:
+        _sibila_db = os.path.join(SCRIPT_DIR, 'sibila.db')
+        if not os.path.exists(_sibila_db):
+            return
+        import sqlite3 as _sq3ak
+        _conn = _sq3ak.connect(_sibila_db)
+        rows = _conn.execute("""
+            SELECT market_type, market_url, real_stake, odds, result
+            FROM sibila_picks
+            WHERE placed=1 AND result IN ('WIN','LOSS')
+            AND market_type != '' AND market_url != ''
+        """).fetchall()
+        _conn.close()
+    except Exception as _e:
+        log.debug('AutoKill read error: %s', _e)
+        return
+
+    from collections import defaultdict
+    by_mt = defaultdict(lambda: {'stake': 0.0, 'pnl': 0.0, 'n': 0, 'prefix': None})
+    for mt, murl, stake, odds, result in rows:
+        stake = float(stake or 0)
+        odds = float(odds or 0)
+        if stake <= 0:
+            continue
+        pnl = (stake * (odds - 1.0)) if result == 'WIN' else -stake
+        d = by_mt[mt]
+        d['stake'] += stake
+        d['pnl'] += pnl
+        d['n'] += 1
+        if d['prefix'] is None and murl:
+            d['prefix'] = murl.split('/')[0]
+
+    already = set(state.get('restricted_market_prefixes', []))
+    for mt, d in by_mt.items():
+        if d['n'] < 20 or d['stake'] <= 0 or not d['prefix'] or d['prefix'] in already:
+            continue
+        roi = d['pnl'] / d['stake']
+        if roi < -0.15:
+            if dry_run:
+                log.warning('[AUTOKILL-DRYRUN] %s restringiria (prefix=%s, ROI=%.1f%%, n=%d)',
+                            mt, d['prefix'], roi*100, d['n'])
+            else:
+                state.setdefault('restricted_market_prefixes', []).append(d['prefix'])
+                log.warning('AUTOKILL: %s restringido (prefix=%s, ROI=%.1f%%, n=%d)',
+                            mt, d['prefix'], roi*100, d['n'])
+
+
 def _auto_tune_strategy(state):
     """
     Auto-adjust strategy parameters based on recent performance.
@@ -1218,12 +1280,22 @@ def scan_football(api, state, dry_run=False):
                                     _hd_price = float(_s.get('price', 0) or 0)
                                     _hd_murl = _s.get('marketUrl', '')
                         if _hd_price and _hd_price > 1.05 and _hd_murl:
-                            _p1x_base = 0.69
-                            _alt_adj = (0.12 if _alt > 3500 else
-                                        0.07 if _alt > 2800 else
-                                        0.04 if _alt >= 2000 else 0.0)
+                            # 2026-07-19 [recalib]: backtest contra 1478 partidos historicos
+                            # cacheados (PER_all.json) mostro que el modelo era demasiado
+                            # conservador -- WR real de 1X con ventaja de altitud real
+                            # (rival no adaptado) = 82.1% (n=468) vs el 0.69-0.81 que
+                            # asumia la formula vieja; y el caso "neutralizado" (rival
+                            # tambien en altura) daba WR=72.5% (n=222), muy por encima
+                            # del 0.0 de bonus que se le asignaba antes. Subida moderada
+                            # (no directo al 82.1% crudo, se deja margen de seguridad
+                            # sobre una muestra de 468) y ya no se anula del todo la
+                            # ventaja en el caso neutralizado.
+                            _p1x_base = 0.74
+                            _alt_adj = (0.14 if _alt > 3500 else
+                                        0.09 if _alt > 2800 else
+                                        0.05 if _alt >= 2000 else 0.0)
                             if _away_alt >= 2000 and (_alt - _away_alt) < 400:
-                                _alt_adj = 0.0  # near-same altitude, no home edge
+                                _alt_adj *= 0.3  # rival tambien adaptado -- ventaja reducida, no anulada (WR real 72.5%)
                             _p1x = min(0.88, _p1x_base + _alt_adj)
                             try:
                                 from oraculo_peru import predict_peru, load_peru_matches
@@ -1235,7 +1307,7 @@ def scan_football(api, state, dry_run=False):
                             except Exception:
                                 pass
                             _dc_edge = _p1x * _hd_price - 1
-                            if _dc_edge >= 0.04 and _p1x >= 0.70:
+                            if _dc_edge >= 0.04 and _p1x >= 0.76:  # 2026-07-19: subido de 0.70 -- con la base nueva (0.74) el piso viejo nunca fallaba
                                 picks.append({
                                     'match': '%s vs %s' % (home, away),
                                     'league': 'PER',
@@ -1943,6 +2015,29 @@ def scan_football(api, state, dry_run=False):
         picks = _fresh_check(picks)
         _fs = _fresh_summary(picks)
         if _fs: log.info(_fs)
+    # 2026-07-17 [fix]: oraculo_filters.json (escrito por el cron diario de
+    # oraculo_auto_analyzer.py) nunca se leia aca -- soccer.blocked_league_line
+    # quedaba sin efecto real pese a que el sistema reporta por Telegram que
+    # aplico el bloqueo. Mismo patron ya usado en scan_tennis() (linea 2025).
+    try:
+        import json as _json_sf
+        _fpath_sf = os.path.join(SCRIPT_DIR, 'oraculo_filters.json')
+        with open(_fpath_sf) as _ff_sf:
+            _dyn_filters_sf = _json_sf.load(_ff_sf)
+        _blocked_league_line = {
+            (b['league'], b['line']) for b in _dyn_filters_sf.get('soccer', {}).get('blocked_league_line', [])
+        }
+    except Exception as _fe_sf:
+        log.warning('scan_football: Could not load oraculo_filters.json: %s', _fe_sf)
+        _blocked_league_line = set()
+    if _blocked_league_line:
+        _pre_bl = len(picks)
+        _pick_line = lambda p: 'U1.5' if '1.5' in str(p.get('label', '')) else 'U2.5'
+        picks = [p for p in picks if (p.get('league', ''), _pick_line(p)) not in _blocked_league_line]
+        _dropped_bl = _pre_bl - len(picks)
+        if _dropped_bl:
+            log.info('scan_football: %d pick(s) descartados por blocked_league_line', _dropped_bl)
+
     if _RLM_ENABLED:
         _RLM.record_batch(picks, book='cloudbet')
         picks = _RLM.tag_picks(picks)
@@ -3553,11 +3648,10 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                     p['portfolio_capped'] = _port_result.get('capped', False)
             if _SIBILA_ENABLED:
                 _sibila_placed(p['match'], p['label'], bet_id, stake)
-            # RLM boost: si sharp money confirma nuestro pick -> +20% stake
-            if _RLM_ENABLED and p.get('rlm_signal') and p.get('rlm_score', 0) >= 0.5:
-                _rlm_boost = min(stake * 1.20, stake + 20)  # max +20 unidades
-                log.info('  [RLM] Stake boost %.2f->%.2f (score=%.2f)', stake, _rlm_boost, p.get('rlm_score',0))
-                stake = round(_rlm_boost, 2)
+            # 2026-07-17 [removed]: el boost de RLM corria despues de _save_bet(),
+            # cuando la apuesta ya se coloco con el stake original -- la
+            # reasignacion de stake no tenia ningun efecto downstream, solo
+            # generaba un log enganoso ([RLM] Stake boost X->Y que nunca paso).
         elif isinstance(resp, dict) and resp.get('INSUFFICIENT_FUNDS'):
             # Currency balance exhausted — retry immediately with the other currency
             _retry_curr = 'USDC' if _bet_currency == 'USDT' else 'USDT'
@@ -3700,16 +3794,55 @@ def check_results(api, state):
                 pass
         log.debug('Backfilled cutoff_time for %d bets', len(_need_ct))
     # Phantom cleanup: bets con cutoff_time vencido >24h sin resultado
+    # 2026-07-17 [fix]: antes acreditaba el stake solo por tiempo transcurrido,
+    # sin verificar contra Cloudbet -- el 9-jul una apuesta que seguia pendiente
+    # de verdad (evento en POST_TRADING, resultado tardio) genero 1006 creditos
+    # repetidos (097 total) porque igual pasaba el umbral de 24h cada ciclo.
+    # reconcile_bankroll() lo corrigio ese mismo dia (verifica contra el wallet
+    # real), pero la causa de fondo no estaba arreglada. Ahora se chequea el
+    # estado real del evento en Cloudbet antes de acreditar: solo se considera
+    # fantasma si el evento no existe (404, huerfano real) o paso mas de 48h
+    # del cutoff sin que Cloudbet lo resuelva (probable abandono, no
+    # liquidacion lenta normal). Si el evento sigue existiendo y tiene <48h,
+    # se deja en active_bets para que check_results lo siga intentando.
     from datetime import timedelta as _td
     _phantom_cut = (datetime.utcnow() - _td(hours=24)).isoformat()
-    _phantom_removed = [
+    _phantom_candidates = [
         b for b in state.get('active_bets', [])
         if b.get('cutoff_time') and str(b.get('cutoff_time', '')) <= _phantom_cut
     ]
-    state['active_bets'] = [
-        b for b in state.get('active_bets', [])
-        if not b.get('cutoff_time') or str(b.get('cutoff_time', '')) > _phantom_cut
-    ]
+    _phantom_removed = []
+    if _phantom_candidates:
+        import requests as _rq3
+        _s3 = _rq3.Session()
+        _cfg3 = json.load(open(os.path.join(SCRIPT_DIR, 'cloudbet_config.json')))
+        _s3.headers.update({'X-API-Key': _cfg3.get('api_key',''), 'Accept': 'application/json'})
+        for _b3 in _phantom_candidates:
+            _eid3 = str(_b3.get('event_id', ''))
+            _is_phantom = False
+            if not _eid3:
+                _is_phantom = True  # sin event_id no hay forma de verificar
+            else:
+                try:
+                    _er3 = _s3.get(CB_BASE + '/pub/v2/odds/events/' + _eid3, timeout=6)
+                    if _er3.status_code == 404:
+                        _is_phantom = True  # evento ya no existe en Cloudbet
+                    elif _er3.status_code == 200:
+                        try:
+                            _ct3 = datetime.fromisoformat(str(_b3.get('cutoff_time',''))[:10])
+                            _hrs3 = (datetime.utcnow() - _ct3).total_seconds() / 3600
+                        except Exception:
+                            _hrs3 = 999
+                        if _hrs3 > 48:
+                            _is_phantom = True  # >48h sin resolver -- probable abandono real
+                        # si <=48h y el evento existe, sigue vivo -- NO es fantasma
+                    # otro status code: no se pudo confirmar, no acreditar todavia
+                except Exception as _e3:
+                    log.debug('Phantom check API error for event %s: %s', _eid3, _e3)
+            if _is_phantom:
+                _phantom_removed.append(_b3)
+
+    state['active_bets'] = [b for b in state.get('active_bets', []) if b not in _phantom_removed]
     _ab_removed = len(_phantom_removed)
     if _ab_removed > 0:
         _phantom_total = sum(float(b.get('stake', 0) or 0) for b in _phantom_removed)
@@ -4121,6 +4254,38 @@ def reconcile_bankroll(api, state):
             _scp.close()
         except Exception:
             pass
+        # 2026-07-17 [fix]: age>24h + ausente de la ventana truncada de
+        # get_bets(limit=50) no probaba que el bet estuviera realmente
+        # anulado -- misma clase de bug que el phantom-cleanup de
+        # check_results() (fix del mismo dia). Antes de podar un candidato,
+        # se verifica su event_id directo contra Cloudbet: solo se poda si
+        # el evento no existe (404, huerfano real) o paso mas de 48h del
+        # cutoff sin resolverse (probable abandono). Si la verificacion
+        # falla (error de red) no se poda -- se reintenta el proximo ciclo.
+        import requests as _rq4
+        _s4 = _rq4.Session()
+        _cfg4 = json.load(open(os.path.join(SCRIPT_DIR, 'cloudbet_config.json')))
+        _s4.headers.update({'X-API-Key': _cfg4.get('api_key',''), 'Accept': 'application/json'})
+
+        def _verify_phantom(_eid4, _cutoff4):
+            if not _eid4:
+                return True
+            try:
+                _er4 = _s4.get(CB_BASE + '/pub/v2/odds/events/' + _eid4, timeout=6)
+                if _er4.status_code == 404:
+                    return True
+                if _er4.status_code == 200:
+                    try:
+                        _ct4 = datetime.fromisoformat(str(_cutoff4)[:10])
+                        _hrs4 = (datetime.utcnow() - _ct4).total_seconds() / 3600
+                    except Exception:
+                        _hrs4 = 999
+                    return _hrs4 > 48
+                return False  # status no concluyente -- no podar
+            except Exception as _e4:
+                log.debug('Ghost-prune verify error for event %s: %s', _eid4, _e4)
+                return False
+
         pruned = []
         kept = []
         for ab in state.get('active_bets', []):
@@ -4135,8 +4300,9 @@ def reconcile_bankroll(api, state):
             if bet_id in _sibila_placed_ids:
                 kept.append(ab)
                 continue
-            # If bet is >24h old and NOT in API response (neither pending nor settled), it was voided
-            if age_hours > 24 and bet_id not in api_bet_ids:
+            # If bet is >24h old and NOT in API response (neither pending nor settled),
+            # it MIGHT be voided -- confirm against Cloudbet before crediting the stake back
+            if age_hours > 24 and bet_id not in api_bet_ids and _verify_phantom(ab.get('event_id',''), ab.get('cutoff_time','')):
                 pruned.append(ab)
             else:
                 kept.append(ab)
@@ -4391,7 +4557,7 @@ def send_whatsapp(msg):
         plain = msg.replace("*", "")
         _wq.post(
             "http://127.0.0.1:3001/send",
-            json={"chatId": "120363427170639397@g.us", "message": plain},
+            json={"chatId": "120363427170639397@g.us", "message": "[Oraculo] " + plain},
             timeout=5)
     except Exception:
         pass
@@ -5895,6 +6061,7 @@ def run_cycle(dry_run=False):
 
     # 0. Auto-tune strategy parameters
     _auto_tune_strategy(state)
+    _auto_kill_check(state, dry_run=True)
 
     # 1. Check results first
     check_results(api, state)
@@ -6028,7 +6195,11 @@ def run_cycle(dry_run=False):
         # 2026-07-02: stake $2 (84 bets live WR=66.7%% n suficiente; antes $1 para acumular data)
         # 2026-07-05: sets_under grass/hard promovido a vivo, stake $2 (cantera WR=65% n=31)
         for _tp in tennis_picks:
-            _tp['_max_stake'] = 2.00 if _tp.get('market_type') in ('tennis_team_win_set', 'sets_under') else 1.00
+            # 2026-07-13: was hardcoded 2.00, silently out of sync with MIN_STAKE
+            # once that got raised (3, then 4) -- _max_stake wins over MIN_STAKE
+            # in the placement loop (no floor re-check after the cap), so these
+            # two highest-volume markets kept betting  regardless.
+            _tp['_max_stake'] = MIN_STAKE if _tp.get('market_type') in ('tennis_team_win_set', 'sets_under') else 1.00
     # Platt calibration shadow log — N=54 Sibila tws, A=0.357 B=0.088 — log only, no placement effect
     try:
         from oraculo_tws_calibrator import shadow_log_platt as _tws_platt_shadow
@@ -6138,6 +6309,13 @@ def run_cycle(dry_run=False):
                          and float(p.get('edge') or 0) > 0
                          and float(p.get('edge') or 0) >= (MLB_F5_ML_MIN_EDGE if p.get('market_type') == 'mlb_f5_ml' else MLB_MIN_EDGE)
                          and float(p.get('model_prob') or 0) >= 0.55]
+            # 2026-07-14: gradual reactivation -- mlb_f5_ml (real WR=25%% n=38 before
+            # disable, shadow since recovered to 51%% n=457) and mlb_f5_total (never
+            # live, shadow WR=71.7%% n=67 but no real track record at all) both
+            # capped to a token $0.50 stake to gather real-money validation data
+            # without meaningful risk while we watch if real matches shadow this time.
+            for _mp2 in mlb_picks:
+                _mp2['_max_stake'] = 0.50
             log.info('MLB: %d candidatos totales, %d pasan pre-filtro v5 (prob>=60%%)',
                      len(_all_mlb), len(mlb_picks))
             # De-correlate: keep best-edge pick per (event_id, market_type)
@@ -6667,6 +6845,28 @@ def run_cycle(dry_run=False):
                            and _goals_over_line_ok(p)
                            and _goals2h_under_odds_ok(p)
                            and (_tfm is None or _tfm.should_place(p))]
+                # 2026-07-20 [fix]: blocked_league_line (oraculo_filters.json) no se aplicaba
+                # aca -- el fix anterior (2026-07-17) lo conecto solo en scan_football(), pero
+                # _gp_csv (este scanner, oraculo_soccer_v2.scan_soccer_goals) es el que arma
+                # las apuestas reales de ligas domesticas (PL/Bundesliga/Serie A/etc), y usa
+                # el formato de liga completo (slug) que coincide con lo que graba Sibila.
+                try:
+                    import json as _json_gp
+                    with open(os.path.join(SCRIPT_DIR, 'oraculo_filters.json')) as _ff_gp:
+                        _dyn_filters_gp = _json_gp.load(_ff_gp)
+                    _blocked_ll_gp = {
+                        (b['league'], b['line']) for b in _dyn_filters_gp.get('soccer', {}).get('blocked_league_line', [])
+                    }
+                except Exception as _fe_gp:
+                    log.warning('[Soccer Goals] Could not load oraculo_filters.json: %s', _fe_gp)
+                    _blocked_ll_gp = set()
+                if _blocked_ll_gp:
+                    _pre_bl_gp = len(_gp_csv)
+                    _pick_line_gp = lambda p: 'U1.5' if '1.5' in str(p.get('label', '')) else 'U2.5'
+                    _gp_csv = [p for p in _gp_csv if (p.get('league', ''), _pick_line_gp(p)) not in _blocked_ll_gp]
+                    _dropped_bl_gp = _pre_bl_gp - len(_gp_csv)
+                    if _dropped_bl_gp:
+                        log.info('[Soccer Goals] %d pick(s) descartados por blocked_league_line', _dropped_bl_gp)
                 # Skip picks with kickoff >48h away (allows next-day matches, prevents weeks-long capital lock-up)
                 from datetime import datetime as _dt, timezone as _tz, timedelta as _td
                 _now_utc = _dt.now(_tz.utc)

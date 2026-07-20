@@ -35,11 +35,23 @@ CB_TO_WNBA = {
     'GS Valkyries (w)':     'Golden State Valkyries',
     'Portland Fire':        'Portland Fire',
     'Portland Fire (w)':    'Portland Fire',
+    'Portland Fire Women':  'Portland Fire',
     'Toronto Tempo':        'Toronto Tempo',
     'Toronto Tempo (w)':    'Toronto Tempo',
+    'Toronto Tempo Women':  'Toronto Tempo',
+    'CON Sun':              'Connecticut Sun',
+    'Connecticut Sun':      'Connecticut Sun',
+    'Connecticut Sun (w)':  'Connecticut Sun',
 }
 
 WNBA_FULL_TO_CB = {v: k for k, v in CB_TO_WNBA.items() if '(w)' not in k}
+
+# 2026-07-13: ESPN's WNBA scoreboard endpoint also returns All-Star games
+# (Team WNBA/Team USA/TEAM CLARK/TEAM COLLIER) and preseason exhibitions vs
+# national/club teams (Brazil, Nigeria, Japan, Toyota Antelopes) mixed in
+# with real season games -- found 11 contaminating the Elo history. Only
+# real franchise-vs-franchise games should count toward ratings.
+REAL_WNBA_TEAMS = set(WNBA_FULL_TO_CB.keys())
 
 
 def _resolve_name(cb_name: str) -> str:
@@ -160,6 +172,8 @@ def fetch_wnba_results(force: bool = False) -> list:
                     'winner': hn if hp > ap else an,
                     'margin': abs(hp - ap),
                 }
+                if hn not in REAL_WNBA_TEAMS or an not in REAL_WNBA_TEAMS:
+                    continue  # All-Star / exhibition game vs non-franchise opponent
                 key = (game['date'], game['home'])
                 if not any(g['date'] == game['date'] and g['home'] == game['home'] for g in existing):
                     existing.append(game)
@@ -177,9 +191,14 @@ def fetch_wnba_results(force: bool = False) -> list:
 
 
 def train_wnba_elo(force: bool = False) -> WNBAElo:
-    """Train WNBA Elo from ESPN results. Uses cache unless forced."""
+    """Train WNBA Elo from ESPN results. Uses cache unless forced or stale."""
     elo = WNBAElo()
-    if not force and elo.load() and len(elo.ratings) >= 8:
+    # 2026-07-13: cache had no TTL -- once saved it was never refreshed again,
+    # silently freezing ratings (found stuck at 2026-05-27 for 47 days while
+    # betting real money on 7-week-stale form/injury data). Match the 6h TTL
+    # fetch_wnba_results() already uses internally.
+    cache_age = (time.time() - os.path.getmtime(WNBA_ELO_CACHE)) if os.path.exists(WNBA_ELO_CACHE) else 1e18
+    if not force and cache_age < 21600 and elo.load() and len(elo.ratings) >= 8:
         log.info('WNBA Elo loaded from cache (%d teams)', len(elo.ratings))
         return elo
 

@@ -15,6 +15,17 @@ def _load_propline_key():
     return ''
 
 PKEY = _load_propline_key()
+def _load_oddsapi_key():
+    try:
+        for line in open('/etc/samael/secrets.env'):
+            if line.startswith('ODDS_API_KEY='):
+                return line.split('=', 1)[1].strip()
+    except Exception: pass
+    return ''
+
+ODDSAPI_KEY = _load_oddsapi_key()
+ODDSAPI_BASE = 'https://api.the-odds-api.com/v4'
+
 PROPLINE_BASE = 'https://api.prop-line.com/v1'
 CKEY = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cloudbet_config.json')))['api_key']
 CH = {'accept': 'application/json', 'X-API-Key': CKEY}
@@ -30,6 +41,11 @@ LEAGUES = [
     ('soccer_mls',                'soccer-usa-mls',                              'MLS',      'minor'),
     ('soccer_japan_j_league',     'soccer-japan-j-league',                       'JLeague',  'minor'),
     ('soccer_fifa_world_cup',     'soccer-international-world-cup',              'WC2026',   'major'),
+]
+
+# Leagues PropLine lacks -- uses The-Odds-API as Pinnacle source (key: ODDS_API_KEY in secrets.env)
+LEAGUES_ODDSAPI = [
+    ('soccer_china_superleague', 'soccer-china-chinese-super-league', 'CSL', 'minor'),
 ]
 
 SUFFIX = {'fk','fc','aa','sk','il','if','cf','sc','ec','ac','afc','cd','ca','sca','bk','ab','idrottsforening'}
@@ -75,6 +91,38 @@ def fetch_pinnacle(sport):
                 raw = oc.get('price', 0)
                 if not raw: continue
                 pr = _us_to_dec(raw) if abs(float(raw)) > 10 else float(raw)
+                if nm == ht: po['home'] = pr
+                elif nm == at: po['away'] = pr
+                elif nm.lower() in ('draw', 'tie'): po['draw'] = pr
+            tm = ptime(e.get('commence_time'))
+            if ht and at and tm and 'home' in po and 'away' in po:
+                out.append({'home': ht, 'away': at, 'time': tm, 'odds': po})
+        return out, None
+    except Exception:
+        return [], None
+
+def fetch_oddsapi(sport):
+    """Pinnacle h2h via The-Odds-API -- fallback for leagues PropLine lacks (e.g. CSL)."""
+    if not ODDSAPI_KEY:
+        return [], None
+    try:
+        r = requests.get(ODDSAPI_BASE + '/sports/' + sport + '/odds',
+                         params={'apiKey': ODDSAPI_KEY, 'regions': 'eu',
+                                 'markets': 'h2h', 'bookmakers': 'pinnacle'},
+                         timeout=20)
+        if r.status_code != 200:
+            return [], None
+        out = []
+        for e in r.json():
+            bm = next((b for b in e.get('bookmakers', []) if b.get('key') == 'pinnacle'), None)
+            if not bm: continue
+            h2h = next((m for m in bm.get('markets', []) if m.get('key') == 'h2h'), None)
+            if not h2h: continue
+            ht, at = e.get('home_team', ''), e.get('away_team', '')
+            po = {}
+            for oc in h2h.get('outcomes', []):
+                nm, pr = oc.get('name', ''), float(oc.get('price', 0) or 0)
+                if pr <= 1: continue
                 if nm == ht: po['home'] = pr
                 elif nm == at: po['away'] = pr
                 elif nm.lower() in ('draw', 'tie'): po['draw'] = pr
@@ -153,7 +201,26 @@ def measure():
                     spots.append({'liga': lab, 'tier': tier, 'match': pe['home']+' v '+pe['away'],
                                   'outcome': k, 'fair': round(fair[k],4), 'cb_odd': cpr[k],
                                   'edge': round(edge,4), 'kickoff': ce['time'].isoformat()})
-    return spots, n_cmp
+    for sport, slug, lab, tier in LEAGUES_ODDSAPI:
+        pin, _ = fetch_oddsapi(sport)
+        cb = fetch_cb_events(slug)
+        for pe, ce, sc in match_events(pin, cb):
+            po = pe['odds']
+            if 'draw' not in po: continue
+            cpr = cb_match_odds(ce['id'])
+            if not cpr: continue
+            ov = sum(1/po[k] for k in ('home','draw','away'))
+            if not (1.01 <= ov <= 1.12): continue
+            fair = {k: (1/po[k])/ov for k in ('home','draw','away')}
+            n_cmp += 1
+            for k in ('home','draw','away'):
+                edge = cpr[k]*fair[k] - 1
+                if abs(edge) > SANITY: continue
+                if edge >= 0.02:
+                    spots.append({'liga': lab, 'tier': tier, 'match': pe['home']+' v '+pe['away'],
+                                  'outcome': k, 'fair': round(fair[k],4), 'cb_odd': cpr[k],
+                                  'edge': round(edge,4), 'kickoff': ce['time'].isoformat()})
+        return spots, n_cmp
 
 def log_spots(spots):
     import sqlite3

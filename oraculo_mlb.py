@@ -567,68 +567,110 @@ def scan_mlb(api, state, elo=None, dry_run=False, min_edge=0.06, min_conf=0.50):
                               outcome, line, prob*100, edge*100, conf_thr*100, price,
                               ' [U4.5]' if is_under45 else '')
 
-    # ── Market: baseball.totals (full 9-inning game total) ──────────────────
-    # Same FIP+OPS+weather model but scaled for full game.
-    # Starters exit after ~5-6 innings; bullpen adds variance.
-    # Full game thresholds are higher (more runs expected).
-    tot9 = markets.get('baseball.totals', {})
-    if tot9:
-        # Bullpen quality proxy: if avg_fip > 4.0 starters likely exit early → more bullpen
-        bullpen_var = max(0.0, (avg_fip - 4.0) * 0.015)   # positive = more variance → slight over signal
-        over_thresh9  = (8.8  / park_factor) - ops_combined * 1.5  # runs where over starts being likely
-        under_thresh9 = (7.8  / park_factor) + ops_combined * 1.5
+        # ── Market: baseball.totals (full 9-inning game total) ──────────────────
+        # Same FIP+OPS+weather model but scaled for full game.
+        # Starters exit after ~5-6 innings; bullpen adds variance.
+        # Full game thresholds are higher (more runs expected).
+        tot9 = markets.get('baseball.totals', {})
+        if tot9:
+            # Bullpen quality proxy: if avg_fip > 4.0 starters likely exit early → more bullpen
+            bullpen_var = max(0.0, (avg_fip - 4.0) * 0.015)   # positive = more variance → slight over signal
+            over_thresh9  = (8.8  / park_factor) - ops_combined * 1.5  # runs where over starts being likely
+            under_thresh9 = (7.8  / park_factor) + ops_combined * 1.5
 
-        for sv in tot9.get('submarkets', {}).values():
-            for sel in sv.get('selections', []):
-                outcome = sel.get('outcome', '')
-                murl    = sel.get('marketUrl', '')
-                price   = float(sel.get('price', 0) or 0)
-                if price < 1.20 or not murl or outcome not in ('over', 'under'):
-                    continue
-                try:
-                    total_str = murl.split('total=')[-1] if 'total=' in murl else ''
-                    line9 = float(total_str)
-                except Exception:
-                    continue
-
-                if outcome == 'over' and _skip_overs:
-                    log.debug('  MLB [skip-9inn-over]: avg_fip=%.2f > 5.2 — bad pitching', avg_fip)
-                    continue
-                if outcome == 'over':
-                    fip_sig9 = (avg_fip  - 4.2) * 0.04 + bullpen_var
-                    ops_sig9 = ops_combined * 0.70
-                    combined9 = fip_sig9 + ops_sig9 + _weather_adj
-                    if combined9 <= 0:
+            for sv in tot9.get('submarkets', {}).values():
+                for sel in sv.get('selections', []):
+                    outcome = sel.get('outcome', '')
+                    murl    = sel.get('marketUrl', '')
+                    price   = float(sel.get('price', 0) or 0)
+                    if price < 1.20 or not murl or outcome not in ('over', 'under'):
                         continue
-                    prob9 = min(0.78, 0.54 + combined9)
-                elif outcome == 'under':
-                    fip_sig9 = (3.8 - avg_fip) * 0.04
-                    ops_sig9 = -ops_combined * 0.70
-                    combined9 = fip_sig9 + ops_sig9 - _weather_adj
-                    if combined9 <= 0:
+                    try:
+                        total_str = murl.split('total=')[-1] if 'total=' in murl else ''
+                        line9 = float(total_str)
+                    except Exception:
                         continue
-                    prob9 = min(0.78, 0.54 + combined9)
 
-                implied9 = 1.0 / price
-                edge9    = prob9 - implied9
+                    if outcome == 'over' and _skip_overs:
+                        log.debug('  MLB [skip-9inn-over]: avg_fip=%.2f > 5.2 — bad pitching', avg_fip)
+                        continue
+                    if outcome == 'over':
+                        fip_sig9 = (avg_fip  - 4.2) * 0.04 + bullpen_var
+                        ops_sig9 = ops_combined * 0.70
+                        combined9 = fip_sig9 + ops_sig9 + _weather_adj
+                        if combined9 <= 0:
+                            continue
+                        prob9 = min(0.78, 0.54 + combined9)
+                    elif outcome == 'under':
+                        fip_sig9 = (3.8 - avg_fip) * 0.04
+                        ops_sig9 = -ops_combined * 0.70
+                        combined9 = fip_sig9 + ops_sig9 - _weather_adj
+                        if combined9 <= 0:
+                            continue
+                        prob9 = min(0.78, 0.54 + combined9)
 
-                if edge9 > min_edge and edge9 < 0.35:
-                    picks.append({
-                        'match':       f'{cb_home} vs {cb_away}',
-                        'league':      'MLB',
-                        'event_id':    eid,
-                        'market_url':  murl,
-                        'price':       price,
-                        'label':       f'Total {outcome.title()} {total_str} [{_w_info[:10]}]',
-                        'model_prob':  round(prob9, 4),
-                        'edge':        round(edge9, 4),
-                        'sport':       'baseball',
-                        'market_type': 'mlb_full_total',
-                        '_home_ops':   round(home_ops, 3),
-                        '_away_ops':   round(away_ops, 3),
-                    })
+                    implied9 = 1.0 / price
+                    edge9    = prob9 - implied9
+
+                    if edge9 > min_edge and edge9 < 0.35:
+                        picks.append({
+                            'match':       f'{cb_home} vs {cb_away}',
+                            'league':      'MLB',
+                            'event_id':    eid,
+                            'market_url':  murl,
+                            'price':       price,
+                            'label':       f'Total {outcome.title()} {total_str} [{_w_info[:10]}]',
+                            'model_prob':  round(prob9, 4),
+                            'edge':        round(edge9, 4),
+                            'sport':       'baseball',
+                            'market_type': 'mlb_full_total',
+                            '_home_ops':   round(home_ops, 3),
+                            '_away_ops':   round(away_ops, 3),
+                        })
 
     picks.sort(key=lambda p: p['edge'], reverse=True)
+
+    # 2026-07-17 [fix]: oraculo_filters.json (escrito por el cron diario de
+    # oraculo_auto_analyzer.py) nunca se leia aca -- baseball.blocked_markets/
+    # blocked_conditions quedaban sin efecto real via el mecanismo dinamico
+    # (los 4 bloqueos ya vigentes funcionan solo por filtros hardcodeados
+    # duplicados en otro lado). blocked_conditions sigue el patron
+    # 'mlb_f5_over_{venue}' que ya usa oraculo_auto_analyzer.py al escribirlo.
+    try:
+        import json as _json_mlb
+        _fpath_mlb = os.path.join(SCRIPT_DIR, 'oraculo_filters.json')
+        with open(_fpath_mlb) as _ff_mlb:
+            _dyn_filters_mlb = _json_mlb.load(_ff_mlb)
+        _blocked_markets_mlb = set(_dyn_filters_mlb.get('baseball', {}).get('blocked_markets', []))
+        _blocked_conditions_mlb = set(_dyn_filters_mlb.get('baseball', {}).get('blocked_conditions', []))
+    except Exception as _fe_mlb:
+        log.warning('scan_mlb: Could not load oraculo_filters.json: %s', _fe_mlb)
+        _blocked_markets_mlb = set()
+        _blocked_conditions_mlb = set()
+    if _blocked_markets_mlb or _blocked_conditions_mlb:
+        _pre_bm = len(picks)
+        def _mlb_blocked(p):
+            if p.get('market_type', '') in _blocked_markets_mlb:
+                return True
+            if p.get('market_type', '') == 'mlb_f5_total':
+                # 2026-07-19 [fix]: la primera version solo chequeaba el patron
+                # 'mlb_f5_over_{venue}' que genera oraculo_auto_analyzer.py hoy --
+                # 'mlb_f5_total_under' (ya presente en el JSON, de una convencion
+                # de nombres mas vieja) nunca se chequeaba. Se prueban ambas
+                # convenciones para la direccion (over/under) real del pick.
+                _lbl = str(p.get('label', '')).lower()
+                _outcome = 'over' if 'over' in _lbl else ('under' if 'under' in _lbl else None)
+                if _outcome:
+                    _venue = 'dome' if 'dome' in _lbl else 'outdoor'
+                    _candidates = {f'mlb_f5_{_outcome}_{_venue}', f'mlb_f5_total_{_outcome}'}
+                    if _candidates & _blocked_conditions_mlb:
+                        return True
+            return False
+        picks = [p for p in picks if not _mlb_blocked(p)]
+        _dropped_bm = _pre_bm - len(picks)
+        if _dropped_bm:
+            log.info('scan_mlb: %d pick(s) descartados por oraculo_filters.json', _dropped_bm)
+
     log.info('MLB: %d value picks found', len(picks))
     for p in picks[:5]:
         log.info('  [MLB] %s | %s | edge=%.1f%% prob=%.0f%% @%.2f',

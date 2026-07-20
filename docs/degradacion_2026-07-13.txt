@@ -1,0 +1,9 @@
+REPORTE DEGRADACION — 2026-07-13 08:00 UTC
+=======================================================
+AVISO   soccer     btts                   — sin picks en 14d
+AVISO   soccer     over_under             — sin picks en 14d
+OK      soccer     soccer_goals            n=  3  WR= 66.7%  ultimo=2026-06-22
+AVISO   tennis     tennis                 — sin picks en 14d
+OK      tennis     tennis_team_win_set     n= 21  WR= 66.7%  ultimo=2026-07-11
+
+Sin alertas — todos los modelos dentro de umbral.

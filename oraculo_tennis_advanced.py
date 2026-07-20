@@ -1,10 +1,24 @@
 """Advanced tennis features: fatigue, retirement risk, set handicap, surface form."""
-import os, json, logging, math
+import os, json, logging, math, re
 from collections import defaultdict
 from datetime import datetime, timedelta
 
 log = logging.getLogger('oraculo')
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def _last_name(full_name):
+    """Extract last name from full name like 'Casper Ruud' -> 'Ruud'."""
+    parts = full_name.strip().split()
+    return parts[-1] if parts else full_name
+
+
+def _abbrev_last_name(abbrev_name):
+    """Extract last name from abbreviated format 'Ruud C.' -> 'Ruud'."""
+    m = re.match(r'^(.+?)\s+[A-Z]\.$', abbrev_name.strip())
+    if m:
+        return m.group(1).strip()
+    return abbrev_name.strip()
 
 
 class TennisAdvanced:
@@ -15,6 +29,7 @@ class TennisAdvanced:
         self._match_log = defaultdict(list)
         self._retirements = defaultdict(int)
         self._total_matches = defaultdict(int)
+        self._by_lastname = defaultdict(list)
 
     def load_match_history(self, cache_dir):
         """Load match history for fatigue and retirement tracking."""
@@ -56,8 +71,48 @@ class TennisAdvanced:
                             self._retirements[loser] += 1
             except Exception:
                 continue
+        # 2026-07-17 [fix]: el historico viejo (Sackmann 2004-2024) usa nombre
+        # completo ("Novak Djokovic"), pero los archivos de temporada actual
+        # (tennis-data.co.uk, migrados 2026-07-13) usan formato abreviado
+        # ("Djokovic N."). Cloudbet siempre manda nombre completo -- sin este
+        # indice, get_fatigue/get_surface_form/etc nunca encontraban el
+        # historial reciente para los jugadores top (daba 0.0 en silencio).
+        # Se indexa por apellido (misma logica que tennis_sibila_resolver.py)
+        # para poder resolver cualquier variante de formato a las mismas
+        # entradas de _match_log.
+        for _key in self._match_log.keys():
+            if re.match(r'^.+?\s+[A-Z]\.$', _key.strip()):
+                _ln = _abbrev_last_name(_key)
+            else:
+                _ln = _last_name(_key)
+            self._by_lastname[_ln.lower()].append(_key)
         log.info('TennisAdvanced: %d players, %d with retirements',
                  len(self._match_log), len(self._retirements))
+
+    def _resolve_keys(self, player):
+        """Resolve a player name (any format) to ALL matching key(s) used in
+        _match_log -- merges full-name and abbreviated-format entries for the
+        SAME player (e.g. "Novak Djokovic" + "Djokovic N."). Matches by last
+        name AND first-initial (not last name alone) to avoid collisions
+        between different players sharing a surname (e.g. "Novak Djokovic"
+        vs "Marko Djokovic")."""
+        player = player.strip()
+        if not player:
+            return [player]
+        first_initial = player[0].lower()
+        ln = _last_name(player).lower()
+        keys = set()
+        if player in self._match_log:
+            keys.add(player)
+        for cand in self._by_lastname.get(ln, []):
+            cand = cand.strip()
+            if re.match(r'^.+?\s+[A-Z]\.$', cand):
+                cand_first = cand[-2].lower()  # "Djokovic N." -> 'n'
+            else:
+                cand_first = cand[0].lower()   # "Marko Djokovic" -> 'm'
+            if cand_first == first_initial:
+                keys.add(cand)
+        return list(keys) if keys else [player]
 
     def get_fatigue(self, player, ref_date=None, window_days=14):
         """Fatigue score 0=fresh, 1=exhausted. Based on matches+sets in last N days."""
@@ -68,7 +123,7 @@ class TennisAdvanced:
         except Exception:
             return 0.0
 
-        recent = [m for m in self._match_log.get(player, [])
+        recent = [m for k in self._resolve_keys(player) for m in self._match_log.get(k, [])
                   if cutoff <= m.get('date', '') <= ref_date]
         if not recent:
             return 0.0
@@ -86,15 +141,16 @@ class TennisAdvanced:
 
     def get_retirement_risk(self, player):
         """Retirement probability 0-0.15 based on historical rate."""
-        total = self._total_matches.get(player, 0)
-        rets = self._retirements.get(player, 0)
+        keys = self._resolve_keys(player)
+        total = sum(self._total_matches.get(k, 0) for k in keys)
+        rets = sum(self._retirements.get(k, 0) for k in keys)
         if total < 20:
             return 0.02
         return min(0.15, rets / total)
 
     def get_surface_form(self, player, surface='hard', n_recent=15):
         """Win rate on specific surface (last N matches)."""
-        matches = [m for m in self._match_log.get(player, [])
+        matches = [m for k in self._resolve_keys(player) for m in self._match_log.get(k, [])
                    if m.get('surface', '').lower() == surface.lower()]
         if not matches:
             return None
@@ -103,7 +159,7 @@ class TennisAdvanced:
 
     def get_serve_dominance(self, player, n=30):
         """SPW / (1-RPW) dominance ratio from match history. >1 = serve-dominant."""
-        matches = self._match_log.get(player, [])[-n:]
+        matches = [m for k in self._resolve_keys(player) for m in self._match_log.get(k, [])][-n:]
         if not matches:
             return None
         spw_list, rpw_list = [], []

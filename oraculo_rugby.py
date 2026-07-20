@@ -41,7 +41,14 @@ class RugbyElo:
     def predict(self, home, away):
         eh = self.ratings.get(self._key(home), 1500)
         ea = self.ratings.get(self._key(away), 1500)
-        return 1.0 / (1.0 + 10 ** (-((eh + HA) - ea) / 400.0))
+        p_raw = 1.0 / (1.0 + 10 ** (-((eh + HA) - ea) / 400.0))
+        cal = getattr(self, '_calibrator', None)
+        if cal is not None:
+            try:
+                return float(cal.predict([p_raw])[0])
+            except Exception:
+                pass
+        return p_raw
 
     def update(self, home, away, hs, as_):
         kh, ka = _norm(home), _norm(away)
@@ -113,7 +120,7 @@ def build_and_cache(league='nrl'):
     for d, h, a, hs, as_ in matches:
         elo.update(h, a, hs, as_)
     with open(_pkl(league), 'wb') as f:
-        pickle.dump({'ratings': elo.ratings, 'n_matches': len(matches)}, f)
+        pickle.dump({'ratings': elo.ratings, 'n_matches': len(matches), 'calibrator': None}, f)
     return elo, len(matches)
 
 
@@ -121,6 +128,7 @@ def load_elo(league='nrl'):
     try:
         d = pickle.load(open(_pkl(league), 'rb'))
         e = RugbyElo(); e.ratings = d['ratings']
+        e._calibrator = d.get('calibrator', None)
         return e
     except Exception:
         return None

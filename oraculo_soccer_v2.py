@@ -746,20 +746,20 @@ _LEAGUE_O25 = {
     'soccer-england-premier-league':       0.548,
     'soccer-germany-bundesliga':           0.592,
     'soccer-italy-serie-a':                0.548,
-    'soccer-spain-la-liga':                0.548,
+    'soccer-spain-laliga':                0.548,
     'soccer-france-ligue-1':               0.529,
     'soccer-netherlands-eredivisie':       0.581,
     'soccer-portugal-primeira-liga':       0.537,
     'soccer-england-championship':         0.521,
-    'soccer-champions-league':             0.570,
+    'soccer-international-clubs-uefa-champions-league':             0.570,
     'soccer-europa-league':                0.551,
     # New leagues (from backtest 2024-25 N=300-552)
-    'soccer-germany-bundesliga-2':         0.573,
-    'soccer-spain-segunda':                0.507,
+    'soccer-germany-2-bundesliga':         0.573,
+    'soccer-spain-laliga-2':                0.507,
     'soccer-france-ligue-2':               0.473,
     'soccer-italy-serie-b':                0.484,
     'soccer-scotland-premiership':         0.510,
-    'soccer-belgium-jupiler':              0.560,
+    'soccer-belgium-first-division-a':              0.560,
     # MLS cantera — base rate 2022-2026 (N=2290). Shadow only until N>=30 live picks.
     'soccer-usa-mls':                      0.588,
 }
@@ -772,19 +772,19 @@ _LEAGUE_U15_2H = {
     'soccer-england-premier-league':       0.450,  # backtest 3503m: actual 45.0% (was 50.0%)
     'soccer-germany-bundesliga':           0.493,  # backtest actual 49.3%
     'soccer-italy-serie-a':                0.570,  # backtest actual 57.0% (was 52.6%)
-    'soccer-spain-la-liga':                0.574,  # backtest actual 57.4% (was 52.6%)
+    'soccer-spain-laliga':                0.574,  # backtest actual 57.4% (was 52.6%)
     'soccer-france-ligue-1':               0.528,  # backtest actual 52.8% (was 56.0%)
     'soccer-netherlands-eredivisie':       0.510,
     'soccer-portugal-primeira-liga':       0.530,
     'soccer-england-championship':         0.572,
-    'soccer-germany-bundesliga-2':         0.510,
-    'soccer-spain-segunda':                0.550,
+    'soccer-germany-2-bundesliga':         0.510,
+    'soccer-spain-laliga-2':                0.550,
     'soccer-france-ligue-2':               0.618,
     'soccer-italy-serie-b':                0.562,
-    'soccer-champions-league':             0.520,
+    'soccer-international-clubs-uefa-champions-league':             0.520,
     'soccer-europa-league':                0.520,
     'soccer-scotland-premiership':         0.580,
-    'soccer-belgium-jupiler':              0.540,
+    'soccer-belgium-first-division-a':              0.540,
 }
 _DEFAULT_U15_2H = 0.540
 
@@ -794,21 +794,64 @@ _LEAGUE_CSV_SUFFIXES = {
     'soccer-england-premier-league':    ('2526/E0.csv', '2425/E0.csv'),
     'soccer-germany-bundesliga':        ('2526/D1.csv', '2425/D1.csv'),
     'soccer-italy-serie-a':            ('2526/I1.csv', '2425/I1.csv'),
-    'soccer-spain-la-liga':            ('2526/SP1.csv', '2425/SP1.csv'),
+    'soccer-spain-laliga':            ('2526/SP1.csv', '2425/SP1.csv'),
     'soccer-france-ligue-1':           ('2526/F1.csv', '2425/F1.csv'),
     'soccer-netherlands-eredivisie':   ('2526/N1.csv', '2425/N1.csv'),
     'soccer-portugal-primeira-liga':   ('2526/P1.csv', '2425/P1.csv'),
     'soccer-england-championship':     ('2526/E1.csv', '2425/E1.csv'),
-    'soccer-germany-bundesliga-2':     ('2526/D2.csv', '2425/D2.csv'),
-    'soccer-spain-segunda':            ('2526/SP2.csv', '2425/SP2.csv'),
+    'soccer-germany-2-bundesliga':     ('2526/D2.csv', '2425/D2.csv'),
+    'soccer-spain-laliga-2':            ('2526/SP2.csv', '2425/SP2.csv'),
     'soccer-france-ligue-2':           ('2526/F2.csv', '2425/F2.csv'),
     'soccer-italy-serie-b':            ('2526/I2.csv', '2425/I2.csv'),
-    'soccer-champions-league':         ('2526/UCL.csv', '2425/UCL.csv'),
+    'soccer-international-clubs-uefa-champions-league':         ('2526/UCL.csv', '2425/UCL.csv'),
     'soccer-scotland-premiership':     ('2526/SC0.csv', '2425/SC0.csv'),
-    'soccer-belgium-jupiler':          ('2526/B1.csv', '2425/B1.csv'),
+    'soccer-belgium-first-division-a':          ('2526/B1.csv', '2425/B1.csv'),
 }
 _CSV_FORM_DATA = {}   # comp_key → {'form': {...}, 'ts': float}
 _CSV_FORM_TTL  = 3600 * 6
+
+
+def _load_peru_form(n_games=6):
+    """Load Peru Liga 1 form from PER_all.json (API-Football cached data).
+    Returns same format as _load_csv_form: {team: {h_sc, h_cc, h_n, a_sc, a_cc, a_n}}
+    """
+    import os as _os
+    from collections import defaultdict as _dd
+    cache_path = _os.path.join(_os.path.dirname(__file__), '.oraculo_cache', 'csv', 'PER_all.json')
+    if not _os.path.exists(cache_path):
+        return {}
+    try:
+        import json as _json
+        data = _json.load(open(cache_path, 'r'))
+        if not data:
+            return {}
+        # Sort by date ascending
+        data.sort(key=lambda m: m.get('date', ''))
+        team_seq = _dd(list)
+        for m in data:
+            ht = m.get('home_team', '').strip()
+            at = m.get('away_team', '').strip()
+            hs = m.get('home_score')
+            as_ = m.get('away_score')
+            if ht and at and hs is not None and as_ is not None:
+                team_seq[ht].append((int(hs), int(as_), True))
+                team_seq[at].append((int(as_), int(hs), False))
+        form = {}
+        for team, seq in team_seq.items():
+            last = seq[-n_games:]
+            hg = [(s, c) for s, c, ih in last if ih]
+            ag = [(s, c) for s, c, ih in last if not ih]
+            form[team] = {
+                'h_sc': sum(s for s, c in hg) / len(hg) if hg else None,
+                'h_cc': sum(c for s, c in hg) / len(hg) if hg else None,
+                'h_n':  len(hg),
+                'a_sc': sum(s for s, c in ag) / len(ag) if ag else None,
+                'a_cc': sum(c for s, c in ag) / len(ag) if ag else None,
+                'a_n':  len(ag),
+            }
+        return form
+    except Exception:
+        return {}
 
 def _load_csv_form(comp_key, n_games=6):
     """Load rolling team form (last N games) from football-data.co.uk CSV.
@@ -823,6 +866,12 @@ def _load_csv_form(comp_key, n_games=6):
     cached = _CSV_FORM_DATA.get(comp_key)
     if cached and now - cached.get('ts', 0) < _CSV_FORM_TTL:
         return cached['form']
+
+    # Peru Liga 1: use local API-Football JSON cache
+    if comp_key == 'soccer-peru-primera-division':
+        _peru_form = _load_peru_form(n_games)
+        _CSV_FORM_DATA[comp_key] = {'form': _peru_form, 'ts': now}
+        return _peru_form
 
     suffixes = _LEAGUE_CSV_SUFFIXES.get(comp_key, ())
     rows = []
