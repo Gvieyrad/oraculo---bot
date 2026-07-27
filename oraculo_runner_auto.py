@@ -66,8 +66,8 @@ SPORT_KELLY = {             # Per-sport Kelly fractions
     'soccer':       0.20,
     'soccer_under': 0.25,  # 2026-05-22: U2.5 +25.5% ROI, U1.5 +47.3% -> boost Kelly
 }
-MIN_STAKE = 4.00            # 2026-07-13: subido de 3 a 4 a pedido, post-fix WNBA/NHL/rugby/WTA (ultimos 7d: 13W-5L +6.84)
-MAX_STAKE_ABS = 7.0         # 2026-07-13: subido 6 a 7 a pedido
+MIN_STAKE = 5.00            # 2026-07-20: subido de 4 a 5 a pedido, ultimos 30d 34W-16L WR=68%
+MAX_STAKE_ABS = 9.0         # 2026-07-20: subido de 7 a 9 a pedido
 CIRCUIT_BREAKER = 10.0      # Stop if bankroll < $10
 LOSS_STREAK_LIMIT = 5       # Reduce stake after 5 consecutive losses
 LOSS_STREAK_FACTOR = 0.50   # Reduce to 50%
@@ -3515,6 +3515,10 @@ def place_bets(api, state, picks, parlays, dry_run=False):
             stake = round(stake * 0.5, 2)
             log.info('  LLM REDUCE: stake halved to $%.2f', stake)
         stake = min(stake, straight_remaining)
+        # 2026-07-22: PortfolioKelly no aplicaba MIN_STAKE -- apuestas de $1 se colaban.
+        if 0 < stake < MIN_STAKE and not p.get('_wc_phase_c'):
+            log.info('  [SKIP] PortfolioKelly stake $%.2f below MIN_STAKE $%.2f: %s', stake, MIN_STAKE, p.get('match','')[:35])
+            continue
 
         if dry_run:
             log.info('  [DRY] %s | %s @%.3f | $%.2f | edge +%.1f%%',
@@ -4640,6 +4644,17 @@ def _capture_closing_odds(api, state):
                     ev = r.json()
                 else:
                     ev = events
+                # 2026-07-22: congelar captura al cutoff real -- antes seguia
+                # recapturando durante el set/partido en curso (odds in-play,
+                # no linea de cierre), contaminando el CLV con varianza in-play.
+                _cutoff_raw = ev.get('cutoffTime', '')
+                if _cutoff_raw:
+                    try:
+                        _cutoff_dt = datetime.fromisoformat(_cutoff_raw.replace('Z', '+00:00'))
+                        if now >= _cutoff_dt:
+                            continue
+                    except Exception:
+                        pass
                 # Find matching market
                 market_url = bet.get('market_url', bet.get('market', ''))
                 if not market_url:
@@ -6162,6 +6177,7 @@ def run_cycle(dry_run=False):
         tennis_picks = _cal_out
         log.info('[tennis CALIBRADO] %d picks live (isotonic, cal_edge>=0.05, $1)', len(tennis_picks))
     else:
+        _tn_pre_filter = tennis_picks
         tennis_picks = [p for p in tennis_picks
                         if p.get('market_type') not in ('tennis_exact_sets',
                                                         'tennis_winner_and_total')  # w+total: 0W/1L, complex market
@@ -6192,6 +6208,14 @@ def run_cycle(dry_run=False):
                                  and float(p.get('price', 0) or 0) >= 1.50)
                         # h2h: DESACTIVADO 2026-06-02 — WR=52.6%, ROI=-7.6% Sibila n=38 placed; win_set (WR=65.7%) es el mercado
                         and p.get('market_type') not in ('', None)]
+        # 2026-07-24: log picks descartados por el filtro de arriba (antes desaparecian sin rastro)
+        _tn_kept_ids = {id(p) for p in tennis_picks}
+        for _dp in _tn_pre_filter:
+            if id(_dp) not in _tn_kept_ids:
+                log.info('  [TN-FILTER] dropped %s | %s | edge=%.1f%% prob=%.0f%% surface=%s league=%s',
+                         _dp.get('match','?')[:35], _dp.get('market_type','?'),
+                         float(_dp.get('edge', 0) or 0) * 100, float(_dp.get('model_prob', 0) or 0) * 100,
+                         _dp.get('surface', '?'), _dp.get('league', '?'))
         # 2026-07-02: stake $2 (84 bets live WR=66.7%% n suficiente; antes $1 para acumular data)
         # 2026-07-05: sets_under grass/hard promovido a vivo, stake $2 (cantera WR=65% n=31)
         for _tp in tennis_picks:
