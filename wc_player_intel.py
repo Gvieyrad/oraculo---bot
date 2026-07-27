@@ -10,14 +10,14 @@ Pipeline:
   4. Write wc_player_factors.json
 
 Run daily from cron (same window as update_wc_standings.py):
-  0 */6 * * * cd /home/noc/oraculo_v2 && python3 wc_player_intel.py >> logs/wc_intel.log 2>&1
+  0 */6 * * * cd /home/noc/terra_v2 && python3 wc_player_intel.py >> logs/wc_intel.log 2>&1
 """
 import json, os, re, time, logging, datetime, urllib.request, urllib.parse, unicodedata
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('wc_intel')
 
-BASE          = '/home/noc/oraculo_v2/wc2026'
+BASE          = '/home/noc/terra_v2/wc2026'
 FACTORS_FILE  = os.path.join(BASE, 'wc_player_factors.json')
 GROUPS_FILE   = os.path.join(BASE, 'wc2026_groups.json')
 NEWS_CACHE    = os.path.join(BASE, 'wc_news_cache.json')

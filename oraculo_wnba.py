@@ -35,11 +35,22 @@ CB_TO_WNBA = {
     'GS Valkyries (w)':     'Golden State Valkyries',
     'Portland Fire':        'Portland Fire',
     'Portland Fire (w)':    'Portland Fire',
+    'Portland Fire Women':  'Portland Fire',
     'Toronto Tempo':        'Toronto Tempo',
     'Toronto Tempo (w)':    'Toronto Tempo',
+    'Toronto Tempo Women':  'Toronto Tempo',
+    'CON Sun':              'Connecticut Sun',
+    'Connecticut Sun':      'Connecticut Sun',
+    'Connecticut Sun (w)':  'Connecticut Sun',
 }
 
 WNBA_FULL_TO_CB = {v: k for k, v in CB_TO_WNBA.items() if '(w)' not in k}
+
+# 2026-07-13: ported from oraculo_v2 -- ESPN's WNBA scoreboard endpoint also
+# returns All-Star games and preseason exhibitions vs national/club teams
+# mixed in with real season games. Only real franchise-vs-franchise games
+# should count toward ratings.
+REAL_WNBA_TEAMS = set(WNBA_FULL_TO_CB.keys())
 
 
 def _resolve_name(cb_name: str) -> str:
@@ -160,6 +171,8 @@ def fetch_wnba_results(force: bool = False) -> list:
                     'winner': hn if hp > ap else an,
                     'margin': abs(hp - ap),
                 }
+                if hn not in REAL_WNBA_TEAMS or an not in REAL_WNBA_TEAMS:
+                    continue  # All-Star / exhibition game vs non-franchise opponent
                 key = (game['date'], game['home'])
                 if not any(g['date'] == game['date'] and g['home'] == game['home'] for g in existing):
                     existing.append(game)

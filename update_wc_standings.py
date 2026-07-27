@@ -16,7 +16,7 @@ import json, os, re, html, sys, datetime, urllib.request, logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('wc_standings')
 
-BASE         = '/home/noc/oraculo_v2/wc2026'
+BASE         = '/home/noc/terra_v2/wc2026'
 STANDINGS_F  = os.path.join(BASE, 'wc_standings.json')
 GROUPS_F     = os.path.join(BASE, 'wc2026_groups.json')
 SECRETS_F    = '/etc/samael/secrets.env'

@@ -12,8 +12,8 @@ log = logging.getLogger('mlb_resolver')
 if not log.handlers:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 
-SIBILA_DB = '/home/noc/oraculo_v2/sibila.db'
-F5_DB     = '/home/noc/oraculo_v2/.oraculo_cache/mlb_f5.db'
+SIBILA_DB = '/home/noc/terra_v2/sibila.db'
+F5_DB     = '/home/noc/terra_v2/.oraculo_cache/mlb_f5.db'
 
 # Sibila short name → MLB Stats API full team name
 TEAM_MAP = {
@@ -129,7 +129,7 @@ def _parse_side(side_str):
 
 def _refresh_cache():
     """Refresh MLB F5 cache for recent dates."""
-    sys.path.insert(0, '/home/noc/oraculo_v2')
+    sys.path.insert(0, '/home/noc/terra_v2')
     try:
         import oraculo_mlb_f5 as mlb
         log.info('Refreshing MLB F5 cache...')

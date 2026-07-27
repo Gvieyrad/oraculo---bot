@@ -8,10 +8,10 @@ import os, sys, sqlite3, logging, re
 from datetime import datetime, timedelta
 from difflib import SequenceMatcher
 
-SIBILA_DB  = '/home/noc/oraculo_v2/sibila.db'
-CACHE_DIR  = '/home/noc/oraculo_v2/.oraculo_cache/tennis'
+SIBILA_DB  = '/home/noc/terra_v2/sibila.db'
+CACHE_DIR  = '/home/noc/terra_v2/.oraculo_cache/tennis'
 ATP_XLSX   = os.path.join(CACHE_DIR, 'td_2026.xlsx')
-WTA_XLSX   = os.path.join(CACHE_DIR, 'wta_2026.xlsx')
+WTA_XLSX   = os.path.join(CACHE_DIR, 'td_wta_2026.xlsx')  # 2026-07-17 fix: wta_2026.xlsx congelado desde jun, fuente migro a tennis-data.co.uk el 13-jul
 
 log = logging.getLogger('tennis_resolver')
 if not log.handlers:

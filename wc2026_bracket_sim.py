@@ -8,16 +8,16 @@ Output: wc2026/bracket_probs.json
   {team: {group_win: float, q_r16: float, q_qf: float, q_sf: float,
           q_final: float, win_tournament: float}}
 
-Run: python3 /home/noc/oraculo_v2/wc2026_bracket_sim.py [--sims N]
+Run: python3 /home/noc/terra_v2/wc2026_bracket_sim.py [--sims N]
 Default: 10000 simulations (~45s)
 """
 import sys, json, os, random, collections, argparse
 import numpy as np
 
 sys.path.insert(0, '/home/noc/.local/lib/python3.12/site-packages')
-sys.path.insert(0, '/home/noc/oraculo_v2')
+sys.path.insert(0, '/home/noc/terra_v2')
 
-BASE = '/home/noc/oraculo_v2'
+BASE = '/home/noc/terra_v2'
 GROUPS_F   = f'{BASE}/wc2026/wc2026_groups.json'
 STANDINGS_F = f'{BASE}/wc2026/wc_standings.json'
 OUTPUT_F   = f'{BASE}/wc2026/bracket_probs.json'

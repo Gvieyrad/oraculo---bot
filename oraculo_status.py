@@ -5,7 +5,7 @@ oraculo_status.py — Unified dashboard for Oraculo + Sibila.
 Shows: 3 bankrolls, active bets, today's activity, AutoTune state,
 Sibila realistic per-sport, watchlist, service health.
 
-Run: python3 /home/noc/oraculo_v2/oraculo_status.py
+Run: python3 /home/noc/terra_v2/oraculo_status.py
 """
 import json, sqlite3, subprocess, os, sys
 from collections import Counter
@@ -159,14 +159,14 @@ def show_recent_activity():
 def show_health():
     section('6. SERVICE HEALTH')
     try:
-        r = subprocess.run(['systemctl', 'is-active', 'oraculo-v2'],
+        r = subprocess.run(['systemctl', 'is-active', 'terra-v2'],
                            capture_output=True, text=True, timeout=5)
         print(f'  oraculo-v2.service : {r.stdout.strip()}')
     except Exception as e:
         print(f'  systemctl check failed: {e}')
     # Recent errors
     try:
-        r = subprocess.run(['journalctl', '-u', 'oraculo-v2',
+        r = subprocess.run(['journalctl', '-u', 'terra-v2',
                             '--since', '6 hours ago', '--no-pager'],
                            capture_output=True, text=True, timeout=10)
         errs = [l for l in r.stdout.splitlines()

@@ -197,34 +197,38 @@ def fetch_match_results(force_refresh=False):
 # --- FALLBACK: Understat JSON API (no anti-bot) ---
 UNDERSTAT_LEAGUES = {
     'PL': 'EPL',
-    'PD': 'La_liga',
-    'SA': 'Serie_A',
+    'PD': 'La liga',
+    'SA': 'Serie A',
     'BL1': 'Bundesliga',
-    'FL1': 'Ligue_1',
+    'FL1': 'Ligue 1',
 }
 
 def _fetch_understat_xg(league_name, season='2025'):
-    """Fetch team xG from Understat (JSON, no anti-bot)."""
-    import urllib.request
-    url = f'https://understat.com/league/{league_name}/{season}'
+    """Fetch team xG from Understat's getLeagueData JSON API (no anti-bot).
+    2026-07-16: Understat moved from embedded JSON in HTML (var teamsData=...)
+    to an async getLeagueData/{league}/{season} endpoint -- old regex always
+    found 0 teams silently. New endpoint needs XHR-style headers or 404s, and
+    always gzips the response regardless of Accept-Encoding."""
+    import urllib.request, urllib.parse, gzip
+    league_enc = urllib.parse.quote(league_name)
+    url = f'https://understat.com/getLeagueData/{league_enc}/{season}'
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'en-US,en;q=0.9',
+        'X-Requested-With': 'XMLHttpRequest',
+        'Referer': f'https://understat.com/league/{league_enc}/{season}',
+        'Accept': 'application/json',
     }
     req = urllib.request.Request(url, headers=headers)
     try:
         resp = urllib.request.urlopen(req, timeout=20)
-        html = resp.read().decode('utf-8', errors='replace')
-        # Understat embeds JSON in script tags
-        match = re.search(r"var\s+teamsData\s*=\s*JSON\.parse\('(.+?)'\)", html)
-        if not match:
-            return {}, []
-        raw = match.group(1).encode().decode('unicode_escape')
-        data = json.loads(raw)
+        raw = resp.read()
+        if resp.headers.get('Content-Encoding') == 'gzip':
+            raw = gzip.decompress(raw)
+        data = json.loads(raw.decode('utf-8', errors='replace'))
+        teams_raw = data.get('teams', {})
         teams = {}
         matches = []
-        for tid, tinfo in data.items():
+        for tid, tinfo in teams_raw.items():
             name = tinfo.get('title', '')
             history = tinfo.get('history', [])
             if not history:

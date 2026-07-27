@@ -460,7 +460,7 @@ def _get_params(team_name):
 
 # ── penaltyblog DixonColes backend (fitted 2026-05-20) ──────────
 # log-loss improvement: +2.8% (1.0051 → 0.9769)
-_PB_MODEL_PATH = '/home/noc/oraculo_v2/wc2026/pb_model.pkl'
+_PB_MODEL_PATH = '/home/noc/terra_v2/wc2026/pb_model.pkl'
 _pb_model_cache = [None]
 _pb_model_mtime = [0.0]
 

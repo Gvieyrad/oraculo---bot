@@ -4,9 +4,9 @@ update_intl_csv.py — Download latest martj42 international results, add new ma
 to intl_results_5y.csv, and retrain pb_model.pkl if enough new matches are found.
 
 Usage:
-    python3 /home/noc/oraculo_v2/update_intl_csv.py
-    python3 /home/noc/oraculo_v2/update_intl_csv.py --force-retrain
-    python3 /home/noc/oraculo_v2/update_intl_csv.py --dry-run
+    python3 /home/noc/terra_v2/update_intl_csv.py
+    python3 /home/noc/terra_v2/update_intl_csv.py --force-retrain
+    python3 /home/noc/terra_v2/update_intl_csv.py --dry-run
 
 Designed to run daily June 1-11 via cron or manually.
 """

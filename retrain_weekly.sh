@@ -1,9 +1,9 @@
 #!/bin/bash
 # retrain_weekly.sh — Retrain Ganagol DC + GBC models
-# Cron: 0 3 * * 6 /home/noc/oraculo_v2/retrain_weekly.sh >> /home/noc/oraculo_v2/retrain.log 2>&1
+# Cron: 0 3 * * 6 /home/noc/terra_v2/retrain_weekly.sh >> /home/noc/terra_v2/retrain.log 2>&1
 
 set -e
-cd /home/noc/oraculo_v2
+cd /home/noc/terra_v2
 echo "=== $(date) === Ganagol weekly retrain ==="
 
 echo "[1/2] DC retrain..."

@@ -1,11 +1,11 @@
 import sys, json, math, random
 sys.path.insert(0, "/home/noc/.local/lib/python3.12/site-packages")
-sys.path.insert(0, "/home/noc/oraculo_v2")
+sys.path.insert(0, "/home/noc/terra_v2")
 random.seed(42)
 
 from oraculo_wc_model import predict_match, get_player_adjusted_xg
 
-groups = json.load(open("/home/noc/oraculo_v2/wc2026/wc2026_groups.json"))
+groups = json.load(open("/home/noc/terra_v2/wc2026/wc2026_groups.json"))
 
 def pp(lam, k):
     return (lam**k * math.exp(-lam)) / math.factorial(k)

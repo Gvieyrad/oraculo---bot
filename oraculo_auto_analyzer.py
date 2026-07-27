@@ -5,7 +5,7 @@ Reads sibila.db, computes segment stats, and updates oraculo_filters.json
 when a segment has ≥MIN_PICKS picks and WR is statistically below breakeven.
 
 Run: python3 oraculo_auto_analyzer.py [--dry-run]
-Cron: 0 5 * * * python3 /home/noc/oraculo_v2/oraculo_auto_analyzer.py >> /var/log/oraculo_analyzer.log 2>&1
+Cron: 0 5 * * * python3 /home/noc/terra_v2/oraculo_auto_analyzer.py >> /var/log/oraculo_analyzer.log 2>&1
 """
 
 import sqlite3

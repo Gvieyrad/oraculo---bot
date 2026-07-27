@@ -26,7 +26,7 @@ from collections import defaultdict
 
 warnings.filterwarnings('ignore')
 
-CACHE_DIR = '/home/noc/oraculo_v2/.oraculo_cache/csv'
+CACHE_DIR = '/home/noc/terra_v2/.oraculo_cache/csv'
 LEAGUE_FILES = {
     'PL':  'E0_2526.json',
     'BL1': 'D1_2526.json',

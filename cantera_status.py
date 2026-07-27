@@ -6,7 +6,7 @@ Uso: python3 cantera_status.py
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
-DB = '/home/noc/oraculo_v2/sibila.db'
+DB = '/home/noc/terra_v2/sibila.db'
 NOW = datetime.now(timezone.utc)
 
 CANTERA = [

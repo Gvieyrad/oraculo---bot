@@ -10,7 +10,7 @@ import os
 import shutil
 import textwrap
 
-BASE   = '/home/noc/oraculo_v2'
+BASE   = '/home/noc/terra_v2'
 RUNNER = f'{BASE}/oraculo_runner_auto.py'
 SIBILA = f'{BASE}/oraculo_sibila.py'
 RLM_SRC = os.path.join(os.path.dirname(__file__), 'oraculo_rlm.py')

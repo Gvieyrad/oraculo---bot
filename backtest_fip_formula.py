@@ -5,8 +5,8 @@ Usa datos 2026 donde tenemos pitcher gamelogs.
 import sqlite3, json, os
 from collections import defaultdict
 
-F5_DB = "/home/noc/oraculo_v2/.oraculo_cache/mlb_f5.db"
-PITCHER_CACHE = "/home/noc/oraculo_v2/.oraculo_cache/mlb_pitcher_logs.json"
+F5_DB = "/home/noc/terra_v2/.oraculo_cache/mlb_f5.db"
+PITCHER_CACHE = "/home/noc/terra_v2/.oraculo_cache/mlb_pitcher_logs.json"
 FIP_CONST = 3.10
 BASE_HOME_PROB = 0.538  # MLB historical home F5 win rate
 

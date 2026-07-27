@@ -16,7 +16,7 @@ Cambios:
   6. Log pitcher FIP en cada pick
 """
 
-MLB = '/home/noc/oraculo_v2/oraculo_mlb.py'
+MLB = '/home/noc/terra_v2/oraculo_mlb.py'
 
 with open(MLB) as f:
     code = f.read()

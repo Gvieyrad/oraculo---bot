@@ -15,7 +15,7 @@ Semana 10-11: Betfair SP como CLV oracle
 import os
 import shutil
 
-BASE    = '/home/noc/oraculo_v2'
+BASE    = '/home/noc/terra_v2'
 RUNNER  = f'{BASE}/oraculo_runner_auto.py'
 SIBILA  = f'{BASE}/oraculo_sibila.py'
 CLV_SRC = os.path.join(os.path.dirname(__file__), 'oraculo_clv.py')

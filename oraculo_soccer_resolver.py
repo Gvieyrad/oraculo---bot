@@ -14,7 +14,7 @@ from datetime import datetime, timezone, timedelta
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 log = logging.getLogger('oraculo.soccer_resolver')
 
-SCRIPT_DIR = '/home/noc/oraculo_v2'
+SCRIPT_DIR = '/home/noc/terra_v2'
 CSV_DIR    = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'csv')
 
 

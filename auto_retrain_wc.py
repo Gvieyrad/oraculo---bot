@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 auto_retrain_wc.py — Auto-retrain DC model during WC 2026 when >=5 new match results detected.
-Cron (Jun 12 – Jul 19): 0 */6 * * * python3 /home/noc/oraculo_v2/auto_retrain_wc.py >> /home/noc/oraculo_v2/logs/auto_retrain.log 2>&1
+Cron (Jun 12 – Jul 19): 0 */6 * * * python3 /home/noc/terra_v2/auto_retrain_wc.py >> /home/noc/terra_v2/logs/auto_retrain.log 2>&1
 """
 import subprocess, csv, os, sys
 from datetime import date
 
-SCRIPT_DIR  = '/home/noc/oraculo_v2'
+SCRIPT_DIR  = '/home/noc/terra_v2'
 CSV_PATH    = f'{SCRIPT_DIR}/wc2026/intl_results_5y.csv'
 MARKER      = f'{SCRIPT_DIR}/wc2026/.last_retrain_count'
 RETRAIN_SC  = f'{SCRIPT_DIR}/wc2026/retrain_pb_model.py'

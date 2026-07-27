@@ -202,7 +202,19 @@ def record_pick(pick: dict, placed: bool = False, real_stake: float = None, bet_
                     (pick.get('match') or '', label, _mkt_type)
                 ).fetchone()
             if _exists:
+                conn.close()
                 return
+            # 2026-07-06: si ya hay una apuesta REAL activa en este evento (mismo event_id),
+            # no sumar mas ruido shadow -- distintos scanners pueden re-encontrar el mismo
+            # partido bajo otro market_url/market_type (ver caso Mexico vs England 2026-07-04)
+            if _event_id:
+                _real_exists = conn.execute(
+                    "SELECT 1 FROM sibila_picks WHERE event_id=? AND placed=1 LIMIT 1",
+                    (_event_id,)
+                ).fetchone()
+                if _real_exists:
+                    conn.close()
+                    return
         conn.execute("""
             INSERT INTO sibila_picks
               (ts, sport, match, league, surface, level, market, side,
@@ -434,6 +446,42 @@ def get_stats(days: int = 30) -> dict:
         'by_level':         level_stats,
         'calibration':      calibration,
     }
+
+
+def clv_report(window: int = 20, min_picks: int = 5) -> dict:
+    """
+    Rolling CLV health check per market_type, over real-money bets only
+    (placed=1) -- catches a live model losing its edge vs the closing line.
+    Returns {'alerts': [str, ...], 'segments': {market_type: {'n', 'avg_clv'}}}.
+    An alert fires when the average CLV of the last `window` resolved picks
+    for a market_type drops below -3%, with at least `min_picks` samples.
+    """
+    conn = _get_conn()
+    try:
+        market_types = [r[0] for r in conn.execute(
+            "SELECT DISTINCT market_type FROM sibila_picks "
+            "WHERE market_type IS NOT NULL AND market_type != '' AND placed=1"
+        ).fetchall()]
+
+        alerts, segments = [], {}
+        for mt in market_types:
+            rows = conn.execute("""
+                SELECT clv FROM sibila_picks
+                WHERE market_type=? AND placed=1 AND result IS NOT NULL AND clv IS NOT NULL
+                ORDER BY COALESCE(resolved_ts, ts) DESC
+                LIMIT ?
+            """, (mt, window)).fetchall()
+            clvs = [r[0] for r in rows]
+            if len(clvs) < min_picks:
+                continue
+            avg_clv = sum(clvs) / len(clvs)
+            segments[mt] = {'n': len(clvs), 'avg_clv': round(avg_clv, 4)}
+            if avg_clv < -0.03:
+                alerts.append('%s: CLV promedio %.1f%% (n=%d, ultimas %d picks)'
+                               % (mt, avg_clv * 100, len(clvs), window))
+        return {'alerts': alerts, 'segments': segments}
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@ check_wc_odds.py — Daily odds-population check for WC 2026 Cloudbet markets.
 Run Jun 1-10 via cron. Sends Telegram on first detection of non-zero odds.
 
 Usage:
-    python3 /home/noc/oraculo_v2/check_wc_odds.py
+    python3 /home/noc/terra_v2/check_wc_odds.py
 """
 import json, os, sys, urllib.request, urllib.parse
 from datetime import date

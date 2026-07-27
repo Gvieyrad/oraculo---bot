@@ -7,7 +7,7 @@ Measures: booking pts calibration, corner winner accuracy, EV per market.
 import os, json, math, sys
 from collections import defaultdict
 
-SCRIPT_DIR = '/home/noc/oraculo_v2'
+SCRIPT_DIR = '/home/noc/terra_v2'
 CSV_DIR    = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'csv')
 
 LEAGUE_FILES = ['E0_2526.json', 'D1_2526.json', 'F1_2526.json',

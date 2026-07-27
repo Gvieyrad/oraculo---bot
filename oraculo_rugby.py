@@ -10,7 +10,7 @@ import os, re, pickle, logging
 from datetime import datetime
 
 log = logging.getLogger('oraculo')
-CACHE = '/home/noc/oraculo_v2/.oraculo_cache/rugby'
+CACHE = '/home/noc/terra_v2/.oraculo_cache/rugby'
 K, HA = 24, 60
 
 LEAGUES = {

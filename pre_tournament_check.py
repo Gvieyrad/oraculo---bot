@@ -5,7 +5,7 @@ Runs: slug verify, bankroll check, service health, bracket sim, player intel.
 Sends Telegram summary with full GO/NO-GO status.
 
 Usage:
-    python3 /home/noc/oraculo_v2/pre_tournament_check.py
+    python3 /home/noc/terra_v2/pre_tournament_check.py
 """
 import json, os, sys, subprocess, urllib.request, urllib.parse
 from datetime import datetime, date, timezone
@@ -94,17 +94,17 @@ def check_bankroll():
 
 
 def check_service():
-    log('--- 3. oraculo-v2.service status ---')
+    log('--- 3. terra-v2.service status ---')
     try:
         result = subprocess.run(
-            ['systemctl', 'is-active', 'oraculo-v2.service'],
+            ['systemctl', 'is-active', 'terra-v2.service'],
             capture_output=True, text=True
         )
         status = result.stdout.strip()
         if status == 'active':
-            ok('oraculo-v2.service', 'active/running')
+            ok('terra-v2.service', 'active/running')
         else:
-            fail('oraculo-v2.service', status)
+            fail('terra-v2.service', status)
     except Exception as e:
         fail('Service check', str(e))
 

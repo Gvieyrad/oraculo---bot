@@ -50,7 +50,19 @@ class ScrapeGuard:
         }
         self._save_health()
 
-        if fails >= 3:
+        # Auto-reset semanal: da otra oportunidad al servicio externo
+        _last_f = prev.get('last_failure', '')
+        if _last_f and fails > 50:
+            try:
+                _age_d = (datetime.utcnow() - datetime.fromisoformat(_last_f)).days
+                if _age_d >= 7:
+                    log.info('[ScrapeGuard] %s: auto-reset tras %dd (%d fallos)', source, _age_d, fails)
+                    fails = 1
+            except Exception:
+                pass
+        # Log solo en milestones (3, 10, 50, 100, luego cada 500)
+        _milestones = {3, 10, 50, 100}
+        if fails in _milestones or (fails > 100 and fails % 500 == 0):
             log.error('[ScrapeGuard] %s has failed %d consecutive times: %s',
                      source, fails, error_msg)
 

@@ -4,7 +4,7 @@ discover_wc_slug.py
 Find the correct Cloudbet competition slug for WC 2026 and patch the runner.
 
 Run once around June 1 when Cloudbet opens WC odds:
-  python3 /home/noc/oraculo_v2/discover_wc_slug.py
+  python3 /home/noc/terra_v2/discover_wc_slug.py
 
 If the correct slug differs from 'soccer-international-world-cup',
 patches oraculo_runner_auto.py and oraculo_wc_model.py automatically.
@@ -12,8 +12,8 @@ patches oraculo_runner_auto.py and oraculo_wc_model.py automatically.
 import json, urllib.request, sys, re, os, py_compile
 
 CB_BASE    = 'https://sports-api.cloudbet.com'
-CB_CFG     = '/home/noc/oraculo_v2/cloudbet_config.json'
-RUNNER     = '/home/noc/oraculo_v2/oraculo_runner_auto.py'
+CB_CFG     = '/home/noc/terra_v2/cloudbet_config.json'
+RUNNER     = '/home/noc/terra_v2/oraculo_runner_auto.py'
 CURRENT_SLUG = 'soccer-international-world-cup'
 
 CANDIDATE_SLUGS = [

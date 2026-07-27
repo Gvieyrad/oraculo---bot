@@ -16,7 +16,7 @@ Semana 12: Benter Trick integration
 import os
 import shutil
 
-BASE      = '/home/noc/oraculo_v2'
+BASE      = '/home/noc/terra_v2'
 RUNNER    = f'{BASE}/oraculo_runner_auto.py'
 SIBILA    = f'{BASE}/oraculo_sibila.py'
 BENT_SRC  = os.path.join(os.path.dirname(__file__), 'oraculo_benter.py')

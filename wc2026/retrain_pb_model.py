@@ -4,9 +4,9 @@ retrain_pb_model.py — Re-fit penaltyblog DixonColes model from intl_results_5y
 Run after update_intl_csv.py adds new warmup matches.
 
 Usage:
-    python3 /home/noc/oraculo_v2/wc2026/retrain_pb_model.py
+    python3 /home/noc/terra_v2/wc2026/retrain_pb_model.py
 
-Output: /home/noc/oraculo_v2/wc2026/pb_model.pkl (overwrites existing)
+Output: /home/noc/terra_v2/wc2026/pb_model.pkl (overwrites existing)
 """
 import sys, os, csv, pickle
 from datetime import date, datetime

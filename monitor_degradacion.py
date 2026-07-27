@@ -6,9 +6,9 @@ import sqlite3, os, sys
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-DB = "/home/noc/oraculo_v2/oraculo.db"
-DOCS = "/home/noc/oraculo_v2/docs"
-RUNNER = "/home/noc/oraculo_v2/oraculo_runner_auto.py"
+DB = "/home/noc/terra_v2/oraculo.db"
+DOCS = "/home/noc/terra_v2/docs"
+RUNNER = "/home/noc/terra_v2/oraculo_runner_auto.py"
 
 # Umbrales Regla 5
 WARN_WR   = 0.50   # alerta manual
@@ -52,7 +52,7 @@ def disable_market(market_flag):
         return False
     with open(RUNNER, "w") as f:
         f.write(content.replace(old, new))
-    os.system("systemctl restart oraculo-v2.service")
+    os.system("systemctl restart terra-v2.service")
     return True
 
 MARKET_FLAGS = {

@@ -188,13 +188,9 @@ VERDICT: BET or SKIP or REDUCE
 CONFIDENCE: number 0-100
 REASON: one sentence"""
 
-    # Try Gemini first (fast cloud API), fall back to local Ollama
-    text = _call_gemini(prompt)
-    source = 'gemini'
-    if text is None:
-        log.info('Gemini unavailable, trying Ollama fallback')
-        text = _call_ollama(prompt)
-        source = 'ollama'
+    # 2026-07-21: Gemini deshabilitado (ya no se usan APIs de IA pagas) -- directo a Ollama local
+    text = _call_ollama(prompt)
+    source = 'ollama'
     if text is None:
         return None
 

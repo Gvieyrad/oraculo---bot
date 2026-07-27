@@ -26,7 +26,7 @@ from difflib import SequenceMatcher
 
 import requests
 
-SCRIPT_DIR = "/home/noc/oraculo_v2"
+SCRIPT_DIR = "/home/noc/terra_v2"
 DB_PATH = os.path.join(SCRIPT_DIR, "sibila.db")
 CFG_PATH = os.path.join(SCRIPT_DIR, "cloudbet_config.json")
 WC_LEAGUE_KEY = "soccer-international-world-cup"

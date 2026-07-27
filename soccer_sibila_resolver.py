@@ -12,7 +12,7 @@ log = logging.getLogger('soccer_resolver')
 if not log.handlers:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
 
-SIBILA_DB = '/home/noc/oraculo_v2/sibila.db'
+SIBILA_DB = '/home/noc/terra_v2/sibila.db'
 
 # League slug → [primary URL, fallback URL]
 def _league_urls(slug):
@@ -516,15 +516,18 @@ def resolve_all_pending(dry_run=False):
     conn2.close()
 
     print('\n=== Soccer Shadow Summary ===')
-    tn, tw, tpnl = 0, 0, 0.0
+    tn, tw, tl, tpnl = 0, 0, 0, 0.0
     for res, n, pnl in settled:
         pnl = pnl or 0
         print(f'  {res:4}: n={n}  PnL=${pnl:+.2f}')
         tn += n
         if res == 'WIN': tw += n
+        if res == 'LOSS': tl += n
         tpnl += pnl
     if tn:
-        print(f'  TOTAL: {tw}/{tn}  WR={tw/tn*100:.1f}%  PnL=${tpnl:+.2f}')
+        # WR sobre decididos (WIN+LOSS), excluye VOID del denominador
+        wr = tw / (tw + tl) * 100 if (tw + tl) else 0.0
+        print(f'  TOTAL: {tw}/{tn}  WR={wr:.1f}% (de {tw+tl} decididos)  PnL=${tpnl:+.2f}')
     print(f'\nThis run: resolved={resolved}  skipped(sequence)={skipped}  not_found={not_found}')
     return resolved, skipped, not_found
 

@@ -6,7 +6,9 @@
     "soccer-italy-serie-a": 0.579,
     "soccer-portugal-primeira-liga": 0.572,
     "soccer-belgium-first-division-a": 0.563,
-    "soccer-spain-laliga": 0.559
+    "soccer-spain-laliga": 0.559,
+    "soccer-china-chinese-super-league": 0.5563,
+    "soccer-peru-primera-division": 0.6023
   },
   "over_friendly": {
     "soccer-germany-bundesliga": 0.471,

@@ -1,7 +1,7 @@
 
 import json, sqlite3, os
 
-SCRIPT_DIR = "/home/noc/oraculo_v2"
+SCRIPT_DIR = "/home/noc/terra_v2"
 LOG_FILE = SCRIPT_DIR + "/predictions_log.jsonl"
 DB_FILE = SCRIPT_DIR + "/oraculo.db"
 

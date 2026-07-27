@@ -9,7 +9,7 @@ Semana 5: Line Opening Timing
 import os
 import textwrap
 
-BASE   = '/home/noc/oraculo_v2'
+BASE   = '/home/noc/terra_v2'
 RUNNER = f'{BASE}/oraculo_runner_auto.py'
 SIBILA = f'{BASE}/oraculo_sibila.py'
 FRESH  = f'{BASE}/oraculo_fresh_line.py'

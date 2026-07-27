@@ -1,6 +1,6 @@
 import sys, urllib.request, json, difflib
 from datetime import datetime, timezone, timedelta
-sys.path.insert(0, '/home/noc/oraculo_v2')
+sys.path.insert(0, '/home/noc/terra_v2')
 
 KEY = '1f271971-8189-483d-ad0d-f9260c8a5896'
 

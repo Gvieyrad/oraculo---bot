@@ -272,7 +272,7 @@ class BenterCalibrator:
     Puede recalibrar automaticamente cuando hay suficientes picks resueltos.
     """
 
-    _ALPHA_PATH = '/home/noc/oraculo_v2/benter_alphas.json'
+    _ALPHA_PATH = '/home/noc/terra_v2/benter_alphas.json'
     _ALPHA_MAX_AGE = 7 * 24 * 3600  # forzar recalibracion si los alphas tienen >7 dias
 
     def __init__(self, sibila_db: str = None):

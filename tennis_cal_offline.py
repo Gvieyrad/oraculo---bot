@@ -1,8 +1,8 @@
 import sqlite3, sys
-sys.path.insert(0, '/home/noc/oraculo_v2')
+sys.path.insert(0, '/home/noc/terra_v2')
 from oraculo_tennis_calib import calibrate_tennis_prob as cal
 
-c = sqlite3.connect('/home/noc/oraculo_v2/sibila.db')
+c = sqlite3.connect('/home/noc/terra_v2/sibila.db')
 rows = c.execute("""SELECT prob_model, odds, clv, result FROM sibila_picks
   WHERE sport='tennis' AND market_type='tennis_team_win_set'
   AND prob_model>0 AND odds>1""").fetchall()

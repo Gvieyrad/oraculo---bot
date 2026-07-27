@@ -6,7 +6,7 @@ Bug context: _lbl is lowercased at scan loop start but the original regexes
 used uppercase patterns -> re.search() always returned None -> fade filter
 was a silent no-op since it was written.
 
-Run: cd /home/noc/oraculo_v2 && python -m pytest tests/test_mlb_filters.py -v
+Run: cd /home/noc/terra_v2 && python -m pytest tests/test_mlb_filters.py -v
 """
 import re
 import sys

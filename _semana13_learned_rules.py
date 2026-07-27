@@ -6,7 +6,7 @@ Reglas aplicadas: skip odds 2.50+, skip edge 12%+, reduce stake market/level.
 """
 import os, re
 
-BASE   = '/home/noc/oraculo_v2'
+BASE   = '/home/noc/terra_v2'
 RUNNER = f'{BASE}/oraculo_runner_auto.py'
 
 with open(RUNNER) as f:
