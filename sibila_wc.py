@@ -167,7 +167,11 @@ def _resolve_pick(pick, result):
     side = str(pick.get("side", "") or "").lower()
     market = str(pick.get("market", "") or "").lower()
     odds = float(pick.get("odds") or 1.0)
-    stake = float(pick.get("shadow_stake") or 1.0)
+    # 2026-07-30 [fix]: mismo bug que los otros resolvers -- usaba shadow_stake
+    # (banca virtual) para apuestas reales (placed=1). WC no mostro distorsion
+    # historica (stakes coincidian por el mecanismo de reserva fijo), pero el
+    # riesgo latente existia igual -- se corrige por consistencia.
+    stake = float(pick.get("real_stake") or pick.get("shadow_stake") or 1.0)
 
     # Goals 2H Under/Over
     if "goals 2h" in side and result.get("ft_goals_2h") is not None:
@@ -197,7 +201,7 @@ def resolve_wc_picks(manual_results=None):
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     cur.execute(
-        "SELECT id, match, market, side, odds, shadow_stake "
+        "SELECT id, match, market, side, odds, shadow_stake, real_stake "
         "FROM sibila_picks WHERE league = ? AND result IS NULL",
         (WC_LEAGUE_KEY,),
     )

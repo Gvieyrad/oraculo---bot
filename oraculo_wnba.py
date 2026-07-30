@@ -248,7 +248,15 @@ def scan_wnba(api, state, elo: WNBAElo = None, dry_run: bool = False, shadow: bo
         if not home_cb or not away_cb or not eid:
             continue
 
+        # 2026-07-27: Cloudbet esta migrando WNBA de basketball.1x2 (3-way,
+        # legado) a basketball.moneyline (2-way) -- de 6 partidos activos hoy,
+        # solo 1 seguia teniendo 1x2, dejando el scanner ciego a los otros 5
+        # (0 picks nuevos desde 07-13). Fallback a moneyline si 1x2 no existe.
+        _mk_key = 'basketball.1x2'
         mk = ev.get('markets', {}).get('basketball.1x2', {})
+        if not mk:
+            _mk_key = 'basketball.moneyline'
+            mk = ev.get('markets', {}).get('basketball.moneyline', {})
         if not mk:
             continue
 
@@ -304,7 +312,7 @@ def scan_wnba(api, state, elo: WNBAElo = None, dry_run: bool = False, shadow: bo
                 'league':                'basketball-usa-wnba',
                 'sport':                 'basketball',
                 'event_id':              eid,
-                'market':                'basketball.1x2',
+                'market':                _mk_key,
                 'market_url':            murl,
                 'price':                 price,
                 'odds':                  price,

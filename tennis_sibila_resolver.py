@@ -296,7 +296,12 @@ def resolve_all_pending(dry_run=False):
         side    = str(col(row, 'side')  or '')
         ts      = str(col(row, 'ts')    or '')
         odds       = float(col(row, 'odds') or 1.5)
-        stake      = float(col(row, 'shadow_stake') or col(row, 'stake') or 10.0)
+        # 2026-07-30 [fix]: apuestas reales (placed=1) usaban shadow_stake
+        # (banca virtual, mucho mas grande) para calcular pnl en vez del stake
+        # real ejecutado en Cloudbet -- Ibragimova real $2.15, Sibila mostraba
+        # $23.73 (shadow_stake=55.19). Plata real no afectada (state.json usa
+        # la API de Cloudbet directamente), solo esta columna de tracking.
+        stake      = float(col(row, 'real_stake') or col(row, 'shadow_stake') or col(row, 'stake') or 10.0)
         event_id   = str(col(row, 'event_id') or '')
         market_url = str(col(row, 'market_url') or '')
 
