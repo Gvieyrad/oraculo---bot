@@ -360,7 +360,9 @@ def resolve_all_pending(dry_run=False):
         league  = str(col(row, 'league')  or '')
         ts      = str(col(row, 'ts')      or '')[:10]
         odds       = float(col(row, 'odds')  or 1.5)
-        stake      = float(col(row, 'shadow_stake') or col(row, 'stake') or 10.0)
+        # 2026-07-30 [fix]: mismo bug que tennis_sibila_resolver -- usaba shadow_stake
+        # (banca virtual) en vez del stake real para pnl en apuestas placed=1.
+        stake      = float(col(row, 'real_stake') or col(row, 'shadow_stake') or col(row, 'stake') or 10.0)
         event_id   = str(col(row, 'event_id') or '')
         market_url = str(col(row, 'market_url') or '')
 

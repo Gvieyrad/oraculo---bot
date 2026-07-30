@@ -2974,6 +2974,31 @@ def scan_tennis(api, state, dry_run=False):
     except Exception as e:
         log.debug('WNBA scan error: %s', e)
 
+    # --- MMA (UFC) SCANNING ---
+    # 2026-07-27: nuevo mercado, SHADOW ONLY -- no colocar apuestas reales.
+    # Elo recien entrenado (901 fighters, 1128 fights via ESPN), sin validacion
+    # en cantera todavia. NO promover a live sin pasar el mismo checklist que
+    # WNBA/sets_under (20+ picks, WR>=umbral). Ver cantera_status.py.
+    try:
+        from oraculo_mma import train_mma_elo, scan_mma
+        _mma_elo = train_mma_elo()
+        if _mma_elo and len(_mma_elo.ratings) >= 50:
+            _mma_picks = scan_mma(api, state, _mma_elo, shadow=True)
+            if _mma_picks:
+                log.info('[MMA] %d picks (SHADOW):', len(_mma_picks))
+                for _mp in _mma_picks:
+                    log.info('  [MMA] %s | %s | edge=%.1f%% conf=%.0f%% @%.3f',
+                             _mp['match'][:35], _mp['label'], _mp['edge']*100,
+                             _mp['model_prob']*100, _mp['price'])
+                if _SIBILA_ENABLED:
+                    for _mp in _mma_picks:
+                        _mp['market_type'] = 'mma_winner'  # tag para tracking cantera
+                        _mp['_shadow_only'] = True
+                        _sibila_record(_mp)
+                # NO picks.extend() -- shadow only, nunca se coloca apuesta real
+    except Exception as e:
+        log.debug('MMA scan error: %s', e)
+
     # --- NHL SCANNING ---
     # NHL regular season Oct-Apr. Uses hockey.1x2 market. Shadow=True until 40+ picks validated.
     _nhl_active = False
@@ -4248,12 +4273,16 @@ def reconcile_bankroll(api, state):
         # Threshold: >1 day old + absent from API (500-bet window) = treat as VOID, return stake.
         api_bet_ids = {b.get('betId', '') for b in bets}
         now = datetime.now()
-        # Bets tracked in sibila as placed=1 are never pruned (long-horizon WC, etc.)
+        # Bets tracked in sibila as placed=1 AND still unresolved are never pruned
+        # (long-horizon WC, etc.). 2026-07-30 [fix]: query no filtraba por result --
+        # protegia indefinidamente bets que Sibila YA sabe que terminaron (WIN/LOSS/
+        # VOID), dejandolas huerfanas en active_bets para siempre (encontrado: bet
+        # 25c3d070 en Terra, VOID en Sibila desde 07-11, seguia activa 17 dias despues).
         _sibila_placed_ids = set()
         try:
             import sqlite3 as _sl3p
             _scp = _sl3p.connect(os.path.join(SCRIPT_DIR, "sibila.db"))
-            for (_bid,) in _scp.execute("SELECT bet_id FROM sibila_picks WHERE placed=1 AND bet_id IS NOT NULL AND bet_id != ''"):
+            for (_bid,) in _scp.execute("SELECT bet_id FROM sibila_picks WHERE placed=1 AND bet_id IS NOT NULL AND bet_id != '' AND (result IS NULL OR result = '')"):
                 _sibila_placed_ids.add(_bid)
             _scp.close()
         except Exception:

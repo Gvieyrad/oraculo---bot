@@ -49,7 +49,8 @@ CANTERA = [
         'name': 'WNBA',
         'query': "sport='basketball' AND (league LIKE '%wnba%' OR side LIKE '%Lynx%' OR side LIKE '%Liberty%' OR side LIKE '%Aces%' OR side LIKE '%Mercury%' OR side LIKE '%Sky%')",
         'threshold': 20,
-        'note': 'ELO model -- activar live cuando WR>=55%% en 20+ picks, odds<=1.90',
+        'live': True,  # 2026-07-06: promovida a vivo (shadow=False en scan_wnba)
+        'note': 'ELO model -- LIVE desde 2026-07-06, stake $1, odds<=1.90',
         'days': 90,
     },
     {
@@ -63,7 +64,15 @@ CANTERA = [
         'name': 'sets_under grass/hard',
         'query': "market_type='sets_under' AND COALESCE(surface,'') != 'clay'",
         'threshold': 20,
-        'note': 'Solo grass/hard (CLAY = desastre confirmado 0/10). Activar live WR>=60%% en 20+.',
+        'live': True,  # 2026-07-05: promovida a vivo (Challenger sigue bloqueado, ver filtro en oraculo_runner_auto.py)
+        'note': 'Solo grass/hard (CLAY = desastre confirmado 0/10; Challenger tambien bloqueado). LIVE desde 2026-07-05.',
+        'days': 90,
+    },
+    {
+        'name': 'MMA (UFC)',
+        'query': "market_type='mma_winner'",
+        'threshold': 20,
+        'note': 'ELO model (ESPN results, 901 fighters). Activar live cuando WR>=55%% en 20+ picks, odds<=3.50.',
         'days': 90,
     },
     {
@@ -152,6 +161,9 @@ for s in CANTERA:
     elif resolved == 0:
         status = 'SIN DATOS'
         progress = '(0/%d picks)' % thr
+    elif s.get('live'):
+        status = 'LIVE'
+        progress = '(%d picks WR=%.0f%%)' % (resolved, wr)
     elif resolved >= thr:
         badge = 'EVALUAR LIVE' if wr >= 55 else 'WR insuf (%.0f%%)' % wr
         status = badge
