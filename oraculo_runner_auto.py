@@ -3541,7 +3541,12 @@ def place_bets(api, state, picks, parlays, dry_run=False):
             log.info('  LLM REDUCE: stake halved to $%.2f', stake)
         stake = min(stake, straight_remaining)
         # 2026-07-22: PortfolioKelly no aplicaba MIN_STAKE -- apuestas de $1 se colaban.
-        if 0 < stake < MIN_STAKE and not p.get('_wc_phase_c'):
+        # 2026-07-31 [fix]: el piso mataba mercados con _max_stake propio ya
+        # validado por debajo de MIN_STAKE (WNBA $1, cantera WR=62% con ese
+        # tamano) -- eximir cuando el tope del pick ya es intencionalmente
+        # menor a MIN_STAKE, no un calculo de Kelly quedandose corto.
+        _has_own_cap = p.get('_max_stake') and float(p['_max_stake']) < MIN_STAKE
+        if 0 < stake < MIN_STAKE and not p.get('_wc_phase_c') and not _has_own_cap:
             log.info('  [SKIP] PortfolioKelly stake $%.2f below MIN_STAKE $%.2f: %s', stake, MIN_STAKE, p.get('match','')[:35])
             continue
 
