@@ -254,16 +254,37 @@ def record_pick(pick: dict, placed: bool = False, real_stake: float = None, bet_
         log.debug('Sibila record_pick error: %s', e)
 
 
-def mark_placed(match: str, label: str, bet_id: str, real_stake: float):
-    """Update a shadow pick to mark it was actually placed as a real bet."""
+def mark_placed(match: str, label: str, bet_id: str, real_stake: float,
+                 event_id: str = None, market_url: str = None):
+    """Update a shadow pick to mark it was actually placed as a real bet.
+
+    2026-07-31 fix: matching by exact match+label text silently missed rows
+    when the label text (odds/FIP/etc embedded) had drifted between the
+    shadow-record scan and the placement scan, or when the shadow row had
+    already been resolved by the time this ran. Prefer the stable
+    event_id+market_url key; fall back to match+label.
+    """
     try:
         conn = _get_conn()
-        conn.execute("""
-            UPDATE sibila_picks SET placed=1, bet_id=?, real_stake=?
-            WHERE match=? AND side=? AND result IS NULL
-            ORDER BY ts DESC LIMIT 1
-        """, (bet_id, real_stake, match, label))
-        conn.commit()
+        row = None
+        if event_id and market_url:
+            row = conn.execute(
+                "SELECT id FROM sibila_picks WHERE event_id=? AND market_url=? AND placed=0 "
+                "ORDER BY ts DESC LIMIT 1",
+                (str(event_id), market_url)
+            ).fetchone()
+        if not row:
+            row = conn.execute(
+                "SELECT id FROM sibila_picks WHERE match=? AND side=? AND result IS NULL "
+                "ORDER BY ts DESC LIMIT 1",
+                (match, label)
+            ).fetchone()
+        if row:
+            conn.execute(
+                "UPDATE sibila_picks SET placed=1, bet_id=?, real_stake=? WHERE id=?",
+                (bet_id, real_stake, row[0])
+            )
+            conn.commit()
         conn.close()
     except Exception as e:
         log.debug('Sibila mark_placed error: %s', e)

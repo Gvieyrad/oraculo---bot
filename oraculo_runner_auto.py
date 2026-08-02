@@ -75,9 +75,9 @@ MAX_BETS_PER_SCAN = 8       # Max bets placed per scan cycle
 MAX_PER_MATCH = 1           # Max 1 bet per match (avoid correlated exposure)
 MAX_EXPOSURE_PER_MATCH = 0.10  # Max 10% of bankroll on a single match
 MAX_EXPOSURE_PER_EVENT = 0.05  # Max 5% of bankroll per event_id (cross-cycle)
-MAX_TOTAL_EXPOSURE = 0.30     # Max 30% of bankroll in pending bets — reduced from 60% (crash prevention)
+MAX_TOTAL_EXPOSURE = 0.50     # 2026-08-02: subido de 30 a 50 a pedido -- permite mas posiciones simultaneas (mismo motivo que el tope de sets_under). Sigue por debajo del 60 original que se considero riesgoso.
 MARKET_TYPE_EXPOSURE_CAP = {
-    'sets_under': 10.0,  # 2026-07-12: flat $ cap after 16 simultaneous bets (17.9% bankroll) on thin real sample
+    'sets_under': 60.0,  # 2026-08-02: subido de 50 a 60 a pedido -- consistente con MAX_TOTAL_EXPOSURE=50% (~$105 con bankroll actual), deja margen para otros mercados
     'double_chance': 10.0,  # 2026-07-12: peru_dc just went live (2 usd/bet), cap concurrent exposure pre-emptively
 }
 TENNIS_BUDGET_RESERVE = 0.30  # Reserve 30% of daily budget for tennis
@@ -182,8 +182,8 @@ LEAGUE_MARKETS = {
     'PPL': ['over25', 'over15', 'under35'],  # 2026-05-13: U3.5=74.5% historical
     'MLS': ['over25', 'over15'],
     'LMX': ['over25', 'over15'],
-    'ARG': ['over25', 'over15'],
-    'BRA': ['over25', 'over15'],
+    'ARG': ['over25', 'over15', 'under35'],
+    'BRA': ['over25', 'over15', 'under35'],
     'BEL': ['over25'],
     'SWE': ['over25'],
     'NOR': ['over25'],
@@ -1106,6 +1106,12 @@ def scan_football(api, state, dry_run=False):
 
     log.info('=== SCANNING FOOTBALL MARKETS ===')
     picks = []
+    # 2026-07-31 diagnostics: separate 'no model available' from 'evaluated but
+    # below edge/conf threshold' -- needed before deciding whether the fix is
+    # model coverage or threshold calibration.
+    _diag_no_model = 0
+    _diag_no_edge = 0
+    _diag_evaluated = 0
 
     # Try to load ML model — cached on function to avoid reloading 49MB pkl each cycle
     mp = None
@@ -1141,8 +1147,27 @@ def scan_football(api, state, dry_run=False):
         if os.path.exists(ep):
             with open(ep, 'rb') as f:
                 elo.__dict__.update(pickle.load(f))
+        # 2026-08-01 fix: build_feature_vector hace elo.ratings[team] (acceso
+        # directo, no .get()) -- KeyError silencioso para equipos no vistos por
+        # el retrain de produccion (solo 253, nombres crudos del CSV). Validado
+        # por agente: sin esto, 19/20 partidos de prueba tiraban vec=None.
+        import collections as _collections
+        elo.ratings = _collections.defaultdict(lambda: 1500, elo.ratings)
     except Exception as e:
         log.warning('Math models unavailable: %s', e)
+
+    # 2026-08-01: contexto historico para build_feature_vector (105 features).
+    # Cacheado internamente por oraculo_football_csv.py (TTL 24h) -- validado
+    # por agente: 10.4s en frio, 0.1s en caliente, seguro correrlo cada ciclo.
+    _fb_context = None
+    try:
+        from oraculo_football_csv import load_all_leagues
+        _fb_context = load_all_leagues(leagues=[
+            'PL', 'PD', 'SA', 'BL1', 'FL1', 'BL2', 'DED', 'ELC', 'PPL',
+            'NOR', 'SWE', 'SB', 'TUR', 'BEL',
+        ])
+    except Exception as e:
+        log.warning('Football context (load_all_leagues) unavailable: %s', e)
 
     # Seed Poisson ratings from Firecrawl/Understat real xG
     if _xg_data and poisson and poisson._fitted:
@@ -1190,6 +1215,23 @@ def scan_football(api, state, dry_run=False):
             markets = ev.get('markets', {})
             if not home or not away:
                 continue
+
+            # 2026-08-01 perf fix: calcular historial UNA vez por partido, no una
+            # vez por mercado (antes se repetia el mismo scan de _fb_context
+            # 3 veces por partido -- over25/over15/under35 -- sin necesidad,
+            # ya que no depende de mkt_key).
+            _home_csv, _away_csv, _home_recent, _away_recent = home, away, [], []
+            if _fb_context:
+                try:
+                    from oraculo_soccer_v2 import _norm_team as _fb_norm_team
+                    _home_csv = _fb_norm_team(home)
+                    _away_csv = _fb_norm_team(away)
+                    _home_recent = [m for m in _fb_context
+                                    if m.get('home_team') == _home_csv or m.get('away_team') == _home_csv]
+                    _away_recent = [m for m in _fb_context
+                                    if m.get('home_team') == _away_csv or m.get('away_team') == _away_csv]
+                except Exception:
+                    pass
 
             for mkt_key in league_mkts:
                 # --- ASIAN HANDICAP ---
@@ -1332,13 +1374,35 @@ def scan_football(api, state, dry_run=False):
                 # Get model prediction
                 model_prob_over = None
                 _peru_ml_ok = False
-                if mp:
+                if mp and _fb_context:
                     try:
-                        preds = mp.predict_match(home, away)
-                        if preds and mkt_key in preds:
-                            model_prob_over = preds[mkt_key].get('prob_yes')
-                    except Exception:
-                        pass
+                        if not _home_recent and not _away_recent:
+                            # 2026-08-01: agente encontro que sin historial para NINGUNO
+                            # de los 2 equipos, build_feature_vector devuelve una prediccion
+                            # generica identica (falsa confianza) en vez de None -- mejor
+                            # no intentar el modelo ML en este caso, dejar que otros
+                            # fallbacks (Poisson/base-rate) lo intenten o se descarte.
+                            if _diag_no_model < 15:
+                                log.info('[FB-DIAG] sin historial CSV para %s ni %s -- skip ML', home, away)
+                        else:
+                            from oraculo_daily_picks import build_feature_vector
+                            _match_dict = {'home_team': _home_csv, 'away_team': _away_csv,
+                                           'home_id': 0, 'away_id': 0, 'utc_date': ev_cutoff}
+                            vec = build_feature_vector(_match_dict, _fb_context, _xg_data,
+                                                        elo=elo, poisson=poisson)
+                            if vec is not None:
+                                preds = mp.predict_all(vec)
+                                _pred = preds.get(mkt_key) if preds else None
+                                if _pred:
+                                    model_prob_over = _pred.get('prob_yes')
+                                elif preds is not None and _diag_no_model < 15:
+                                    log.info('[FB-DIAG] mp sin %s para %s vs %s (keys=%s)',
+                                             mkt_key, home, away, list(preds.keys()) if preds else preds)
+                    except Exception as _e_mp:
+                        if _diag_no_model < 15:
+                            log.info('[FB-DIAG] build_feature_vector/predict_all error %s vs %s: %s', home, away, _e_mp)
+                elif _diag_no_model < 15:
+                    log.info('[FB-DIAG] mp o contexto (_fb_context) no disponibles')
                 # Peru Liga 1: dedicated ML model with altitude + form features
                 if league == 'PER' and mkt_key in ('over25', 'btts_yes', 'btts_no'):
                     try:
@@ -1367,8 +1431,28 @@ def scan_football(api, state, dry_run=False):
                     try:
                         p_mkts = poisson.predict_markets(home, away)
                         model_prob_over = p_mkts.get('over25', 0.5)
-                    except Exception:
-                        pass
+                    except Exception as _e_ps:
+                        if _diag_no_model < 15:
+                            log.info('[FB-DIAG] poisson.predict_markets error %s vs %s: %s', home, away, _e_ps)
+                elif model_prob_over is None and mkt_key == 'over25' and not poisson and _diag_no_model < 15:
+                    log.info('[FB-DIAG] poisson es None (over25 sin fallback)')
+                # 2026-08-01: fallback de tasa historica de goles para ARG/BRA en
+                # over15/under35 -- backtest walk-forward confirmo que estas dos
+                # lineas calibran mejor que coinflip; over25 NO se usa aca porque
+                # el mismo backtest mostro que no aporta señal real para estas ligas.
+                if model_prob_over is None and league in ('ARG', 'BRA') and mkt_key in ('over15', 'under35'):
+                    try:
+                        # model_prob_over siempre representa P(over LINEA) -- el loop
+                        # de outcomes de abajo ya invierte para 'under'. Pedir 'over'
+                        # siempre acá, sin importar si mkt_key es under35.
+                        from oraculo_soccer_v2 import base_rate_edge_goals
+                        _line = 1.5 if mkt_key == 'over15' else 3.5
+                        _p_over_br, _ = base_rate_edge_goals(league, _line, 'over', 2.0)
+                        if _p_over_br is not None:
+                            model_prob_over = _p_over_br
+                    except Exception as _e_br:
+                        if _diag_no_model < 15:
+                            log.info('[FB-DIAG] base_rate_edge_goals error %s vs %s: %s', home, away, _e_br)
                 # Altitude multiplier: only when ML model unavailable (Poisson fallback path)
                 if league == 'PER' and not _peru_ml_ok and model_prob_over is not None:
                     try:
@@ -1396,6 +1480,7 @@ def scan_football(api, state, dry_run=False):
                     except Exception:
                         pass
                 if model_prob_over is None:
+                    _diag_no_model += 1
                     continue
 
                 # Weather adjustment (rain/wind suppress over/btts probability)
@@ -1433,6 +1518,7 @@ def scan_football(api, state, dry_run=False):
                         continue
                     implied = 1.0 / best_price
                     edge = prob - implied
+                    _diag_evaluated += 1
                     if edge > MIN_EDGE and prob > MIN_CONF and edge < 0.45 and prob < 0.92:
                         _dp = {
                             'match': f'{home} vs {away}', 'league': league,
@@ -1444,7 +1530,16 @@ def scan_football(api, state, dry_run=False):
                         if mkt_key in ('btts_yes', 'btts_no'):
                             _dp['_shadow_only'] = True  # Cantera: n>=25 WR>=65% before live
                             _dp['market_type'] = 'btts'
+                        elif mkt_key in ('over15', 'over25', 'under35'):
+                            # 2026-08-01: modelo ML de fútbol estaba roto (mp.predict_match
+                            # no existía) para TODAS las ligas hasta hoy -- este camino nunca
+                            # produjo un pick real antes. Shadow-only hasta acumular muestra
+                            # y confirmar WR, mismo criterio que sets_under/rugby_ml/mlb_f5_total.
+                            _dp['_shadow_only'] = True
+                            _dp['market_type'] = mkt_key
                         picks.append(_dp)
+                    else:
+                        _diag_no_edge += 1
 
 
     # --- INTERNATIONAL / FIFA WC QUALIFIERS ---
@@ -1625,11 +1720,27 @@ def scan_football(api, state, dry_run=False):
                             _wc_mm_lvl = 0
                     else:
                         _is_cantera = False
-                        ph, pd, pa = intl_elo.predict_match(home, away, neutral)
-                        if _is_wc and hasattr(intl_elo, 'prob_over_wc'):
-                            p_o25 = intl_elo.prob_over_wc(home, away, 2.5, neutral)
+                        # 2026-08-02 fix: IntlElo solo tiene selecciones nacionales
+                        # (282 equipos, 0 clubes) -- Champions/Europa/Conference
+                        # League nunca generaban pick real porque ambos equipos
+                        # caian al rating por defecto (50/50, sin edge), en
+                        # silencio. Usar el modelo de clubes (poisson, entrenado
+                        # con 14 ligas reales, ya arreglado 2026-08-01) cuando
+                        # conoce a alguno de los dos equipos del partido.
+                        _club_leagues = ('CHAMPIONS', 'EUROPA_L', 'CONF_L')
+                        _use_club_model = (intl_league in _club_leagues and poisson
+                                           and getattr(poisson, '_fitted', False)
+                                           and (home in poisson.attack or away in poisson.attack))
+                        if _use_club_model:
+                            _pm_club = poisson.predict_markets(home, away)
+                            ph, pd, pa = _pm_club['home_win'], _pm_club['draw'], _pm_club['away_win']
+                            p_o25 = _pm_club['over25']
                         else:
-                            p_o25 = intl_elo.prob_over(home, away, 2.5, neutral)
+                            ph, pd, pa = intl_elo.predict_match(home, away, neutral)
+                            if _is_wc and hasattr(intl_elo, 'prob_over_wc'):
+                                p_o25 = intl_elo.prob_over_wc(home, away, 2.5, neutral)
+                            else:
+                                p_o25 = intl_elo.prob_over(home, away, 2.5, neutral)
                         p_btts_yes = p_btts_no = None
                         p_o15_2h = p_u15_2h = None
                         p_o35 = 0.0
@@ -1687,7 +1798,7 @@ def scan_football(api, state, dry_run=False):
                         _wc_bl = _is_wc and ((out_key == 'home' and home in _WC_BLACKLIST) or (out_key == 'away' and away in _WC_BLACKLIST))
                         _wc_cfg = _get_wc_phase_config()
                         _wc_1x2_gate = (not _is_wc) or (not _wc_bl and prob >= _wc_cfg['min_prob'] and price >= _wc_cfg['min_odds'] and _wc_1x2_ratio >= _wc_cfg['xg_ratio'])
-                        if _r1x2_ok and not _skip_1x2 and _wc_1x2_gate and edge >= _e_min and prob >= _c_min and edge < 0.45 and prob < 0.92:
+                        if _r1x2_ok and not _skip_1x2 and _wc_1x2_gate and edge >= _e_min and prob >= _c_min and edge < 0.45 and prob < 0.92 and not _use_club_model:
                             _pick = {
                                 'match': match_label, 'league': intl_league,
                                 'event_id': eid, 'market_url': murl,
@@ -1705,6 +1816,16 @@ def scan_football(api, state, dry_run=False):
                                 ABTester().log_pick(picks[-1], 'model_A', True)
                             except Exception:
                                 pass
+                        elif _use_club_model and not _skip_1x2 and edge >= _e_min and prob >= _c_min and edge < 0.45 and prob < 0.92 and _SIBILA_ENABLED:
+                            # 2026-08-02 fix: mismo criterio shadow-only que el OU de mas abajo --
+                            # el modelo de clubes (Champions/Europa/Conference) recien se conecto hoy,
+                            # sin WR validado. Sin este guard el 1X2 se colocaba en vivo con plata real.
+                            _sibila_record({'match': match_label, 'league': intl_league,
+                                'event_id': eid, 'market_url': murl,
+                                'price': price, 'label': out_key.title() + ' Win',
+                                'model_prob': prob, 'edge': edge,
+                                'sport': 'soccer', 'intl': True, '_shadow_only': True,
+                                'market_type': 'soccer_intl_club_1x2'})
                         elif _is_cantera and not _skip_1x2 and edge >= MIN_EDGE and prob >= MIN_CONF and edge < 0.45 and prob < 0.92:
                             _sibila_record({'match': match_label, 'league': intl_league,
                                 'event_id': eid, 'market_url': murl,
@@ -1741,6 +1862,14 @@ def scan_football(api, state, dry_run=False):
                             }
                             if _is_cantera:
                                 _ou_pick['_shadow_only'] = True
+                                _sibila_record(_ou_pick)
+                            elif intl_league in ('CHAMPIONS', 'EUROPA_L', 'CONF_L'):
+                                # 2026-08-02: modelo de clubes recien conectado hoy --
+                                # nunca antes genero un pick real para estas ligas.
+                                # Shadow-only hasta acumular muestra y confirmar WR,
+                                # mismo criterio usado con el resto de fixes de hoy.
+                                _ou_pick['_shadow_only'] = True
+                                _ou_pick['market_type'] = 'soccer_intl_club_ou'
                                 _sibila_record(_ou_pick)
                             else:
                                 if _is_wc:
@@ -2001,6 +2130,9 @@ def scan_football(api, state, dry_run=False):
         log.info("Football: filtered %d marginal picks (edge < 8%%)", _pre_filter - len(picks))
     log.info('Football: %d value picks found (%d steam)', len(picks),
              sum(1 for p in picks if p.get('signal') == 'steam'))
+    log.info('[FB-DIAG] over15/over25/btts: sin_modelo=%d evaluados_sin_edge=%d '
+             '(de %d evaluados con precio)',
+             _diag_no_model, _diag_no_edge, _diag_evaluated)
     for _p in picks:
         log.info('  [FB] %s | %s | edge=%.1f%% conf=%.0f%% @%.2f', _p.get('match','?')[:35], _p.get('label','?'), _p.get('edge',0)*100, _p.get('model_prob',0)*100, _p.get('price',0))
     if _FRESH_ENABLED:
@@ -3681,7 +3813,7 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                     p['portfolio_corr'] = _port_result.get('corr_penalty', 0)
                     p['portfolio_capped'] = _port_result.get('capped', False)
             if _SIBILA_ENABLED:
-                _sibila_placed(p['match'], p['label'], bet_id, stake)
+                _sibila_placed(p['match'], p['label'], bet_id, stake, event_id=p.get('event_id'), market_url=p.get('market_url'))
             # 2026-07-17 [removed]: el boost de RLM corria despues de _save_bet(),
             # cuando la apuesta ya se coloco con el stake original -- la
             # reasignacion de stake no tenia ningun efecto downstream, solo
@@ -3725,7 +3857,7 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                                event_id=p.get('event_id', ''),
                                market_type=p.get('market_type'))
                 if _SIBILA_ENABLED:
-                    _sibila_placed(p['match'], p['label'], bet_id, stake)
+                    _sibila_placed(p['match'], p['label'], bet_id, stake, event_id=p.get('event_id'), market_url=p.get('market_url'))
             else:
                 _rejected_keys.add(dedup_key)
                 consecutive_fails += 1
@@ -6129,6 +6261,76 @@ def run_cycle(dry_run=False):
     football_picks = scan_football(api, state, dry_run=dry_run)  # 2026-05-29: F2 enable live
     if not SOCCER_ENABLED:
         football_picks = []
+    # 2026-07-31: Argentina/Brasil agregadas a xg_matches mientras Europa esta en
+    # receso -- shadow-only hasta validar WR real (mismo criterio ya usado para
+    # sets_under/rugby_ml antes de ir vivo con plata real). Roster fijo 2026;
+    # actualizar cada temporada si hace falta.
+    _SHADOW_ONLY_SOCCER_TEAMS = frozenset({
+    'Aldosivi',
+    'Argentinos Jrs',
+    'Athletico-PR',
+    'Atl. Tucuman',
+    'Atletico-MG',
+    'Bahia',
+    'Banfield',
+    'Barracas Central',
+    'Belgrano',
+    'Boca Juniors',
+    'Botafogo RJ',
+    'Bragantino',
+    'Central Cordoba',
+    'Chapecoense-SC',
+    'Corinthians',
+    'Coritiba',
+    'Cruzeiro',
+    'Defensa y Justicia',
+    'Dep. Riestra',
+    'Estudiantes L.P.',
+    'Estudiantes Rio Cuarto',
+    'Flamengo RJ',
+    'Fluminense',
+    'Gimnasia L.P.',
+    'Gimnasia Mendoza',
+    'Gremio',
+    'Huracan',
+    'Ind. Rivadavia',
+    'Independiente',
+    'Instituto',
+    'Internacional',
+    'Lanus',
+    'Mirassol',
+    'Newells Old Boys',
+    'Palmeiras',
+    'Platense',
+    'Racing Club',
+    'Remo',
+    'River Plate',
+    'Rosario Central',
+    'San Lorenzo',
+    'Santos',
+    'Sao Paulo',
+    'Sarmiento Junin',
+    'Talleres Cordoba',
+    'Tigre',
+    'Union de Santa Fe',
+    'Vasco',
+    'Velez Sarsfield',
+    'Vitoria'
+    })
+    if football_picks and _SIBILA_ENABLED:
+        # 2026-08-01 fix: 'not p.get("_shadow_only")' evita grabar dos veces --
+        # over15/over25/under35 ya se graban adentro de scan_football() via su
+        # propio flag _shadow_only (record_pick() dedupea igual, pero esto evita
+        # el llamado redundante). Solo graba aca lo que no haya pasado por esa via.
+        _sa_shadow = [p for p in football_picks
+                      if any(_t in (p.get('match') or '') for _t in _SHADOW_ONLY_SOCCER_TEAMS)
+                      and not p.get('_shadow_only')]
+        if _sa_shadow:
+            log.info('[Soccer-SA CANTERA] %d picks Argentina/Brasil (shadow only)', len(_sa_shadow))
+            for _sp in _sa_shadow:
+                _sibila_record(_sp)
+    football_picks = [p for p in football_picks
+                       if not any(_t in (p.get('match') or '') for _t in _SHADOW_ONLY_SOCCER_TEAMS)]
     # Fase B 2026-05-22: drop over/under picks below raw 0.65 model_prob
     # Calibration N=107: <0.65 WR=33.8% ROI=-13.0% | >=0.65 WR=69.2% ROI=+23.5%
     if football_picks:
@@ -6148,20 +6350,32 @@ def run_cycle(dry_run=False):
         _pre_f2 = len(football_picks)
         football_picks = [
             p for p in football_picks
-            if (p.get('market_type') or '') not in ('over', 'under', 'ou', 'total')
-            and (
-                (float(p.get('confidence') or p.get('model_prob') or 0) >= 0.85
-                 and float(p.get('edge') or 0) >= 0.05
-                 and float(p.get('price') or p.get('odds') or 0) <= 1.50)  # 2026-06-02: backtest n=39 WR=84.6% cliff at odds 1.52
-                or
-                (0.75 <= float(p.get('confidence') or p.get('model_prob') or 0) < 0.85
-                 and float(p.get('edge') or 0) >= 0.05
-                 and float(p.get('edge') or 0) < 0.10
-                 and float(p.get('price') or p.get('odds') or 0) <= 1.50)  # 2026-06-02: backtest n=39 WR=84.6% cliff at odds 1.52
+            if (p.get('market_type') == 'double_chance' and p.get('league') == 'PER')
+            # 2026-08-02: modelo de altitud Peru ya tiene su propio gate backtested
+            # (edge>=4%% prob>=76%%, calibrado contra 1478 partidos historicos reales,
+            # WR 82.1%% n=468 / 72.5%% n=222 por bucket de altitud) -- el filtro F2
+            # generico (cuota<=1.50) esta pensado para otro mercado y bloqueaba de
+            # rebote los picks de altitud con mas edge (odds 1.5-2.5 son normales
+            # para ventaja moderada, no favoritos aplastantes). Piso global de 8%%
+            # de edge sigue aplicando mas abajo como chequeo de seguridad extra.
+            or (
+                (p.get('market_type') or '') not in ('over', 'under', 'ou', 'total')
+                and (
+                    (float(p.get('confidence') or p.get('model_prob') or 0) >= 0.85
+                     and float(p.get('edge') or 0) >= 0.05
+                     and float(p.get('price') or p.get('odds') or 0) <= 1.50)  # 2026-06-02: backtest n=39 WR=84.6% cliff at odds 1.52
+                    or
+                    (0.75 <= float(p.get('confidence') or p.get('model_prob') or 0) < 0.85
+                     and float(p.get('edge') or 0) >= 0.05
+                     and float(p.get('edge') or 0) < 0.10
+                     and float(p.get('price') or p.get('odds') or 0) <= 1.50)  # 2026-06-02: backtest n=39 WR=84.6% cliff at odds 1.52
+                )
             )
         ]
         for _p in football_picks:
-            _p['_max_stake'] = 2.00  # 2026-06-02: raised, backtest ROI +34% at odds<1.50
+            # 2026-08-02: stake de validacion mas chico para Peru altitud (nunca
+            # antes tuvo un bet real) -- el resto conserva el cap de siempre.
+            _p['_max_stake'] = 2.00  # 2026-06-02: raised, backtest ROI +34% at odds<1.50 (Peru altitud: mismo cap de validacion, 2026-08-02)
         _dropped_f2 = _pre_f2 - len(football_picks)
         if _dropped_f2:
             log.info('[F2] Soccer live filter v2: kept %d/%d (dropped %d)',
@@ -6216,11 +6430,13 @@ def run_cycle(dry_run=False):
                         if p.get('market_type') not in ('tennis_exact_sets',
                                                         'tennis_winner_and_total')  # w+total: 0W/1L, complex market
                         # sets_under: LIVE 2026-07-05 — cantera grass/hard paso umbral (WR=65% n=31, >=60% en 20+)
-                        # Mismo filtro que el shadow record (surface!=clay, non-challenger, edge>=0.10, prob>=0.55)
+                        # Mismo filtro que el shadow record (surface!=clay, edge>=0.10, prob>=0.55)
                         # clay sigue BLOQUEADO — WR=9.1% (11 RG picks all LOSS)
+                        # 2026-07-31: Challenger desbloqueado -- TennisExplorer fallback resolvio
+                        # 99 picks historicos (WR=60%, iguala al resto de sets_under). Ver cantera
+                        # 'sets_under Challenger' en cantera_status.py para seguimiento.
                         and not (p.get('market_type') == 'sets_under'
                                  and (p.get('surface', 'hard') == 'clay'
-                                      or 'challenger' in (p.get('league', '') or '').lower()
                                       or float(p.get('edge', 0) or 0) < 0.10
                                       or float(p.get('model_prob', 0) or 0) < 0.55))
                         # tennis_team_win_set: edge>=10% AND odds 1.40-1.90
@@ -6389,6 +6605,14 @@ def run_cycle(dry_run=False):
                 if _n_before_decorr != len(mlb_picks):
                     log.info('MLB [de-corr]: %d -> %d picks (best-edge per game/market)',
                              _n_before_decorr, len(mlb_picks))
+            # 2026-07-31 fix: shadow-record SIEMPRE los picks que pasan el pre-filtro
+            # (f5_ml y f5_total, live o no) -- sin esta fila antecedente, mark_placed()
+            # no tiene que hacer placed=1 real cuando el mercado esta 'live' (confirmado:
+            # mlb_f5_ml/mlb_f5_total tenian 0 bets reales marcadas en Sibila pese a
+            # estar habilitadas). record_pick() ya deduplica, es seguro llamarlo siempre.
+            if _SIBILA_ENABLED:
+                for _sp0 in mlb_picks:
+                    _sibila_record(_sp0)
             # F5 ML CANTERA shadow — MLB_F5_ML_ENABLED=False; track picks in Sibila sin apostar
             if not MLB_F5_ML_ENABLED and _SIBILA_ENABLED:
                 _f5_shadow = [p for p in _all_mlb
@@ -6458,7 +6682,11 @@ def run_cycle(dry_run=False):
     except Exception as _de:
         log.debug("Darts scan error: %s", _de)
 
-    # 3f. CANTERA rugby shadow (2026-06-21: NRL 63.8%% + MLR 66.0%% acc backtest, no live hasta CLV+)
+    # 3f. Rugby: NRL promovido a vivo 2026-08-01 por decision explicita del
+    # usuario (26/30 picks Cantera, WR=58%% shadow -- bajo el umbral formal de
+    # 30 pero se decidio arrancar igual con stake de validacion fijo de 1 USD.
+    # MLR sigue en shadow puro (0/30, sin datos, criterio Cantera intacto).
+    rugby_picks = []
     try:
         import oraculo_rugby as _rug
         _RUG_LEAGUES = (('nrl', 'rugby-league-international-nrl', 'rugby_ml'),
@@ -6495,17 +6723,25 @@ def run_cycle(dry_run=False):
                     _pr, _murl = _ml[_side]
                     _edge = round(_p * _pr - 1.0, 4)
                     if _edge >= 0.05 and _p >= 0.50:
-                        _sibila_record({
+                        _rp = {
                             'match': '%s vs %s' % (_rh, _ra), 'league': _rcomp,
                             'event_id': _reid, 'market_url': _murl, 'price': _pr,
                             'label': '%s ML %s (elo %.0f%%)' % (_rlg.upper(), _side, _p * 100),
                             'model_prob': round(_p, 4), 'edge': _edge,
-                            'sport': 'rugby', '_shadow_only': True, 'market_type': _rmt,
-                        })
+                            'sport': 'rugby', 'market_type': _rmt,
+                        }
+                        if _rlg == 'nrl':
+                            _rp['_max_stake'] = 1.00
+                            _sibila_record(_rp)
+                            rugby_picks.append(_rp)
+                        else:
+                            _rp['_shadow_only'] = True
+                            _sibila_record(_rp)
                         _rug_n += 1
                         break
             if _rug_n:
-                log.info('[Rugby %s cantera] %d shadow picks', _rlg.upper(), _rug_n)
+                log.info('[Rugby %s %s] %d picks', _rlg.upper(),
+                         'LIVE 1USD' if _rlg == 'nrl' else 'cantera shadow', _rug_n)
     except Exception as _rge:
         log.debug('rugby scan error: %s', _rge)
 
@@ -6747,7 +6983,17 @@ def run_cycle(dry_run=False):
                 log.info("[MLB F5-Under Dome] shadow %s @%.2f", _dp.get("match", "?"), _dp.get("price", 0))
             except Exception as _e:
                 log.warning("[MLB F5-Under Dome] sibila_record err: %s", _e)
-        mlb_picks = [p for p in mlb_picks if 'under' not in str(p.get('label', '') or p.get('side', '')).lower()]  # 2026-06-05: F5 Under WR=40.3% n=77 block
+        # 2026-07-31 fix: el strip de abajo era incondicional y anulaba el
+        # propio Filtro 3 v5 que reactivo Under4.5 F5-total (WR=67% n=246 Sibila,
+        # validado 2026-06-03) -- exceptuar esos picks (no-shadow) del bloqueo.
+        def _keep_mlb_pick(p):
+            _lbl_or_side = str(p.get('label', '') or p.get('side', '')).lower()
+            if 'under' not in _lbl_or_side:
+                return True
+            return (p.get('market_type') == 'mlb_f5_total'
+                    and 'under 4.5' in _lbl_or_side
+                    and not p.get('_shadow_only'))
+        mlb_picks = [p for p in mlb_picks if _keep_mlb_pick(p)]  # 2026-06-05: F5 Under WR=40.3% n=77 block (otras lineas)
         if mlb_picks:
             _caps = {p.get('match','?'): p.get('_max_stake',2.0) for p in mlb_picks}
             log.info('MLB: %d picks -> place_bets | caps=%s | settled=%d',
@@ -7075,8 +7321,12 @@ def run_cycle(dry_run=False):
     except Exception as _shclve:
         log.debug('Shadow CLV update failed: %s', _shclve)
 
-    log.info('Cycle complete: %d picks found (%d fb + %d tn + %d mlb + %d sc), %d placed | Bankroll: $%.2f',
-             len(football_picks) + len(tennis_picks) + len(mlb_picks) + len(sc_picks), len(football_picks), len(tennis_picks), len(mlb_picks), len(sc_picks),
+    if rugby_picks:
+        placed += place_bets(api, state, rugby_picks, [], dry_run)
+
+    log.info('Cycle complete: %d picks found (%d fb + %d tn + %d mlb + %d sc + %d rugby), %d placed | Bankroll: $%.2f',
+             len(football_picks) + len(tennis_picks) + len(mlb_picks) + len(sc_picks) + len(rugby_picks),
+             len(football_picks), len(tennis_picks), len(mlb_picks), len(sc_picks), len(rugby_picks),
              placed, state['bankroll'])
     return state
 

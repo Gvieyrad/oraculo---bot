@@ -320,10 +320,14 @@ FOOTBALLDATA_LEAGUES = {
     'TUR': 'https://www.football-data.co.uk/mmz4281/2526/T1.csv',
     # MLS: /new/ multi-season format — columns Home/HG not HomeTeam/FTHG
     'MLS': 'https://www.football-data.co.uk/new/USA.csv',
+    # 2026-07-31: Sudamerica en temporada mientras Europa esta en receso (ago).
+    # Shadow-only hasta validar WR -- ver _SHADOW_ONLY_LEAGUES en oraculo_runner_auto.py
+    'ARG': 'https://www.football-data.co.uk/new/ARG.csv',
+    'BRA': 'https://www.football-data.co.uk/new/BRA.csv',
 }
 
 # Leagues using /new/ multi-season format; parser handles Home/HG columns + Season filter
-_FOOTBALLDATA_NEW_FORMAT = {'MLS'}
+_FOOTBALLDATA_NEW_FORMAT = {'MLS', 'ARG', 'BRA'}
 _FOOTBALLDATA_MIN_SEASON = 2022  # MLS goal rate shifted upward post-2022
 
 def fetch_footballdata_results(force_refresh=False):

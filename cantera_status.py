@@ -35,14 +35,15 @@ CANTERA = [
         'name': 'Rugby MLR (union US)',
         'query': "market_type='rugby_mlr_ml'",
         'threshold': 30,
-        'note': 'ELO MLR (backtest 66.0%% acc OOS > NRL; liga blanda US). Shadow hasta CLV+. In-season mar-jul.',
+        'note': 'ELO MLR (backtest 66.0%% acc OOS > NRL; liga blanda US). Shadow hasta CLV+. FUERA DE TEMPORADA (confirmado 2026-08-02: 0 eventos en Cloudbet) -- vuelve ~marzo 2027.',
         'days': 90,
     },
     {
         'name': 'Rugby NRL',
         'query': "market_type='rugby_ml'",
         'threshold': 30,
-        'note': 'ELO NRL (backtest 63.8%% acc out-of-sample, calibrado). Shadow hasta CLV+ vs Cloudbet. Markets abren ~horario (gana volumen jun 23-28).',
+        'live': True,  # 2026-08-01: promovida a vivo por decision explicita del usuario
+        'note': 'ELO NRL (backtest 63.8%% acc out-of-sample, calibrado). LIVE desde 2026-08-01, stake fijo $1 (bajo el umbral formal de 30, arrancado a pedido con 26/30 WR=58%% shadow).',
         'days': 90,
     },
     {
@@ -66,6 +67,13 @@ CANTERA = [
         'threshold': 20,
         'live': True,  # 2026-07-05: promovida a vivo (Challenger sigue bloqueado, ver filtro en oraculo_runner_auto.py)
         'note': 'Solo grass/hard (CLAY = desastre confirmado 0/10; Challenger tambien bloqueado). LIVE desde 2026-07-05.',
+        'days': 90,
+    },
+    {
+        'name': 'sets_under Challenger',
+        'query': "market_type='sets_under' AND league LIKE '%challenger%'",
+        'threshold': 20,
+        'note': '2026-07-31: TennisExplorer fallback destrabo la resolucion (105->6 sin resolver). Bloqueado en vivo hasta juntar 20+ picks limpios.',
         'days': 90,
     },
     {
@@ -125,6 +133,28 @@ CANTERA = [
         'killed': True,
         'note': 'MATADO 2026-06-18 por CLV -- shadow WR 56%% es ARTEFACTO; live real WR 24-33%%, CLV -0.325, -$87. NO REACTIVAR.',
         'days': 90,
+    },
+    {
+        'name': 'MLB F5 Total (Under 4.5)',
+        'query': "market_type='mlb_f5_total'",
+        'threshold': 20,
+        'live': True,  # 2026-07-31: desbloqueado (bug de strip incondicional que anulaba el filtro)
+        'note': 'F5 Total Under 4.5 (WR=67%% n=246 Sibila, validado 2026-06-03). Bloqueado desde entonces por un bug de codigo (strip incondicional de under); arreglado 2026-07-31. LIVE, stake $8 cap.',
+        'days': 90,
+    },
+    {
+        'name': 'Soccer ML (5 grandes ligas: over15/over25/under35)',
+        'query': "market_type IN ('over15','over25','under35') AND league IN ('PL','PD','SA','BL1','FL1')",
+        'threshold': 30,
+        'note': 'Modelo ML (MarketPredictor.predict_all + build_feature_vector) estaba roto para TODAS las ligas (mp.predict_match no existia) -- arreglado 2026-08-01. Shadow hasta acumular muestra; sin partidos hasta que arranquen las 5 grandes ligas (~10-ago).',
+        'days': 30,
+    },
+    {
+        'name': 'Soccer Goles Sudamerica (ARG/BRA over15/under35)',
+        'query': "market_type IN ('over15','under35') AND league IN ('ARG','BRA')",
+        'threshold': 20,
+        'note': 'Fallback de tasa historica de goles (sin corners/tarjetas, football-data.co.uk). Backtest walk-forward: over1.5/over3.5 calibran mejor que coinflip; over2.5 NO se usa (sin señal real). Sin cuotas de mercado en la fuente -- ROI real solo validable en shadow contra Cloudbet.',
+        'days': 30,
     },
 ]
 

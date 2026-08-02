@@ -181,6 +181,32 @@ def _parse_date(s):
 
 # ── Base rate scanner (Layer B) ───────────────────────────────────────────────
 
+# 2026-08-01: goles Sudamerica (ARG/BRA) -- backtest walk-forward confirmo que
+# over1.5 y over3.5 calibran mejor que coinflip (Brier < 0.25), pero over2.5 NO
+# aporta señal real (Brier ~0.24, casi coinflip) -- por eso solo se usa para
+# over15/under35, nunca over25. Ventana reciente (no historico completo) porque
+# ARG tiene drift real: over2.5 cayo de ~45% (2014-2022) a ~33% (2023-2026).
+# Sin cuotas de mercado over/under en la fuente -- no se pudo backtestear ROI
+# real, solo estabilidad de la tasa. Validar en shadow contra Cloudbet real.
+LEAGUE_GOALS_BASE_RATES = {
+    'ARG': {1.5: 0.609, 2.5: 0.329, 3.5: 0.130},
+    'BRA': {1.5: 0.738, 2.5: 0.470, 3.5: 0.243},
+}
+
+
+def base_rate_edge_goals(league_code, line, outcome, bookmaker_price):
+    """Analogo a base_rate_edge() pero para goles (ARG/BRA), sin corners/tarjetas.
+    Devuelve (None, None) si la liga no esta en la tabla."""
+    rates = LEAGUE_GOALS_BASE_RATES.get(league_code)
+    if not rates:
+        return None, None
+    nearest_line = min(rates.keys(), key=lambda l: abs(l - line))
+    p_over = rates[nearest_line]
+    prob = p_over if outcome == 'over' else 1.0 - p_over
+    edge = prob * bookmaker_price - 1.0
+    return round(prob, 4), round(edge, 4)
+
+
 def base_rate_edge(league_code, line, outcome, bookmaker_price):
     """Return (model_prob, edge) using only historical base rate for this league+line."""
     rates = LEAGUE_BASE_RATES.get(league_code) or LEAGUE_BASE_RATES['_']
