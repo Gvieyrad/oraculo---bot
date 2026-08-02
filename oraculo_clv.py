@@ -91,7 +91,7 @@ def _fetch_closing_odds_local(event_id: str, market_type: str, label: str) -> fl
     return 0.0
 
 
-def _fetch_closing_odds(match: str, sport: str, entry_ts: str) -> float:
+def _fetch_closing_odds(match: str, sport: str, entry_ts: str, label: str = '') -> float:
     """
     Fetch Pinnacle/best closing odds from TheOddsAPI for a match.
     Returns the implied probability (1/odds) or 0 if not found.
@@ -127,6 +127,16 @@ def _fetch_closing_odds(match: str, sport: str, entry_ts: str) -> float:
             return 0.0
         home_q, away_q = parts[0], parts[1]
 
+        # 2026-08-01 fix (replicado de oraculo_v2): elegir el lado apostado via
+        # texto del label, no siempre home_q -- traia la cuota del jugador
+        # equivocado en picks 'away', generando CLV sin sentido.
+        label_lower = (label or '').lower()
+        home_words = [w for w in home_q.split() if len(w) > 3]
+        away_words = [w for w in away_q.split() if len(w) > 3]
+        home_hits = sum(1 for w in home_words if w in label_lower)
+        away_hits = sum(1 for w in away_words if w in label_lower)
+        target_q = away_q if away_hits > home_hits else home_q
+
         best_odds = 0.0
         for ev in events:
             home = ev.get('home_team', '').lower()
@@ -144,7 +154,7 @@ def _fetch_closing_odds(match: str, sport: str, entry_ts: str) -> float:
                     outcomes = mkt.get('outcomes', [])
                     for out in outcomes:
                         oname = out.get('name', '').lower()
-                        if any(w in oname for w in home_q.split() if len(w) > 3):
+                        if any(w in oname for w in target_q.split() if len(w) > 3):
                             best_odds = float(out.get('price', 0))
                             break
                     if best_odds:
@@ -364,7 +374,7 @@ def record_closing_for_settled(predictions_file: str):
 
             closing = _fetch_closing_odds_local(event_id, market_type, label)
             if not closing:
-                closing = _fetch_closing_odds(match, sport, ts)
+                closing = _fetch_closing_odds(match, sport, ts, label)
             clv = compute_clv(float(entry_odds), closing) if closing else None
             if clv is not None:
                 entry['clv'] = clv
@@ -542,7 +552,7 @@ class CLVOracle:
             if sport in ('baseball', 'mlb'):
                 return {}
             ts_str = pick.get('ts') or ''
-            closing = _fetch_closing_odds(match, sport, ts_str)
+            closing = _fetch_closing_odds(match, sport, ts_str, pick.get('label', ''))
             if not closing or closing <= 1:
                 return {}
             clv = compute_clv(float(entry_odds or 0), closing) if entry_odds else None

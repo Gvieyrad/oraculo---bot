@@ -304,6 +304,7 @@ def resolve_all_pending(dry_run=False):
         stake      = float(col(row, 'real_stake') or col(row, 'shadow_stake') or col(row, 'stake') or 10.0)
         event_id   = str(col(row, 'event_id') or '')
         market_url = str(col(row, 'market_url') or '')
+        league     = str(col(row, 'league') or '')
 
         player1, player2 = _parse_match(match)
         if not player2:
@@ -317,6 +318,23 @@ def resolve_all_pending(dry_run=False):
             continue
 
         game_row, p1_is_winner, score = _find_match(all_rows, player1, player2, ts)
+        if game_row is None and 'challenger' in league.lower():
+            # 2026-07-31: el XLSX principal (ATP/WTA main tour) no cubre
+            # Challenger -- fallback a TennisExplorer, que si tiene ese
+            # circuito. Shadow-only, no afecta apuestas reales (Challenger
+            # esta bloqueado en vivo hasta tener WR medible aca).
+            try:
+                from te_challenger import find_challenger_result
+                _te = find_challenger_result(player1, player2, ts)
+            except Exception as _tee:
+                log.debug('TE fallback error: %s', _tee)
+                _te = None
+            if _te:
+                game_row = _te
+                _p1_last = _last_name(player1).lower()
+                _w_last = _te['winner'].split()[0].lower() if _te['winner'].split() else ''
+                p1_is_winner = (_p1_last == _w_last) or (_p1_last in _te['winner_norm'])
+                score = 1.0
         if game_row is None:
             log.debug('  Not found: %s (%s)', match, ts[:10])
             not_found += 1

@@ -69,6 +69,13 @@ CANTERA = [
         'days': 90,
     },
     {
+        'name': 'sets_under Challenger',
+        'query': "market_type='sets_under' AND league LIKE '%challenger%'",
+        'threshold': 20,
+        'note': '2026-07-31: TennisExplorer fallback destrabo la resolucion (105->6 sin resolver). Bloqueado en vivo hasta juntar 20+ picks limpios.',
+        'days': 90,
+    },
+    {
         'name': 'MMA (UFC)',
         'query': "market_type='mma_winner'",
         'threshold': 20,
