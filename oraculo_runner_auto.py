@@ -75,7 +75,7 @@ MAX_BETS_PER_SCAN = 8       # Max bets placed per scan cycle
 MAX_PER_MATCH = 1           # Max 1 bet per match (avoid correlated exposure)
 MAX_EXPOSURE_PER_MATCH = 0.10  # Max 10% of bankroll on a single match
 MAX_EXPOSURE_PER_EVENT = 1.00  # 2026-07-22: deshabilitado a pedido (chocaba con MIN_STAKE=5 en bankroll chico) -- MAX_STAKE_ABS/MAX_EXPOSURE_PER_MATCH/MARKET_TYPE_EXPOSURE_CAP siguen limitando
-MAX_TOTAL_EXPOSURE = 0.40     # 2026-08-02: subido de 30 a 40 a pedido -- permite mas posiciones simultaneas
+MAX_TOTAL_EXPOSURE = 0.70     # 2026-08-03: subido de 40 a 70 a pedido -- igualado a Oraculo, por encima del techo de 60 previamente considerado riesgoso.
 MARKET_TYPE_EXPOSURE_CAP = {
     'sets_under': 34.0,  # 2026-08-03: igualado al tope general a pedido (mismo criterio que Oraculo) -- MAX_TOTAL_EXPOSURE=40% ya es la restriccion real (bankroll ~$84 -> ~$34), este cap especifico deja de ser el limitante
     'double_chance': 10.0,  # 2026-07-12: peru_dc going live (2 usd/bet), cap concurrent exposure pre-emptively
@@ -812,7 +812,7 @@ def _auto_tune_strategy(state):
         # 3. MAX_TOTAL_EXPOSURE: expand if winning, contract if losing
         if len(recent) >= 10:
             if roi > 0.15 and win_rate > 0.65:
-                MAX_TOTAL_EXPOSURE = min(0.60, MAX_TOTAL_EXPOSURE + 0.05)
+                MAX_TOTAL_EXPOSURE = min(0.70, MAX_TOTAL_EXPOSURE + 0.05)  # 2026-08-03: techo subido de 60 a 70 a pedido
             elif roi < -0.05:
                 MAX_TOTAL_EXPOSURE = max(0.25, MAX_TOTAL_EXPOSURE - 0.10)
         # else: leave MAX_TOTAL_EXPOSURE unchanged
