@@ -6827,8 +6827,12 @@ def run_cycle(dry_run=False):
                             log.debug('MLB [fade-ok %s]: no en fade_teams, pasa', _picked_team[:15])
 
                 # Filtro 1c: odds gate F5 ML -- shadow ROI <2.00 = +8.3% vs >=2.00 = +36.8% (backtest n=226)
-                if _is_ml and _mkt_type == 'mlb_f5_ml' and _odds < 2.00:
-                    log.info('MLB [odds-gate F5ML @%.2f<2.00]: ROI insuficiente — skip', _odds)
+                if _is_ml and _mkt_type == 'mlb_f5_ml' and _odds < 1.85:
+                    # 2026-08-03: bajado de 2.00 a 1.85 -- backtest Sibila (894 resueltos):
+                    # tramo 1.75-1.85 WR=63.0% ROI=+13.3% (n=51), 1.85-2.00 WR=53.7%
+                    # ROI=+3.5% (n=132, casi breakeven). Umbral >=1.85 total: n=810
+                    # WR=53.2% ROI=+20.4% PnL=+138.5u vs actual n=678 ROI=+23.6% PnL=+134.7u.
+                    log.info('MLB [odds-gate F5ML @%.2f<1.85]: ROI insuficiente — skip', _odds)
                     continue
 
                 # Filtro 2 v6: OVER — solo lineas 6.5+ (Fase3: 4.5-6.0 WR=30-44% Sibila 1230p -> BLOQUEADO)
