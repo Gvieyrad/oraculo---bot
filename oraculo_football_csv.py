@@ -42,6 +42,16 @@ LEAGUE_MAP = {
     'FL2': 'F2',    # France Ligue 2
 }
 
+# 2026-08-03: ligas en formato /new/ (multi-temporada en un solo CSV, columnas
+# Home/Away/HG/AG en vez de HomeTeam/FTHG/FTAG) -- distinto de LEAGUE_MAP
+# (formato clasico /mmz4281/, un CSV por temporada). MLS estaba en LEAGUE_MAP
+# por error antes (nunca funciono, download_new_league_csv() no se llamaba
+# desde ningun lado y ademas el codigo de archivo real es USA, no MLS).
+NEW_FORMAT_LEAGUES = {
+    'MLS': 'USA',
+}
+NEW_FORMAT_MIN_SEASON = 2022  # evita ruido de temporadas viejas/equipos ya no vigentes
+
 # Team name mapping: football-data.co.uk -> football-data.org
 _TEAM_MAP = {
     # Premier League
@@ -164,6 +174,48 @@ def _season_code(year_start=2025):
     return '%02d%02d' % (year_start % 100, (year_start + 1) % 100)
 
 
+def _parse_new_format_compat(raw_text, league_code):
+    """Parse /new/ format CSV (Home,Away,HG,AG,Season,Date) into the SAME
+    schema _parse_csv produces, so callers (load_all_leagues consumers) do not
+    need to know which format a league uses. Corners/cards/shots are None
+    (not present in this CSV format) -- _safe_int-style callers already
+    handle None gracefully."""
+    matches = []
+    reader = csv.DictReader(StringIO(raw_text))
+    for row in reader:
+        try:
+            season = (row.get('Season') or '').strip()
+            try:
+                season_year = int(season.split('/')[0])
+            except (ValueError, IndexError):
+                continue
+            if season_year < NEW_FORMAT_MIN_SEASON:
+                continue
+            home = (row.get('Home') or '').strip()
+            away = (row.get('Away') or '').strip()
+            hg, ag = (row.get('HG') or '').strip(), (row.get('AG') or '').strip()
+            if not home or not away or not hg or not ag:
+                continue
+            matches.append({
+                'home_team_csv': home, 'away_team_csv': away,
+                'home_team': home, 'away_team': away,
+                'competition_code': league_code,
+                'home_score': int(hg), 'away_score': int(ag),
+                'ht_home': None, 'ht_away': None,
+                'result': row.get('Res', ''), 'referee': '',
+                'home_shots': None, 'away_shots': None,
+                'home_shots_target': None, 'away_shots_target': None,
+                'home_corners': None, 'away_corners': None,
+                'home_yellow': None, 'away_yellow': None,
+                'home_red': None, 'away_red': None,
+                'home_fouls': None, 'away_fouls': None,
+                'utc_date': _parse_date(row.get('Date', ''), row.get('Time', '15:00')),
+            })
+        except Exception as e:
+            log.debug('Skip new-format row: %s', e)
+    return matches
+
+
 def download_league_csv(league_code_org, season_start=2025, force=False):
     """
     Download CSV from football-data.co.uk.
@@ -176,6 +228,37 @@ def download_league_csv(league_code_org, season_start=2025, force=False):
     Returns:
         list of match dicts with stats, or empty list on failure
     """
+    if league_code_org in NEW_FORMAT_LEAGUES:
+        url_code = NEW_FORMAT_LEAGUES[league_code_org]
+        cache_file = os.path.join(_ensure_cache(), f'new_{url_code}.json')
+        if not force and os.path.exists(cache_file):
+            age = time.time() - os.path.getmtime(cache_file)
+            if age < 86400:
+                try:
+                    with open(cache_file, 'r', encoding='utf-8') as f:
+                        return json.load(f)
+                except Exception:
+                    pass
+        url = f'https://www.football-data.co.uk/new/{url_code}.csv'
+        log.info('Downloading %s (new format)', url)
+        try:
+            from urllib.request import Request, urlopen
+            req = Request(url)
+            req.add_header('User-Agent', 'Mozilla/5.0 Oraculo/1.0')
+            resp = urlopen(req, timeout=30)
+            raw = resp.read().decode('utf-8', errors='replace')
+        except Exception as e:
+            log.error('Failed to download %s: %s', url, e)
+            return []
+        matches = _parse_new_format_compat(raw, league_code_org)
+        log.info('Parsed %d matches from %s (new format)', len(matches), league_code_org)
+        try:
+            with open(cache_file, 'w', encoding='utf-8') as f:
+                json.dump(matches, f, ensure_ascii=False)
+        except Exception as e:
+            log.warning('Cache write failed: %s', e)
+        return matches
+
     csv_code = LEAGUE_MAP.get(league_code_org)
     if not csv_code:
         log.warning('Unknown league code: %s', league_code_org)
