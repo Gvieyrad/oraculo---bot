@@ -297,13 +297,20 @@ def _parse_date(date_str, time_str='15:00'):
     return ''
 
 
-def load_all_leagues(leagues=None, season=2025):
+def load_all_leagues(leagues=None, season=None):
     """
     Load stats for all leagues.
 
     Args:
         leagues: list of league codes (default: top 5)
-        season: season start year
+        season: season start year. If None (default), loads BOTH the
+            current season (2026) and the previous one (2025) merged --
+            2026-08-03 fix: recien ascendidos (ej. SC Cambuur a Eredivisie)
+            no tenian NINGUN historial porque solo se cargaba la temporada
+            2025/26 (ya terminada), donde jugaban en la division inferior.
+            Con las dos temporadas combinadas, apenas empiecen a jugar en
+            2026/27 tendran algo de historial real; equipos no-ascendidos
+            siguen con la profundidad completa de la temporada anterior.
 
     Returns:
         list of all match dicts with stats
@@ -311,12 +318,15 @@ def load_all_leagues(leagues=None, season=2025):
     if leagues is None:
         leagues = ['PL', 'PD', 'SA', 'BL1', 'FL1']
 
+    seasons_to_load = [season] if season is not None else [2026, 2025]
+
     all_matches = []
     for code in leagues:
-        matches = download_league_csv(code, season)
-        all_matches.extend(matches)
-        if matches:
-            log.info('%s: %d matches loaded', code, len(matches))
+        for s in seasons_to_load:
+            matches = download_league_csv(code, s)
+            all_matches.extend(matches)
+            if matches:
+                log.info('%s (%s): %d matches loaded', code, s, len(matches))
 
     all_matches.sort(key=lambda m: m.get('utc_date', ''))
     return all_matches
