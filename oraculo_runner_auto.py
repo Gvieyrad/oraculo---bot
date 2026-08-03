@@ -271,83 +271,6 @@ CB_MARKETS_MAP = {
 
 
 # ---------------------------------------------------------------------------
-# OddsBlaze reference odds (WC 2026 Moneyline 3-Way market gate)
-# ---------------------------------------------------------------------------
-_ob_wc_cache = {}  # {sportsbook: (ts, {(home_lower, away_lower): {home/draw/away: p}})}
-
-def _ob_key():
-    try:
-        cfg = json.load(open(os.path.join(SCRIPT_DIR, 'oraculo_config.json')))
-        return cfg.get('oddsblaze_key', '')
-    except Exception:
-        return ''
-
-def _ob_load_wc(sportsbook='polymarket', max_age=1800):
-    """Fetch all WC Moneyline 3-Way events from OddsBlaze; cache max_age s."""
-    import time as _t, urllib.request as _ur, difflib as _df
-    cached = _ob_wc_cache.get(sportsbook)
-    if cached and (_t.time() - cached[0]) < max_age:
-        return cached[1]
-    key = _ob_key()
-    if not key:
-        return {}
-    try:
-        url = (f'https://odds.oddsblaze.com/?key={key}'
-               f'&sportsbook={sportsbook}&league=fifa-world-cup')
-        resp = _ur.urlopen(url, timeout=6).read()
-        data = json.loads(resp)
-        lookup = {}
-        for ev in data.get('events', []):
-            h_name = ev['teams']['home']['name']
-            a_name = ev['teams']['away']['name']
-            ml = {}
-            for odd in ev.get('odds', []):
-                if odd['market'] != 'Moneyline 3-Way':
-                    continue
-                sel = odd['name']
-                try:
-                    p = int(odd['price'])
-                    imp = (100 / (p + 100)) if p > 0 else (abs(p) / (abs(p) + 100))
-                except Exception:
-                    continue
-                if sel == h_name:
-                    ml['home'] = imp
-                elif sel == a_name:
-                    ml['away'] = imp
-                else:
-                    ml['draw'] = imp
-            if len(ml) >= 2:
-                total = sum(ml.values()) or 1
-                ml = {k: v / total for k, v in ml.items()}
-                lookup[(h_name.lower(), a_name.lower())] = ml
-        _ob_wc_cache[sportsbook] = (_t.time(), lookup)
-        log.debug('OB WC loaded %d events from %s', len(lookup), sportsbook)
-        return lookup
-    except Exception as e:
-        log.debug('OB WC load failed (%s): %s', sportsbook, e)
-        return {}
-
-def _ob_wc_ref(home_cb, away_cb, sportsbook='polymarket'):
-    """Return devig'd {home, draw, away} probs from OddsBlaze market, or None."""
-    import difflib as _df
-    lookup = _ob_load_wc(sportsbook)
-    if not lookup:
-        return None
-    h = home_cb.lower().strip()
-    a = away_cb.lower().strip()
-    if (h, a) in lookup:
-        return lookup[(h, a)]
-    best, best_k = 0.0, None
-    for (h_ob, a_ob) in lookup:
-        score = (_df.SequenceMatcher(None, h, h_ob).ratio() *
-                 _df.SequenceMatcher(None, a, a_ob).ratio())
-        if score > best:
-            best, best_k = score, (h_ob, a_ob)
-    if best >= 0.35 and best_k:
-        return lookup[best_k]
-    return None
-
-# ---------------------------------------------------------------------------
 # Cloudbet API (dual auth: v2=Bearer, v4=X-API-Key)
 # ---------------------------------------------------------------------------
 import requests
@@ -1748,15 +1671,8 @@ def scan_football(api, state, dry_run=False):
                         _e_min = WC_MIN_EDGE if _is_wc else MIN_EDGE
                         _c_min = WC_MIN_CONF if _is_wc else MIN_CONF
                         _r1x2_ok = (WC_RESULT_1X2_ENABLED if _is_wc else RESULT_1X2_ENABLED)
-                        # OddsBlaze market gate (WC: Polymarket must also imply value vs Cloudbet)
-                        _ob_ref_p = None
+                        _ob_ref_p = None  # OddsBlaze WC gate retirado 2026-08-03 (key expirada, sin reemplazo)
                         if _is_wc:
-                            _ob = _ob_wc_ref(home, away)
-                            if _ob and out_key in _ob:
-                                _ob_ref_p = _ob[out_key]
-                                if _ob_ref_p * price - 1 < 0:
-                                    log.debug('OB gate skip %s %s ob=%.3f price=%.3f', home, out_key, _ob_ref_p, price)
-                                    continue
                             _wc_1x2_dom = _xg_h if out_key == 'home' else _xg_a
                         _wc_1x2_weak = _xg_a if out_key == 'home' else _xg_h
                         _wc_1x2_ratio = (_wc_1x2_dom / _wc_1x2_weak) if _wc_1x2_weak > 0 else 0
