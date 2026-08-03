@@ -484,6 +484,14 @@ def clv_report(window: int = 20, min_picks: int = 5) -> dict:
             "WHERE market_type IS NOT NULL AND market_type != '' AND placed=1"
         ).fetchall()]
 
+        # 2026-08-03 fix: mercados en vivo (bet colocado durante el partido) tienen
+        # CLV vs cierre estructuralmente ruidoso -- el precio se mueve legitimamente
+        # con el marcador del partido, no con la calidad del modelo. Confirmado con
+        # datos reales: sets_under y tennis_team_win_set dispararon esta alerta con
+        # WR real de 87.5% y 75% respectivamente (falsos positivos). Se sigue
+        # calculando el segmento (visibilidad en dashboards/reportes), solo no
+        # dispara la alerta de 'modelo perdio edge'.
+        _INPLAY_MARKET_TYPES = {'sets_under', 'tennis_team_win_set'}
         alerts, segments = [], {}
         for mt in market_types:
             rows = conn.execute("""
@@ -492,12 +500,19 @@ def clv_report(window: int = 20, min_picks: int = 5) -> dict:
                 ORDER BY COALESCE(resolved_ts, ts) DESC
                 LIMIT ?
             """, (mt, window)).fetchall()
-            clvs = [r[0] for r in rows]
+            # 2026-08-03 fix: un solo swing extremo de mercado en vivo (ej. sets_under
+            # va a un set extra tras la captura inicial, la cuota 'under' se dispara
+            # legitimamente de 1.56 a 14.5+) puede arrastrar el promedio de una ventana
+            # chica (n=20) por si solo, sin que el modelo haya perdido edge real
+            # (caso real: n=20 daba -3.8% por 1 fila, sacandola quedaba +2.6% con
+            # WR=87.5% en las otras 19). Recortar |clv|>0.5 antes de promediar --
+            # esos valores son movimiento de mercado in-play, no señal de calibracion.
+            clvs = [r[0] for r in rows if abs(r[0]) <= 0.5]
             if len(clvs) < min_picks:
                 continue
             avg_clv = sum(clvs) / len(clvs)
             segments[mt] = {'n': len(clvs), 'avg_clv': round(avg_clv, 4)}
-            if avg_clv < -0.03:
+            if avg_clv < -0.03 and mt not in _INPLAY_MARKET_TYPES:
                 alerts.append('%s: CLV promedio %.1f%% (n=%d, ultimas %d picks)'
                                % (mt, avg_clv * 100, len(clvs), window))
         return {'alerts': alerts, 'segments': segments}
