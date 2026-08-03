@@ -324,10 +324,12 @@ FOOTBALLDATA_LEAGUES = {
     # Shadow-only hasta validar WR -- ver _SHADOW_ONLY_LEAGUES en oraculo_runner_auto.py
     'ARG': 'https://www.football-data.co.uk/new/ARG.csv',
     'BRA': 'https://www.football-data.co.uk/new/BRA.csv',
+    # 2026-08-03: Liga MX Apertura arranca 15-ago -- dejar listo antes.
+    'LMX': 'https://www.football-data.co.uk/new/MEX.csv',
 }
 
 # Leagues using /new/ multi-season format; parser handles Home/HG columns + Season filter
-_FOOTBALLDATA_NEW_FORMAT = {'MLS', 'ARG', 'BRA'}
+_FOOTBALLDATA_NEW_FORMAT = {'MLS', 'ARG', 'BRA', 'LMX'}
 _FOOTBALLDATA_MIN_SEASON = 2022  # MLS goal rate shifted upward post-2022
 
 def fetch_footballdata_results(force_refresh=False):

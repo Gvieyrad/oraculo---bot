@@ -11,6 +11,13 @@ NOW = datetime.now(timezone.utc)
 
 CANTERA = [
     {
+        'name': 'Asian Handicap Liga MX (Poisson dedicado)',
+        'query': "market_type='asian_handicap' AND league='LMX'",
+        'threshold': 30,
+        'note': '2026-08-03: Poisson dedicado (football-data.co.uk MEX.csv, 2022-2027). Backtest walk-forward salio mal (33.3%% hit-rate vs 52.4%% breakeven) pero el test cayo justo en las primeras 4 jornadas del Apertura nuevo (ratings heredados de temporada pasada, roster changes de mercado de pases) -- sesgo conocido, no descalifica el modelo. Shadow-only, revalidar con partidos de mitad de temporada.',
+        'days': 60,
+    },
+    {
         'name': 'Asian Handicap ARG/BRA (Poisson dedicado)',
         'query': "market_type='asian_handicap' AND league IN ('ARG','BRA')",
         'threshold': 30,
