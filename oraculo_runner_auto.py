@@ -1106,17 +1106,15 @@ def scan_football(api, state, dry_run=False):
     _fb_context = None
     try:
         from oraculo_football_csv import load_all_leagues
-        # 2026-08-03: FL2 agregado (tenia fuente de datos, F2.csv, pero
-        # nunca se cargaba en el contexto). MLS quitado de esta lista --
-        # el intento anterior de agregarlo estaba incompleto: oraculo_football_csv.py
-        # no tiene ruta real para /new/USA.csv (download_new_league_csv() nunca
-        # se invoca desde ningun lado), asi que solo generaba un warning inutil
-        # cada ciclo. Revisar oraculo_football_csv.py antes de reintentar MLS.
+        # 2026-08-03: FL2 y MLS agregados (tenian fuente de datos pero
+        # nunca se cargaban). MLS necesito arreglar oraculo_football_csv.py
+        # de verdad -- NEW_FORMAT_LEAGUES + _parse_new_format_compat(), el
+        # intento anterior solo generaba un warning inutil cada ciclo.
         # load_all_leagues sin season explicito combina 2026+2025 (ver fix
         # en oraculo_football_csv.py) para cubrir equipos recien ascendidos.
         _fb_context = load_all_leagues(leagues=[
             'PL', 'PD', 'SA', 'BL1', 'FL1', 'BL2', 'DED', 'ELC', 'PPL',
-            'NOR', 'SWE', 'SB', 'TUR', 'BEL', 'FL2',
+            'NOR', 'SWE', 'SB', 'TUR', 'BEL', 'FL2', 'MLS',
         ])
     except Exception as e:
         log.warning('Football context (load_all_leagues) unavailable: %s', e)
