@@ -182,8 +182,8 @@ LEAGUE_MARKETS = {
     'PPL': ['over25', 'over15', 'under35'],  # 2026-05-13: U3.5=74.5% historical
     'MLS': ['over25', 'over15'],
     'LMX': ['over25', 'over15'],
-    'ARG': ['over25', 'over15', 'under35'],
-    'BRA': ['over25', 'over15', 'under35'],
+    'ARG': ['over25', 'over15', 'under35', 'asian_handicap'],
+    'BRA': ['over25', 'over15', 'under35', 'asian_handicap'],
     'BEL': ['over25'],
     'SWE': ['over25'],
     'NOR': ['over25'],
@@ -1079,6 +1079,27 @@ def scan_football(api, state, dry_run=False):
     except Exception as e:
         log.warning('Math models unavailable: %s', e)
 
+    # 2026-08-03: Poisson separados para ARG/BRA (entrenados con datos reales
+    # de football-data.co.uk, no mezclados con el modelo global de las 5
+    # ligas grandes -- fit() recalcula league_avg/home_adv como escalares
+    # globales, mezclar corromperia las predicciones de PL/PD/SA/BL1/FL1).
+    # Backtest walk-forward (train 2022-24 / test 2025-26): ARG accuracy
+    # 41.9% vs 41.1% baseline "siempre gana local" (senal debil), BRA 51.3%
+    # vs 49.6% (senal moderada). Por eso arranca shadow-only -- que Cantera
+    # decida con datos reales si el edge es suficiente.
+    poisson_league = {}
+    try:
+        from oraculo_models_advanced import PoissonGoalModel as _PGM
+        for _lg in ('arg', 'bra'):
+            _pp = os.path.join(SCRIPT_DIR, 'models', 'poisson_%s_state.pkl' % _lg)
+            if os.path.exists(_pp):
+                _pm = _PGM()
+                with open(_pp, 'rb') as f:
+                    _pm.__dict__.update(pickle.load(f))
+                poisson_league[_lg.upper()] = _pm
+    except Exception as e:
+        log.warning('Poisson ARG/BRA unavailable: %s', e)
+
     # 2026-08-01: contexto historico para build_feature_vector (105 features).
     # Cacheado internamente por oraculo_football_csv.py (TTL 24h) -- validado
     # por agente: 10.4s en frio, 0.1s en caliente, seguro correrlo cada ciclo.
@@ -1158,9 +1179,10 @@ def scan_football(api, state, dry_run=False):
 
             for mkt_key in league_mkts:
                 # --- ASIAN HANDICAP ---
-                if mkt_key == 'asian_handicap' and poisson:
+                _ah_model = poisson_league.get(league, poisson)
+                if mkt_key == 'asian_handicap' and _ah_model:
                     try:
-                        lh, la = poisson.predict_lambda(home, away)
+                        lh, la = _ah_model.predict_lambda(home, away)
                         model_margin = lh - la
                         ah_data = markets.get('soccer.asian_handicap', {})
                         for sub in ah_data.get('submarkets', {}).values():
@@ -1181,7 +1203,7 @@ def scan_football(api, state, dry_run=False):
                                 outcome = sel.get('outcome', '')
                                 # Poisson scoreline matrix for true AH probability
                                 try:
-                                    model_prob = poisson.prob_ah(home, away, line, outcome)
+                                    model_prob = _ah_model.prob_ah(home, away, line, outcome)
                                 except Exception:
                                     if outcome == 'home':
                                         model_prob = min(0.85, max(0.35, 0.5 + (model_margin + line) * 0.15))
