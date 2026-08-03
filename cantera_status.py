@@ -11,6 +11,13 @@ NOW = datetime.now(timezone.utc)
 
 CANTERA = [
     {
+        'name': 'Asian Handicap ARG/BRA (Poisson dedicado)',
+        'query': "market_type='asian_handicap' AND league IN ('ARG','BRA')",
+        'threshold': 30,
+        'note': '2026-08-03: Poisson separado entrenado con football-data.co.uk (2022-2026), no mezclado con modelo global 5 grandes ligas. Backtest walk-forward: ARG accuracy 41.9% vs 41.1% baseline home-win (senal debil), BRA 51.3% vs 49.6% (senal moderada). Shadow-only hasta validar con datos reales.',
+        'days': 60,
+    },
+    {
         'name': 'Goals 2H Under — ligas BAJO scoring (debe ganar)',
         'query': "market_type='soccer_goals' AND league IN ('soccer-france-ligue-2','soccer-england-championship','soccer-italy-serie-a','soccer-portugal-primeira-liga','soccer-belgium-first-division-a','soccer-spain-laliga')",
         'threshold': 30,
