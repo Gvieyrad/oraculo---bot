@@ -485,6 +485,14 @@ def clv_report(window: int = 20, min_picks: int = 5) -> dict:
             "WHERE market_type IS NOT NULL AND market_type != '' AND placed=1"
         ).fetchall()]
 
+        # 2026-08-03 fix: mercados en vivo (bet colocado durante el partido) tienen
+        # CLV vs cierre estructuralmente ruidoso -- el precio se mueve legitimamente
+        # con el marcador del partido, no con la calidad del modelo. Confirmado con
+        # datos reales: sets_under y tennis_team_win_set dispararon esta alerta con
+        # WR real de 87.5% y 75% respectivamente (falsos positivos). Se sigue
+        # calculando el segmento (visibilidad en dashboards/reportes), solo no
+        # dispara la alerta de 'modelo perdio edge'.
+        _INPLAY_MARKET_TYPES = {'sets_under', 'tennis_team_win_set'}
         alerts, segments = [], {}
         for mt in market_types:
             rows = conn.execute("""
@@ -493,12 +501,15 @@ def clv_report(window: int = 20, min_picks: int = 5) -> dict:
                 ORDER BY COALESCE(resolved_ts, ts) DESC
                 LIMIT ?
             """, (mt, window)).fetchall()
-            clvs = [r[0] for r in rows]
+            # 2026-08-03 fix: portado de Oraculo -- un solo swing extremo de mercado
+            # en vivo puede arrastrar el promedio de una ventana chica (n=20) sin que
+            # el modelo haya perdido edge real. Recortar |clv|>0.5 antes de promediar.
+            clvs = [r[0] for r in rows if abs(r[0]) <= 0.5]
             if len(clvs) < min_picks:
                 continue
             avg_clv = sum(clvs) / len(clvs)
             segments[mt] = {'n': len(clvs), 'avg_clv': round(avg_clv, 4)}
-            if avg_clv < -0.03:
+            if avg_clv < -0.03 and mt not in _INPLAY_MARKET_TYPES:
                 alerts.append('%s: CLV promedio %.1f%% (n=%d, ultimas %d picks)'
                                % (mt, avg_clv * 100, len(clvs), window))
         return {'alerts': alerts, 'segments': segments}
