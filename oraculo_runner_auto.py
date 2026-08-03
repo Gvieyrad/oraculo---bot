@@ -77,7 +77,7 @@ MAX_EXPOSURE_PER_MATCH = 0.10  # Max 10% of bankroll on a single match
 MAX_EXPOSURE_PER_EVENT = 1.00  # 2026-07-22: deshabilitado a pedido (chocaba con MIN_STAKE=5 en bankroll chico) -- MAX_STAKE_ABS/MAX_EXPOSURE_PER_MATCH/MARKET_TYPE_EXPOSURE_CAP siguen limitando
 MAX_TOTAL_EXPOSURE = 0.40     # 2026-08-02: subido de 30 a 40 a pedido -- permite mas posiciones simultaneas
 MARKET_TYPE_EXPOSURE_CAP = {
-    'sets_under': 10.0,  # 2026-07-12: ported from oraculo_v2, flat dollar cap on concurrent exposure
+    'sets_under': 34.0,  # 2026-08-03: igualado al tope general a pedido (mismo criterio que Oraculo) -- MAX_TOTAL_EXPOSURE=40% ya es la restriccion real (bankroll ~$84 -> ~$34), este cap especifico deja de ser el limitante
     'double_chance': 10.0,  # 2026-07-12: peru_dc going live (2 usd/bet), cap concurrent exposure pre-emptively
 }
 TENNIS_BUDGET_RESERVE = 0.30  # Reserve 30% of daily budget for tennis
@@ -184,7 +184,7 @@ LEAGUE_MARKETS = {
     'DED': ['over25', 'over15'],
     'PPL': ['over25', 'over15', 'under35'],  # 2026-05-13: U3.5=74.5% historical
     'MLS': ['over25', 'over15'],
-    'LMX': ['over25', 'over15'],
+    'LMX': ['over25', 'over15', 'asian_handicap'],
     'ARG': ['over25', 'over15', 'under35', 'asian_handicap'],
     'BRA': ['over25', 'over15', 'under35', 'asian_handicap'],
     'BEL': ['over25'],
@@ -1086,7 +1086,7 @@ def scan_football(api, state, dry_run=False):
     poisson_league = {}
     try:
         from oraculo_models_advanced import PoissonGoalModel as _PGM
-        for _lg in ('arg', 'bra'):
+        for _lg in ('arg', 'bra', 'lmx'):
             _pp = os.path.join(SCRIPT_DIR, 'models', 'poisson_%s_state.pkl' % _lg)
             if os.path.exists(_pp):
                 _pm = _PGM()
