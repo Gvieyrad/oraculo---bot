@@ -3130,6 +3130,52 @@ def scan_tennis(api, state, dry_run=False):
     except Exception as e:
         log.debug('Euroleague scan error: %s', e)
 
+    # --- CRICKET SCANNING (ODI + Test) ---
+    # 2026-08-04: nuevo mercado, Fase 4a del plan de expansion de deportes,
+    # SHADOW ONLY -- no colocar apuestas reales. Fuente cricsheet.org (dataset
+    # abierto, sin bloqueo). ODI: Elo binario simple (empates/no-result son
+    # ~5%, se descartan del entrenamiento). Test: Elo de 3 resultados con
+    # P_DRAW_TEST constante (draw rate no depende de la diferencia de Elo,
+    # medido con datos reales -- ver oraculo_cricket.py). NO promover a live
+    # sin pasar el mismo checklist que NFL/EuroLeague/Rugby Union (20+ picks,
+    # WR>=umbral por formato).
+    try:
+        from oraculo_cricket import (train_cricket_odi_elo, train_cricket_test_elo,
+                                      scan_cricket_odi, scan_cricket_test)
+        _cr_odi_elo = train_cricket_odi_elo()
+        if _cr_odi_elo and len(_cr_odi_elo.ratings) >= 10:
+            _cr_odi_picks = scan_cricket_odi(api, state, _cr_odi_elo, shadow=True)
+            if _cr_odi_picks:
+                log.info('[CRICKET-ODI] %d picks (SHADOW):', len(_cr_odi_picks))
+                for _cp in _cr_odi_picks:
+                    log.info('  [CRICKET-ODI] %s | %s | edge=%.1f%% conf=%.0f%% @%.3f',
+                             _cp['match'][:35], _cp['label'], _cp['edge']*100,
+                             _cp['model_prob']*100, _cp['price'])
+                if _SIBILA_ENABLED:
+                    for _cp in _cr_odi_picks:
+                        _sibila_record(_cp)
+                # NO picks.extend() -- shadow only, nunca se coloca apuesta real
+    except Exception as e:
+        log.debug('Cricket ODI scan error: %s', e)
+
+    try:
+        from oraculo_cricket import train_cricket_test_elo, scan_cricket_test
+        _cr_test_elo = train_cricket_test_elo()
+        if _cr_test_elo and len(_cr_test_elo.ratings) >= 8:
+            _cr_test_picks = scan_cricket_test(api, state, _cr_test_elo, shadow=True)
+            if _cr_test_picks:
+                log.info('[CRICKET-TEST] %d picks (SHADOW):', len(_cr_test_picks))
+                for _cp in _cr_test_picks:
+                    log.info('  [CRICKET-TEST] %s | %s | edge=%.1f%% conf=%.0f%% @%.3f',
+                             _cp['match'][:35], _cp['label'], _cp['edge']*100,
+                             _cp['model_prob']*100, _cp['price'])
+                if _SIBILA_ENABLED:
+                    for _cp in _cr_test_picks:
+                        _sibila_record(_cp)
+                # NO picks.extend() -- shadow only, nunca se coloca apuesta real
+    except Exception as e:
+        log.debug('Cricket Test scan error: %s', e)
+
     # --- NHL SCANNING ---
     # NHL regular season Oct-Apr. Uses hockey.1x2 market. Shadow=True until 40+ picks validated.
     _nhl_active = False
