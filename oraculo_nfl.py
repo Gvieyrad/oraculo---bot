@@ -195,6 +195,10 @@ def fetch_nfl_results(force: bool = False) -> list:
             an = NFLVERSE_TO_FULL.get(row.get('away_team', ''))
             if not hn or not an:
                 continue  # franquicia historica reubicada (OAK/SD/STL) -- fuera del mapa a proposito
+            if hp == ap:
+                continue  # 2026-08-04 fix: empates reales de NFL (raros pero existen, ej.
+                # Browns-Steelers 21-21 2018) caian al else de 'winner' y se contaban
+                # como victoria del visitante -- corrompia el Elo en silencio
             games.append({
                 'date': row.get('gameday', ''),
                 'home': hn, 'away': an,
@@ -223,6 +227,13 @@ def train_nfl_elo(force: bool = False) -> NFLElo:
     if not force and cache_age < 21600 and elo.load() and len(elo.ratings) >= 28:
         log.info('NFL Elo loaded from cache (%d teams)', len(elo.ratings))
         return elo
+
+    # 2026-08-04 fix: elo.load() (llamado arriba dentro del and) puebla self.ratings
+    # con efecto de lado aunque el cache este parcial/corrupto (<28 equipos) -- sin
+    # esta instancia nueva, el reentrenamiento de abajo se aplicaba ENCIMA de los
+    # ratings ya cargados en vez de arrancar de 1500 neutral, acumulando swings de
+    # forma no idempotente cada vez que este camino se disparaba.
+    elo = NFLElo()
 
     games = fetch_nfl_results(force=force)
     if not games:

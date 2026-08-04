@@ -252,6 +252,10 @@ def train_cricket_test_elo(force=False):
 
     for m in matches:
         winner = m['winner']
+        if not winner and m.get('result') not in ('draw', 'tie'):
+            continue  # 2026-08-04 fix: 'no result' (partido abandonado, lluvia) no es
+            # lo mismo que un empate real de 5 dias -- se estaba procesando igual,
+            # contaminando el Elo y potencialmente el P_DRAW_TEST=0.195 medido
         elo.process_match(m['home'], m['away'], winner, winner == m['home'] if winner else None)
 
     elo.save(TEST_ELO_CACHE)
@@ -372,3 +376,195 @@ def scan_cricket_test(api, state, elo=None, dry_run=False, shadow=True):
 
     return _scan_market(api, 'cricket-international-tc19e-international-test-match',
                          'cricket_test', 8, elo.ratings, predict_fn, dry_run)
+
+
+# ---------------------------------------------------------------------------
+# T20 CLUB LEAGUES (Fase 4b) -- reusa CricketEloODI (T20 no tiene draws,
+# misma dinamica win/loss binaria que ODI, solo cambia duracion del partido).
+# A diferencia de ODI/Test (selecciones nacionales, sin ambiguedad), estas
+# son ligas de franquicias -- necesitan mapeo explicito de nombres porque:
+#   1) las franquicias se renombran entre temporadas (ej. Kings XI Punjab ->
+#      Punjab Kings, Royal Challengers Bangalore -> Bengaluru)
+#   2) Cloudbet a veces usa una convencion de nombre distinta a cricsheet
+#      (ej. T20 Blast: Cloudbet usa el nombre del condado "Warwickshire",
+#      cricsheet usa el nombre comercial "Birmingham Bears")
+# LPL (Lanka Premier League) agregada 2026-08-04 (segunda pasada) -- Cloudbet
+# usa nombres genericos por ciudad ("Colombo CC", "Galle CC") que no matchean
+# la marca comercial de cricsheet. Confirmado un partido real en vivo (Jaffna
+# Kings vs Galle CC) que valido 2 de 4 equipos exacto (Jaffna Kings, Kandy
+# Royals); Colombo CC/Galle CC son inferidos por eliminacion, no confirmados
+# 1:1 todavia -- revisar cuando haya mas partidos reales de esos 2 equipos.
+# ---------------------------------------------------------------------------
+
+CRICKET_T20_LEAGUES = {
+    'lpl': {
+        'zip_url':     'https://cricsheet.org/downloads/lpl_json.zip',
+        'comp_key':    'cricket-international-lanka-premier-league',
+        'market_type': 'cricket_t20_lpl',
+        'min_ratings': 4,
+        # 2026-08-04: verificado en vivo contra api.get_odds() -- partido real
+        # Jaffna Kings vs Galle CC confirmado. Jaffna Kings y Kandy Royals
+        # matchean exacto entre cricsheet y Cloudbet. Colombo CC/Galle CC son
+        # los nombres genericos que usa Cloudbet para Colombo Kaps/Galle
+        # Gallants -- inferido por eliminacion (nombres unicos restantes tras
+        # matchear los otros 2), no confirmado 1:1 con un partido de esos
+        # equipos especificos todavia. Revisado por auditoria de codigo
+        # (agente code-reviewer, 2026-08-04): sin bugs, aislamiento correcto.
+        'alias': {
+            'Colombo Kaps':      'Colombo CC',
+            'Colombo Kings':     'Colombo CC',
+            'Colombo Stars':     'Colombo CC',
+            'Colombo Strikers':  'Colombo CC',
+            'Galle Gallants':    'Galle CC',
+            'Galle Gladiators':  'Galle CC',
+            'Galle Marvels':     'Galle CC',
+            'Galle Titans':      'Galle CC',
+            'Jaffna Kings':      'Jaffna Kings',
+            'Jaffna Stallions':  'Jaffna Kings',
+            'Kandy Royals':      'Kandy Royals',
+            'Kandy Falcons':     'Kandy Royals',
+            'Kandy Tuskers':     'Kandy Royals',
+            'Kandy Warriors':    'Kandy Royals',
+            'B-Love Kandy':      'Kandy Royals',
+            'Dambulla Sixers':   'Dambulla Sixers',
+            'Dambulla Aura':     'Dambulla Sixers',
+            'Dambulla Giants':   'Dambulla Sixers',
+            'Dambulla Viiking':  'Dambulla Sixers',
+        },
+    },
+    'ipl': {
+        'zip_url':     'https://cricsheet.org/downloads/ipl_json.zip',
+        'comp_key':    'cricket-india-indian-premier-league',
+        'market_type': 'cricket_t20_ipl',
+        'min_ratings': 8,
+        # canonical = nombre actual de la franquicia (10 equipos 2026),
+        # variantes historicas de la misma franquicia mapean al nombre actual
+        # para que el Elo no reinicie en 1500 con cada rebrand. Franquicias
+        # extintas (Deccan Chargers, Kochi Tuskers, Pune Warriors, Rising
+        # Pune Supergiant(s), Gujarat Lions) quedan SIN mapear a proposito --
+        # no tienen equivalente actual en Cloudbet, se descartan del training.
+        'alias': {
+            'Delhi Daredevils':            'Delhi Capitals',
+            'Delhi Capitals':              'Delhi Capitals',
+            'Kings XI Punjab':              'Punjab Kings',
+            'Punjab Kings':                 'Punjab Kings',
+            'Royal Challengers Bangalore':  'Royal Challengers Bengaluru',
+            'Royal Challengers Bengaluru':  'Royal Challengers Bengaluru',
+            'Chennai Super Kings':          'Chennai Super Kings',
+            'Kolkata Knight Riders':        'Kolkata Knight Riders',
+            'Mumbai Indians':               'Mumbai Indians',
+            'Rajasthan Royals':             'Rajasthan Royals',
+            'Sunrisers Hyderabad':          'Sunrisers Hyderabad',
+            'Gujarat Titans':               'Gujarat Titans',
+            'Lucknow Super Giants':         'Lucknow Super Giants',
+        },
+    },
+    'cpl': {
+        'zip_url':     'https://cricsheet.org/downloads/cpl_json.zip',
+        'comp_key':    'cricket-westindies-caribbean-premier-league',
+        'market_type': 'cricket_t20_cpl',
+        'min_ratings': 6,
+        # 2026-08-04: mapeo best-effort -- CPL tambien tiene inestabilidad de
+        # nombres (Cloudbet outright listo variantes viejas y nuevas mezcladas,
+        # ej 'antigua-hawksbills' Y 'antigua-and-barbuda-falcons' como opciones
+        # separadas). Sin partido real en vivo para confirmar, este mapeo es
+        # la mejor inferencia -- revisar cuando CPL tenga partidos reales.
+        'alias': {
+            'Antigua Hawksbills':              'Antigua and Barbuda Falcons',
+            'Antigua and Barbuda Falcons':     'Antigua and Barbuda Falcons',
+            'Barbados Tridents':               'Barbados Royals',
+            'Barbados Royals':                 'Barbados Royals',
+            'Guyana Amazon Warriors':          'Guyana Amazon Warriors',
+            'Jamaica Tallawahs':               'Jamaica Tallawahs',
+            'St Kitts and Nevis Patriots':     'St Kitts and Nevis Patriots',
+            'St Lucia Stars':                  'St Lucia Kings',
+            'St Lucia Zouks':                  'St Lucia Kings',
+            'St Lucia Kings':                  'St Lucia Kings',
+            'Trinidad & Tobago Red Steel':     'Trinbago Knight Riders',
+            'Trinbago Knight Riders':          'Trinbago Knight Riders',
+        },
+    },
+    'ntb': {
+        'zip_url':     'https://cricsheet.org/downloads/ntb_json.zip',
+        'comp_key':    'cricket-england-t20-vitality-blast',
+        'market_type': 'cricket_t20_blast',
+        'min_ratings': 12,
+        # 2026-08-04: Cloudbet usa nombres de CONDADO (18 slugs confirmados:
+        # derbyshire, durham, essex, ... warwickshire), no nombres comerciales
+        # de marca T20 -- unico caso encontrado es Warwickshire, que juega T20
+        # como "Birmingham Bears" en cricsheet. El resto de los 18 condados
+        # coincide 1:1 sin necesidad de alias.
+        'alias': {
+            'Birmingham Bears': 'Warwickshire',
+            'Derbyshire': 'Derbyshire', 'Durham': 'Durham', 'Essex': 'Essex',
+            'Glamorgan': 'Glamorgan', 'Gloucestershire': 'Gloucestershire',
+            'Hampshire': 'Hampshire', 'Kent': 'Kent', 'Lancashire': 'Lancashire',
+            'Leicestershire': 'Leicestershire', 'Middlesex': 'Middlesex',
+            'Northamptonshire': 'Northamptonshire', 'Nottinghamshire': 'Nottinghamshire',
+            'Somerset': 'Somerset', 'Surrey': 'Surrey', 'Sussex': 'Sussex',
+            'Warwickshire': 'Warwickshire', 'Worcestershire': 'Worcestershire',
+            'Yorkshire': 'Yorkshire',
+        },
+    },
+}
+
+
+def fetch_cricket_t20(league_code, force=False):
+    cfg = CRICKET_T20_LEAGUES[league_code]
+    cache_path = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'cricket_t20_%s_results.json' % league_code)
+    return _fetch_cricsheet(cfg['zip_url'], cache_path, force)
+
+
+def train_cricket_t20_elo(league_code, force=False):
+    cfg = CRICKET_T20_LEAGUES[league_code]
+    elo_path = os.path.join(SCRIPT_DIR, '.oraculo_cache', 'cricket_t20_%s_elo.json' % league_code)
+    elo = CricketEloODI(home_adv=0)  # 2026-08-04: T20 de clubes juega en cancha
+    # neutral/rotativa dentro del pais sede -- sin ventaja de localia clara
+    # como en internacionales (no medido especificamente, criterio conservador:
+    # 0 en vez de asumir un valor sin evidencia).
+    cache_age = (time.time() - os.path.getmtime(elo_path)) if os.path.exists(elo_path) else 1e18
+    if not force and cache_age < CACHE_TTL and elo.load(elo_path) and len(elo.ratings) >= cfg['min_ratings']:
+        log.info('Cricket T20 %s Elo loaded from cache (%d equipos)', league_code, len(elo.ratings))
+        return elo
+
+    matches = fetch_cricket_t20(league_code, force=force)
+    if not matches:
+        log.warning('Cricket T20 %s: no results to train from', league_code)
+        return elo
+
+    alias = cfg['alias']
+    n_used = 0
+    for m in matches:
+        winner_raw = m['winner']
+        if not winner_raw:
+            continue
+        home_raw = m['home']
+        away_raw = m['away']
+        if home_raw not in alias or away_raw not in alias or winner_raw not in alias:
+            continue  # equipo extinto/sin mapeo -- se descarta, no se adivina
+        home = alias[home_raw]
+        away = alias[away_raw]
+        winner = alias[winner_raw]
+        loser = away if winner == home else home
+        elo.process_match(winner, loser, winner == home)
+        n_used += 1
+
+    elo.save(elo_path)
+    log.info('Cricket T20 %s Elo trained: %d equipos, %d partidos (de %d totales)',
+              league_code, len(elo.ratings), n_used, len(matches))
+    return elo
+
+
+def scan_cricket_t20(api, state, league_code, elo=None, dry_run=False, shadow=True):
+    """T20 de clubes. Shadow-only -- no colocar apuestas reales hasta validar
+    WR en cantera (mismo checklist que el resto de la expansion)."""
+    cfg = CRICKET_T20_LEAGUES[league_code]
+    if elo is None:
+        elo = train_cricket_t20_elo(league_code)
+
+    def predict_fn(home, away):
+        p_h = elo.predict(home, away)
+        return {'home': p_h, 'away': 1.0 - p_h}
+
+    return _scan_market(api, cfg['comp_key'], cfg['market_type'], cfg['min_ratings'],
+                         elo.ratings, predict_fn, dry_run)
