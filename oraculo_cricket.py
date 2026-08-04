@@ -263,9 +263,9 @@ def train_cricket_test_elo(force=False):
     return elo
 
 
-def _scan_market(api, comp_key, market_type, min_ratings, elo_lookup, predict_fn, dry_run=False):
-    """Generico: escanea cricket.winner en una competicion, arma picks
-    shadow-only. predict_fn(home, away) -> dict {'home': p, 'away': p}."""
+def _scan_market(api, comp_key, market_type, min_ratings, elo_lookup, predict_fn, dry_run=False, market_key='cricket.winner'):
+    """Generico: escanea el mercado indicado (default cricket.winner) en una
+    competicion, arma picks shadow-only. predict_fn(home, away) -> dict {'home': p, 'away': p}."""
     if len(elo_lookup) < min_ratings:
         log.warning('Cricket %s Elo not ready (%d equipos)', market_type, len(elo_lookup))
         return []
@@ -294,7 +294,7 @@ def _scan_market(api, comp_key, market_type, min_ratings, elo_lookup, predict_fn
         if home_cb not in elo_lookup or away_cb not in elo_lookup:
             continue
 
-        mk = ev.get('markets', {}).get('cricket.winner', {})
+        mk = ev.get('markets', {}).get(market_key, {})
         if not mk:
             continue
         default_sub = None
@@ -327,7 +327,7 @@ def _scan_market(api, comp_key, market_type, min_ratings, elo_lookup, predict_fn
                 'league':               comp_key,
                 'sport':                'cricket',
                 'event_id':             eid,
-                'market':               'cricket.winner',
+                'market':               market_key,
                 'market_url':           murl,
                 'price':                price,
                 'odds':                 price,
@@ -358,15 +358,19 @@ def scan_cricket_odi(api, state, elo=None, dry_run=False, shadow=True):
         return {'home': p_h, 'away': 1.0 - p_h}
 
     return _scan_market(api, 'cricket-international-one-day-internationals',
-                         'cricket_odi', 10, elo.ratings, predict_fn, dry_run)
+                         'cricket_odi', 10, elo.ratings, predict_fn, dry_run,
+                         market_key='cricket.winner')
 
 
 def scan_cricket_test(api, state, elo=None, dry_run=False, shadow=True):
-    """Test internacionales. Shadow-only. Nota: el mercado cricket.winner de
-    Cloudbet solo tiene 2 outcomes (home/away) -- el draw no es un outcome
-    apostable directamente en este mercado, asi que el edge de home/away
-    ya viene descontado por P_DRAW_TEST dentro de predict() (ver CricketEloTest),
-    no hace falta manejar un tercer outcome aca."""
+    """Test internacionales. Shadow-only. 2026-08-04 fix: el mercado real de
+    Cloudbet para Test es 'cricket.test_1x2' (3 outcomes: home/draw/away,
+    draw cotizado aparte, ej @70) -- NO 'cricket.winner' (ese key ni existe
+    para partidos Test, causaba que el scanner nunca encontrara mercado y
+    devolviera 0 picks siempre, sin importar el edge real). Con test_1x2
+    confirmado como mercado de 3 resultados genuino, la probabilidad conjunta
+    (P_DRAW_TEST descontado dentro de predict(), ver CricketEloTest) es el
+    enfoque correcto -- no hace falta cambiar el modelo, solo el market key."""
     if elo is None:
         elo = train_cricket_test_elo()
 
@@ -375,7 +379,8 @@ def scan_cricket_test(api, state, elo=None, dry_run=False, shadow=True):
         return {'home': p_h, 'away': p_a}
 
     return _scan_market(api, 'cricket-international-tc19e-international-test-match',
-                         'cricket_test', 8, elo.ratings, predict_fn, dry_run)
+                         'cricket_test', 8, elo.ratings, predict_fn, dry_run,
+                         market_key='cricket.test_1x2')
 
 
 # ---------------------------------------------------------------------------
