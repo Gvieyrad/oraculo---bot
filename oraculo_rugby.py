@@ -5,6 +5,11 @@ Backtests out-of-sample (octonion/rugby):
   NRL  (rugby-league): 63.8%% acc (vs 56%% base), 1908 partidos, calibrado.
   MLR  (rugby-union US): 66.0%% acc (vs 56%% base), 534 partidos, calibrado.
 NO live: solo shadow hasta validar CLV vs odds Cloudbet (N>=30).
+
+2026-08-04: agregadas premiership/celtic(URC)/npc (Rugby Union, Fase 2 del
+plan de expansion). octonion/rugby no tiene estas 3 ligas actualizadas
+(datos parados en 2020-21) -- fuente nueva: transientlunatic/Rugby-Data
+(GitHub, JSON por temporada, activo). fmt='json_v2' en LEAGUES.
 """
 import os, re, pickle, logging
 from datetime import datetime
@@ -16,6 +21,11 @@ K, HA = 24, 60
 LEAGUES = {
     'nrl': {'path': 'nrl/csv', 'prefix': 'nrl-', 'fmt': 'nrl'},
     'mlr': {'path': 'major_league/csv', 'prefix': 'ml-', 'fmt': 'mlr'},
+    # 2026-08-04: Rugby Union, fuente transientlunatic/Rugby-Data (JSON directo
+    # por temporada, activo -- octonion/rugby no sirve para estas 3, parado en 2020-21)
+    'premiership': {'file': 'premiership-2025-2026.json', 'fmt': 'json_v2'},
+    'celtic':      {'file': 'celtic-2025-2026.json', 'fmt': 'json_v2'},
+    'npc':         {'file': 'npc-2025-2026.json', 'fmt': 'json_v2'},
 }
 
 
@@ -90,10 +100,34 @@ def _parse_mlr(txt):
     return out
 
 
+def _parse_json_v2(data):
+    """transientlunatic/Rugby-Data: lista de dicts {home:{team,score}, away:{team,score}, date, ...}.
+    Partidos futuros vienen con score=None y team='TBC' -- se descartan."""
+    out = []
+    for m in data:
+        try:
+            h, a = m.get('home') or {}, m.get('away') or {}
+            hs, as_ = h.get('score'), a.get('score')
+            ht, at = h.get('team'), a.get('team')
+            if hs is None or as_ is None or not ht or not at or ht == 'TBC' or at == 'TBC':
+                continue
+            d = datetime.strptime((m.get('date') or '')[:10], '%Y-%m-%d')
+            out.append((d, ht, at, int(hs), int(as_)))
+        except Exception:
+            continue
+    return out
+
+
 def _fetch(league):
     import requests
     H = {'User-Agent': 'Mozilla/5.0'}
     cfg = LEAGUES[league]
+    if cfg['fmt'] == 'json_v2':
+        url = 'https://raw.githubusercontent.com/transientlunatic/Rugby-Data/master/json/' + cfg['file']
+        data = requests.get(url, headers=H, timeout=20).json()
+        matches = _parse_json_v2(data)
+        matches.sort(key=lambda x: x[0])
+        return matches
     api = 'https://api.github.com/repos/octonion/rugby/contents/' + cfg['path']
     items = requests.get(api, headers=H, timeout=20).json()
     parser = _parse_nrl if cfg['fmt'] == 'nrl' else _parse_mlr
@@ -135,7 +169,7 @@ def load_elo(league='nrl'):
 
 
 if __name__ == '__main__':
-    for lg in ('nrl', 'mlr'):
+    for lg in ('nrl', 'mlr', 'premiership', 'celtic', 'npc'):
         try:
             e, n = build_and_cache(lg)
             top = sorted(e.ratings.items(), key=lambda x: -x[1])[:3]

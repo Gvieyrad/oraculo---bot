@@ -6661,7 +6661,14 @@ def run_cycle(dry_run=False):
     try:
         import oraculo_rugby as _rug
         _RUG_LEAGUES = (('nrl', 'rugby-league-international-nrl', 'rugby_ml'),
-                        ('mlr', 'rugby-union-international-major-league-rugby', 'rugby_mlr_ml'))
+                        ('mlr', 'rugby-union-international-major-league-rugby', 'rugby_mlr_ml'),
+                        # 2026-08-04: Fase 2 expansion -- premiership/celtic(URC)/npc,
+                        # todas caen en la rama shadow-only del loop de abajo (solo 'nrl'
+                        # tiene _max_stake/rugby_picks.append(), el resto es _sibila_record
+                        # con _shadow_only=True) -- sin validar cantera todavia
+                        ('premiership', 'rugby-union-international-english-premiership', 'rugby_premiership_ml'),
+                        ('celtic', 'rugby-union-international-pro-14', 'rugby_urc_ml'),
+                        ('npc', 'rugby-union-international-mitre-10-cup', 'rugby_npc_ml'))
         for _rlg, _rcomp, _rmt in (_RUG_LEAGUES if _SIBILA_ENABLED else ()):
             _rug_elo = _rug.load_elo(_rlg)
             if _rug_elo is None:
