@@ -118,18 +118,44 @@ def _parse_json_v2(data):
     return out
 
 
+def _fetch_json_retry(url, headers, timeout=20, tries=3):
+    # 2026-08-04 fix: cron diario (04:50/04:55 UTC) fallaba con 'string
+    # indices must be integers, not str' cuando GitHub devolvia un objeto
+    # de rate-limit ({'message': 'API rate limit exceeded...'}) en vez del
+    # listado/JSON esperado -- el codigo lo iteraba como si fuera una lista.
+    # NRL no se corrompia (load_elo() sigue sirviendo el ultimo cache bueno,
+    # fallback seguro), pero el fetch nunca se actualizaba. Retry con backoff
+    # + deteccion explicita de la forma de rate-limit antes de usar la
+    # respuesta.
+    import time as _time
+    import requests
+    last_exc = None
+    for attempt in range(tries):
+        try:
+            r = requests.get(url, headers=headers, timeout=timeout)
+            data = r.json()
+            if isinstance(data, dict) and 'message' in data and 'documentation_url' in data:
+                raise RuntimeError('GitHub API error: %s' % data.get('message'))
+            return data
+        except Exception as e:
+            last_exc = e
+            if attempt < tries - 1:
+                _time.sleep(2 ** attempt)  # 1s, 2s
+    raise last_exc
+
+
 def _fetch(league):
     import requests
     H = {'User-Agent': 'Mozilla/5.0'}
     cfg = LEAGUES[league]
     if cfg['fmt'] == 'json_v2':
         url = 'https://raw.githubusercontent.com/transientlunatic/Rugby-Data/master/json/' + cfg['file']
-        data = requests.get(url, headers=H, timeout=20).json()
+        data = _fetch_json_retry(url, H)
         matches = _parse_json_v2(data)
         matches.sort(key=lambda x: x[0])
         return matches
     api = 'https://api.github.com/repos/octonion/rugby/contents/' + cfg['path']
-    items = requests.get(api, headers=H, timeout=20).json()
+    items = _fetch_json_retry(api, H)
     parser = _parse_nrl if cfg['fmt'] == 'nrl' else _parse_mlr
     matches = []
     for it in items:
