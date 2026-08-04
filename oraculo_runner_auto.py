@@ -3075,6 +3075,33 @@ def scan_tennis(api, state, dry_run=False):
     except Exception as e:
         log.debug('MMA scan error: %s', e)
 
+    # --- NFL SCANNING ---
+    # 2026-08-04: nuevo mercado, Fase 1 del plan de expansion de deportes,
+    # SHADOW ONLY -- no colocar apuestas reales. Elo recien entrenado via ESPN,
+    # sin validacion en cantera todavia. NO promover a live sin pasar el mismo
+    # checklist que WNBA/MMA/sets_under (20+ picks, WR>=umbral). Temporada NFL
+    # es sept-feb, fuera de esa ventana el scan simplemente no encuentra
+    # eventos con cutoffTime en rango (no rompe nada, solo 0 picks).
+    try:
+        from oraculo_nfl import train_nfl_elo, scan_nfl
+        _nfl_elo = train_nfl_elo()
+        if _nfl_elo and len(_nfl_elo.ratings) >= 28:
+            _nfl_picks = scan_nfl(api, state, _nfl_elo, shadow=True)
+            if _nfl_picks:
+                log.info('[NFL] %d picks (SHADOW):', len(_nfl_picks))
+                for _fp in _nfl_picks:
+                    log.info('  [NFL] %s | %s | edge=%.1f%% conf=%.0f%% @%.3f',
+                             _fp['match'][:35], _fp['label'], _fp['edge']*100,
+                             _fp['model_prob']*100, _fp['price'])
+                if _SIBILA_ENABLED:
+                    for _fp in _nfl_picks:
+                        _fp['market_type'] = 'nfl_ml'
+                        _fp['_shadow_only'] = True
+                        _sibila_record(_fp)
+                # NO picks.extend() -- shadow only, nunca se coloca apuesta real
+    except Exception as e:
+        log.debug('NFL scan error: %s', e)
+
     # --- NHL SCANNING ---
     # NHL regular season Oct-Apr. Uses hockey.1x2 market. Shadow=True until 40+ picks validated.
     _nhl_active = False
