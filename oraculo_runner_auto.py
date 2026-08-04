@@ -3122,6 +3122,33 @@ def scan_tennis(api, state, dry_run=False):
     except Exception as e:
         log.debug('Cricket Test scan error: %s', e)
 
+    # --- CRICKET T20 CLUB LEAGUES (Fase 4b) ---
+    # 2026-08-04: IPL, LPL, CPL, T20 Vitality Blast -- shadow only, reusa
+    # CricketEloODI (T20 no tiene draws). Un solo bloque try/except cubriendo
+    # las 4 ligas -- si una liga individual falla, se loguea per-liga via
+    # log.debug adentro del loop pero no corta el resto.
+    try:
+        from oraculo_cricket import CRICKET_T20_LEAGUES, train_cricket_t20_elo, scan_cricket_t20
+        for _t20_lg, _t20_cfg in CRICKET_T20_LEAGUES.items():
+            try:
+                _cr_t20_elo = train_cricket_t20_elo(_t20_lg)
+                if _cr_t20_elo and len(_cr_t20_elo.ratings) >= _t20_cfg['min_ratings']:
+                    _cr_t20_picks = scan_cricket_t20(api, state, _t20_lg, _cr_t20_elo, shadow=True)
+                    if _cr_t20_picks:
+                        log.info('[CRICKET-T20-%s] %d picks (SHADOW):', _t20_lg.upper(), len(_cr_t20_picks))
+                        for _cp in _cr_t20_picks:
+                            log.info('  [CRICKET-T20-%s] %s | %s | edge=%.1f%% conf=%.0f%% @%.3f',
+                                     _t20_lg.upper(), _cp['match'][:35], _cp['label'], _cp['edge']*100,
+                                     _cp['model_prob']*100, _cp['price'])
+                        if _SIBILA_ENABLED:
+                            for _cp in _cr_t20_picks:
+                                _sibila_record(_cp)
+                        # NO picks.extend() -- shadow only, nunca se coloca apuesta real
+            except Exception as _e_t20:
+                log.debug('Cricket T20 %s scan error: %s', _t20_lg, _e_t20)
+    except Exception as e:
+        log.debug('Cricket T20 scan error: %s', e)
+
     # --- NHL SCANNING ---
     # NHL regular season Oct-Apr. Uses hockey.1x2 market. Shadow=True until 40+ picks validated.
     _nhl_active = False
