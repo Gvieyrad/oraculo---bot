@@ -3102,6 +3102,34 @@ def scan_tennis(api, state, dry_run=False):
     except Exception as e:
         log.debug('NFL scan error: %s', e)
 
+    # --- EUROLEAGUE SCANNING ---
+    # 2026-08-04: nuevo mercado, Fase 3 del plan de expansion de deportes,
+    # SHADOW ONLY -- no colocar apuestas reales. Elo entrenado via API oficial
+    # de EuroLeague (api-live.euroleague.net), sin validacion en cantera
+    # todavia. NO promover a live sin pasar el mismo checklist que
+    # WNBA/MMA/NFL/sets_under (20+ picks, WR>=umbral). Cloudbet solo tiene
+    # mercado de outrights ahora (temporada oct-mayo, pausa en agosto) -- el
+    # scan simplemente no encuentra mercado de partido todavia, no rompe nada.
+    try:
+        from oraculo_euroleague import train_euroleague_elo, scan_euroleague
+        _el_elo = train_euroleague_elo()
+        if _el_elo and len(_el_elo.ratings) >= 15:
+            _el_picks = scan_euroleague(api, state, _el_elo, shadow=True)
+            if _el_picks:
+                log.info('[EUROLEAGUE] %d picks (SHADOW):', len(_el_picks))
+                for _ep in _el_picks:
+                    log.info('  [EUROLEAGUE] %s | %s | edge=%.1f%% conf=%.0f%% @%.3f',
+                             _ep['match'][:35], _ep['label'], _ep['edge']*100,
+                             _ep['model_prob']*100, _ep['price'])
+                if _SIBILA_ENABLED:
+                    for _ep in _el_picks:
+                        _ep['market_type'] = 'euroleague_ml'
+                        _ep['_shadow_only'] = True
+                        _sibila_record(_ep)
+                # NO picks.extend() -- shadow only, nunca se coloca apuesta real
+    except Exception as e:
+        log.debug('Euroleague scan error: %s', e)
+
     # --- NHL SCANNING ---
     # NHL regular season Oct-Apr. Uses hockey.1x2 market. Shadow=True until 40+ picks validated.
     _nhl_active = False
