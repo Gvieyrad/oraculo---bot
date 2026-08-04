@@ -4772,7 +4772,7 @@ def send_whatsapp(msg):
         plain = msg.replace("*", "")
         _wq.post(
             "http://127.0.0.1:3001/send",
-            json={"chatId": "120363427170639397@g.us", "message": "[Oraculo] " + plain},
+            json={"chatId": "120363428643034450@g.us", "message": "[Rock] " + plain},
             timeout=5)
     except Exception:
         pass
