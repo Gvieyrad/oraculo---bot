@@ -6387,18 +6387,16 @@ def run_cycle(dry_run=False):
         tennis_picks = [p for p in tennis_picks
                         if p.get('market_type') not in ('tennis_exact_sets',
                                                         'tennis_winner_and_total')  # w+total: 0W/1L, complex market
-                        # sets_under: LIVE 2026-07-06 (ported from oraculo_v2, promoted there at
-                        # cantera grass/hard WR=65% n=31). Terra's own sets_under has 0 resolved
-                        # picks (75 pending) -- this inherits Oraculo's validation, not Terra's own.
-                        # Same filter as the shadow record (surface!=clay, edge>=0.10, prob>=0.55)
-                        # clay stays BLOCKED — WR=9.1% (11 RG picks all LOSS) on the Oraculo backtest
-                        # 2026-07-31: Challenger unblocked -- TennisExplorer fallback resolved
-                        # 99 historical picks (WR=60%, matches the rest of sets_under). See
-                        # 'sets_under Challenger' entry in cantera_status.py for tracking.
-                        and not (p.get('market_type') == 'sets_under'
-                                 and (p.get('surface', 'hard') == 'clay'
-                                      or float(p.get('edge', 0) or 0) < 0.10
-                                      or float(p.get('model_prob', 0) or 0) < 0.55))
+                        # sets_under: REVERTED to shadow-only 2026-08-05 -- the n=31/WR=65%
+                        # that justified going live turned out to be a favorable streak inside
+                        # a market with negative EV at scale: real ROI -10.0%% over n=241 resolved
+                        # (jun -21.5%%, jul -4.9%%, ago -15.2%%), never solidly profitable. Grand
+                        # Slam grass in particular: WR=41.2%% ROI=-40.1%% (n=34). CLV stays positive
+                        # (+0.77%%) suggesting market variance rather than bad calibration -- but
+                        # realized results are negative regardless, doesn't justify real money.
+                        # Back to full shadow-only until recalibrated. See 'sets_under' /
+                        # 'sets_under Challenger' entries in cantera_status.py for tracking.
+                        and not (p.get('market_type') == 'sets_under')
                         # tennis_team_win_set: edge>=10% AND odds 1.40-1.90
                         # EXCLUIR 0.15-0.18: valle de la muerte WR=42.9% ROI=-34% n=7 (2026-06-02)
                         # 0.12-0.15 WR=75% y 0.18+ WR=75% son buenos; 0.15-0.18 es anomalia del modelo
