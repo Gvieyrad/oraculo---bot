@@ -66,9 +66,9 @@ SPORT_KELLY = {             # Per-sport Kelly fractions
     'soccer':       0.20,
     'soccer_under': 0.25,  # 2026-05-22: U2.5 +25.5% ROI, U1.5 +47.3% -> boost Kelly
 }
-MIN_STAKE = 5.00            # 2026-07-20: subido de 4 a 5 a pedido, ultimos 30d 34W-16L WR=68%
-MAX_STAKE_ABS = 9.0         # 2026-07-20: subido de 7 a 9 a pedido
-CIRCUIT_BREAKER = 10.0      # Stop if bankroll < $10
+MIN_STAKE = 0.50            # 2026-08-04: Rock bankroll=$10, stake conservador 5% a pedido
+MAX_STAKE_ABS = 1.00        # 2026-08-04: Rock bankroll=$10, tope proporcional
+CIRCUIT_BREAKER = 3.0       # 2026-08-04: Rock bankroll=$10 -- 10.0 original hubiera frenado tras la primera perdida (bankroll=umbral del breaker). Bajado a 30% del deposito.
 LOSS_STREAK_LIMIT = 5       # Reduce stake after 5 consecutive losses
 LOSS_STREAK_FACTOR = 0.50   # Reduce to 50%
 MAX_BETS_PER_SCAN = 8       # Max bets placed per scan cycle
@@ -166,9 +166,9 @@ WC_1X2_XG_RATIO = 1.75
 WC_1X2_MIN_PROB = 0.70
 CB_BASE = 'https://sports-api.cloudbet.com'
 # Initial deposits (known constants for bankroll reconciliation)
-INITIAL_DEPOSIT = 57.03        # Total initial deposit (USDC + USDT)
-INITIAL_DEPOSIT_USDC = 34.56   # 57.03 x 39.98/65.98 -- proportional split
-INITIAL_DEPOSIT_USDT = 22.47   # 57.03 x 26.00/65.98 -- proportional split
+INITIAL_DEPOSIT = 10.0         # 2026-08-04: Rock -- deposito real confirmado 10 USDC
+INITIAL_DEPOSIT_USDC = 10.0    # 2026-08-04: Rock -- 100% USDC
+INITIAL_DEPOSIT_USDT = 0.0     # 2026-08-04: Rock -- sin USDT
 
 # Markets (V3: no BTTS)
 LEAGUE_MARKETS = {
