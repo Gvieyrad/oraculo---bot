@@ -156,15 +156,14 @@ CANTERA = [
         'name': 'sets_under grass/hard',
         'query': "market_type='sets_under' AND COALESCE(surface,'') != 'clay'",
         'threshold': 20,
-        'live': True,  # 2026-07-05: promovida a vivo (Challenger sigue bloqueado, ver filtro en oraculo_runner_auto.py)
-        'note': 'Solo grass/hard (CLAY = desastre confirmado 0/10; Challenger tambien bloqueado). LIVE desde 2026-07-05.',
+        'note': '2026-08-05: REVERTIDO a shadow-only -- ROI real -10.0%% sobre n=241 (jun -21.5%%, jul -4.9%%, ago -15.2%%), el n=31/WR=65%% que promovio a vivo el 2026-07-05 fue racha favorable en mercado de EV negativo de fondo. Grand Slam grass: WR=41.2%% ROI=-40.1%% (n=34). No reactivar sin re-calibrar.',
         'days': 90,
     },
     {
         'name': 'sets_under Challenger',
         'query': "market_type='sets_under' AND league LIKE '%challenger%'",
         'threshold': 20,
-        'note': '2026-07-31: TennisExplorer fallback destrabo la resolucion (105->6 sin resolver). Bloqueado en vivo hasta juntar 20+ picks limpios.',
+        'note': '2026-07-31: TennisExplorer fallback destrabo la resolucion (105->6 sin resolver). 2026-08-05: sets_under completo (incluye Challenger) revertido a shadow-only por ROI negativo a escala -- ver entrada sets_under grass/hard.',
         'days': 90,
     },
     {
