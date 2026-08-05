@@ -3994,8 +3994,8 @@ def place_bets(api, state, picks, parlays, dry_run=False):
                 f"🎰 Parlay ✅ ({par['n_legs']} picks)\n"
                 f"{par['label'][:60]}\n"
                 f"💰 Odds: {par['combined_odds']:.2f} | Edge: +{par['edge']*100:.1f}%\n"
-                f"💵 Apostado: ${stake:.2f} | Ganancia est: +${stake*(par['combined_odds']-1):.2f}\n"
-                f"📊 Dia: {'+' if state['daily_pnl'] >= 0 else '-'}${abs(state['daily_pnl']):.2f}"
+                f"💵 Staked: ${stake:.2f} | Est. profit: +${stake*(par['combined_odds']-1):.2f}\n"
+                f"📊 Day: {'+' if state['daily_pnl'] >= 0 else '-'}${abs(state['daily_pnl']):.2f}"
             )
         time.sleep(2.0)  # Respect rate limit
 
@@ -4321,8 +4321,8 @@ def check_results(api, state):
                 f"{_tg_emoji} {result}\n"
                 f"{_tg_match}\n"
                 f"📌 {_tg_label}{_tg_prob_str}\n"
-                f"💰 Resultado: {'+' if _tg_pnl >= 0 else '-'}${abs(_tg_pnl):.2f}\n"
-                f"📊 Dia: {'+' if state['daily_pnl'] >= 0 else '-'}${abs(state['daily_pnl']):.2f}"
+                f"💰 Result: {'+' if _tg_pnl >= 0 else '-'}${abs(_tg_pnl):.2f}\n"
+                f"📊 Day: {'+' if state['daily_pnl'] >= 0 else '-'}${abs(state['daily_pnl']):.2f}"
             )
         except Exception as _tg_err:
             log.debug('Telegram settlement notification failed: %s', _tg_err)
@@ -4752,8 +4752,8 @@ def send_telegram(msg):
 def _wa_bet_msg(p, stake, daily_pnl=None):
     """Build WA notification card — one field per line, matches reference format."""
     sport = p.get('sport', 'soccer')
-    sport_icons = {'soccer': '⚽ Futbol', 'tennis': '🎾 Tennis', 'baseball': '⚾ Beisbol'}
-    hdr = '🏆 WC' if p.get('_wc_phase_c') else sport_icons.get(sport, '🎰 Apuesta')
+    sport_icons = {'soccer': '⚽ Soccer', 'tennis': '🎾 Tennis', 'baseball': '⚾ Baseball'}
+    hdr = '🏆 WC' if p.get('_wc_phase_c') else sport_icons.get(sport, '🎰 Bet')
     league = p.get('league', '')
     # date from cutoff_time
     ct = p.get('cutoff_time', '')
@@ -4784,12 +4784,12 @@ def _wa_bet_msg(p, stake, daily_pnl=None):
         f'💰 Odds: {odds:.2f} (Cloudbet)',
         f'📈 Edge: +{edge:.2f}%',
         f'🎯 Conf: {conf:.1f}%',
-        f'💵 Apostado: ${stake:.2f}',
-        f'📊 Ganancia est: +${ev:.2f} (retorno: ${stake+ev:.2f})',
+        f'💵 Staked: ${stake:.2f}',
+        f'📊 Est. profit: +${ev:.2f} (return: ${stake+ev:.2f})',
     ]
     if daily_pnl is not None:
         _ds = '+' if daily_pnl >= 0 else '-'
-        lines.append(f'📊 Dia: {_ds}${abs(daily_pnl):.2f}')
+        lines.append(f'📊 Day: {_ds}${abs(daily_pnl):.2f}')
     return '\n'.join(lines)
 
 def send_whatsapp(msg):
@@ -4820,7 +4820,7 @@ def check_alerts(state):
     cb_was = state.get('_cb_active', False)
     if cb_now and not cb_was:
         send_telegram(f'CIRCUIT BREAKER: Bankroll ${state["bankroll"]:.2f} < ${CIRCUIT_BREAKER:.2f}. Betting STOPPED.')
-        send_whatsapp(f'🚨 CIRCUIT BREAKER: BK ${state["bankroll"]:.2f} — apuestas PAUSADAS')
+        send_whatsapp(f'🚨 CIRCUIT BREAKER: BK ${state["bankroll"]:.2f} — betting PAUSED')
         state['_cb_active'] = True
     elif not cb_now and cb_was:
         send_telegram(f'RECOVERED: Bankroll ${state["bankroll"]:.2f} >= ${CIRCUIT_BREAKER:.2f}. Betting RESUMED.')
@@ -4845,9 +4845,9 @@ def check_alerts(state):
                           f'Record: {wins}W/{losses}L\n'
                           f'Active: {len(state.get("active_bets", []))} bets')
             send_whatsapp(
-                '📊 Oraculo resumen del dia\n'
+                '📊 Rock daily summary\n'
                 + f'P&L: ${yesterday_pnl:+.2f} | BK: ${state["bankroll"]:.2f}\n'
-                + f'Record: {wins}W/{losses}L | Pendientes: {len(state.get("active_bets", []))}'
+                + f'Record: {wins}W/{losses}L | Pending: {len(state.get("active_bets", []))}'
             )
 
 # ---------------------------------------------------------------------------
@@ -5855,8 +5855,8 @@ def process_manual_bets(api, state):
                 f'{match_name[:50]}\n'
                 f'📌 {pick}\n'
                 f'💰 Odds: {price:.2f}\n'
-                f'💵 Apostado: ${stake:.2f} | Ganancia est: +${stake*(price-1):.2f}\n'
-                f'📊 Dia: {"+" if state["daily_pnl"] >= 0 else "-"}${abs(state["daily_pnl"]):.2f}'
+                f'💵 Staked: ${stake:.2f} | Est. profit: +${stake*(price-1):.2f}\n'
+                f'📊 Day: {"+" if state["daily_pnl"] >= 0 else "-"}${abs(state["daily_pnl"]):.2f}'
             )
             processed.append({**bet, 'status': 'PLACED', 'bet_id': bet_id,
                             'price': price, 'ts': datetime.now().isoformat()})
@@ -5943,8 +5943,8 @@ def process_manual_bets(api, state):
                 send_whatsapp(
                     f'🎰 Parlay Manual ✅\n'
                     f'{label[:60]}\n'
-                    f'💵 Apostado: ${stake:.2f}\n'
-                    f'📊 Dia: {"+" if state["daily_pnl"] >= 0 else "-"}${abs(state["daily_pnl"]):.2f}'
+                    f'💵 Staked: ${stake:.2f}\n'
+                    f'📊 Day: {"+" if state["daily_pnl"] >= 0 else "-"}${abs(state["daily_pnl"]):.2f}'
                 )
                 placed += 1
             else:
@@ -6285,13 +6285,13 @@ def _health_check(state):
                     _real_bc = _avail_bc + _pend_bc
                     _bk_bc = float(state.get('bankroll', 0) or 0)
                     if _real_bc > 0 and abs(_bk_bc - _real_bc) / _real_bc > 0.05:
-                        issues.append('Bankroll desfasado: bot $%.2f vs real $%.2f (disp $%.2f + pend $%.2f) -- retiro/deposito? reconciliar' % (_bk_bc, _real_bc, _avail_bc, _pend_bc))
+                        issues.append('Bankroll mismatch: bot $%.2f vs real $%.2f (avail $%.2f + pend $%.2f) -- withdrawal/deposit? reconcile' % (_bk_bc, _real_bc, _avail_bc, _pend_bc))
         except Exception as _bce:
             log.debug('balance reconcile error: %s', _bce)
         if issues:
             _today = datetime.now().strftime('%Y-%m-%d')
             if state.get('_last_health_alert') != _today:
-                send_whatsapp('🚨 Oraculo HEALTH ALERT:' + chr(10) + '- ' + (chr(10)+'- ').join(issues))
+                send_whatsapp('🚨 Rock HEALTH ALERT:' + chr(10) + '- ' + (chr(10)+'- ').join(issues))
                 state['_last_health_alert'] = _today
             for _i in issues:
                 log.warning('[HEALTH] %s', _i)
