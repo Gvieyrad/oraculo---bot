@@ -73,8 +73,10 @@ LOSS_STREAK_LIMIT = 5       # Reduce stake after 5 consecutive losses
 LOSS_STREAK_FACTOR = 0.50   # Reduce to 50%
 MAX_BETS_PER_SCAN = 8       # Max bets placed per scan cycle
 MAX_PER_MATCH = 1           # Max 1 bet per match (avoid correlated exposure)
-MAX_EXPOSURE_PER_MATCH = 0.10  # Max 10% of bankroll on a single match
-MAX_EXPOSURE_PER_EVENT = 0.05  # Max 5% of bankroll per event_id (cross-cycle)
+MAX_EXPOSURE_PER_MATCH = 0.20  # 2026-08-04: Rock -- subido de 0.10 a 0.20. Con MIN_STAKE=0.80
+                                # y bankroll=$10, el tope viejo (5%=$0.50 por evento, 10%=$1.00 por match)
+                                # bloqueaba TODAS las apuestas -- $0.80 ya superaba $0.50 antes de intentar.
+MAX_EXPOSURE_PER_EVENT = 0.20  # 2026-08-04: Rock -- subido de 0.05 a 0.20 (mismo motivo).
 MAX_TOTAL_EXPOSURE = 0.80     # 2026-08-04: Rock -- subido a 80% a pedido, stakes chicos ($0.50) mitigan el riesgo absoluto.
 MARKET_TYPE_EXPOSURE_CAP = {
     'sets_under': 105.0,  # 2026-08-03: igualado al tope general a pedido -- MAX_TOTAL_EXPOSURE=50% ya es la restriccion real (bankroll ~$213 -> ~$107), este cap especifico deja de ser el limitante
