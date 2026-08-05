@@ -66,7 +66,7 @@ SPORT_KELLY = {             # Per-sport Kelly fractions
     'soccer':       0.20,
     'soccer_under': 0.25,  # 2026-05-22: U2.5 +25.5% ROI, U1.5 +47.3% -> boost Kelly
 }
-MIN_STAKE = 0.50            # 2026-08-04: Rock bankroll=$10, stake conservador 5% a pedido
+MIN_STAKE = 0.75            # 2026-08-04: Rock bankroll=$10, subido de 0.50 a pedido
 MAX_STAKE_ABS = 1.00        # 2026-08-04: Rock bankroll=$10, tope proporcional
 CIRCUIT_BREAKER = 3.0       # 2026-08-04: Rock bankroll=$10 -- 10.0 original hubiera frenado tras la primera perdida (bankroll=umbral del breaker). Bajado a 30% del deposito.
 LOSS_STREAK_LIMIT = 5       # Reduce stake after 5 consecutive losses
