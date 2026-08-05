@@ -66,7 +66,10 @@ SPORT_KELLY = {             # Per-sport Kelly fractions
     'soccer':       0.20,
     'soccer_under': 0.25,  # 2026-05-22: U2.5 +25.5% ROI, U1.5 +47.3% -> boost Kelly
 }
-MIN_STAKE = 0.80            # 2026-08-04: Rock bankroll=$10, subido de 0.75 a pedido
+MIN_STAKE = 0.30            # 2026-08-04: Rock -- bajado de 0.80 a 0.30. El stake fijo de 0.80
+                            # bloqueaba TODAS las apuestas: PortfolioKelly calculaba stakes de
+                            # $0.31-0.63 para estos edges/bankroll, por debajo del piso, asi que
+                            # todo se descartaba como 'stake below MIN_STAKE'.
 MAX_STAKE_ABS = 1.00        # 2026-08-04: Rock bankroll=$10, tope proporcional
 CIRCUIT_BREAKER = 3.0       # 2026-08-04: Rock bankroll=$10 -- 10.0 original hubiera frenado tras la primera perdida (bankroll=umbral del breaker). Bajado a 30% del deposito.
 LOSS_STREAK_LIMIT = 5       # Reduce stake after 5 consecutive losses
