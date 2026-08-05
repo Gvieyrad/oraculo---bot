@@ -82,7 +82,7 @@ CANTERA = [
     },
     {
         'name': 'Cricket T20 Vitality Blast (Inglaterra)',
-        'query': "market_type='cricket_t20_ntb'",
+        'query': "market_type='cricket_t20_blast'",
         'threshold': 20,
         'note': '2026-08-04: Fase 4b expansion deportes. 18 condados ingleses.',
         'days': 180,
