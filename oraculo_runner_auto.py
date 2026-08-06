@@ -66,8 +66,8 @@ SPORT_KELLY = {             # Per-sport Kelly fractions
     'soccer':       0.20,
     'soccer_under': 0.25,  # 2026-05-22: U2.5 +25.5% ROI, U1.5 +47.3% -> boost Kelly
 }
-MIN_STAKE = 5.00            # 2026-07-20: subido de 4 a 5 a pedido, ultimos 30d 34W-16L WR=68%
-MAX_STAKE_ABS = 9.0         # 2026-07-20: subido de 7 a 9 a pedido
+MIN_STAKE = 10.00           # 2026-08-05: subido de 5 a 10 a pedido
+MAX_STAKE_ABS = 15.0        # 2026-08-05: subido de 9 a 15 a pedido
 CIRCUIT_BREAKER = 10.0      # Stop if bankroll < $10
 LOSS_STREAK_LIMIT = 5       # Reduce stake after 5 consecutive losses
 LOSS_STREAK_FACTOR = 0.50   # Reduce to 50%
@@ -6811,7 +6811,7 @@ def run_cycle(dry_run=False):
                             'sport': 'rugby', 'market_type': _rmt,
                         }
                         if _rlg == 'nrl':
-                            _rp['_max_stake'] = 1.00
+                            _rp['_max_stake'] = 3.00  # 2026-08-05: Chris -- subido de 1 a 3 a pedido
                             _sibila_record(_rp)
                             rugby_picks.append(_rp)
                         else:

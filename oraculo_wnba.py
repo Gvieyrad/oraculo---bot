@@ -326,7 +326,7 @@ def scan_wnba(api, state, elo: WNBAElo = None, dry_run: bool = False, shadow: bo
                 'confidence':            round(prob, 4),
                 'edge':                  edge,
                 'shadow':                shadow,
-                '_max_stake':            1.00,
+                '_max_stake':            3.00,  # 2026-08-05: Chris -- subido de 1 a 3 a pedido
             })
 
     log.info('WNBA: %d value picks (%s)', len(picks), 'SHADOW' if shadow else 'LIVE')
