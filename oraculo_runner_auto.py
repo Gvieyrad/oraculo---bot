@@ -210,7 +210,7 @@ CB_COMPS = {
     'DED': 'soccer-netherlands-eredivisie',
     'PPL': 'soccer-portugal-primeira-liga',
     'ELC': 'soccer-england-championship',
-    'MLS': 'soccer-usa-mls',
+    'MLS': 'soccer-usa-major-league-soccer',  # 2026-08-05 fix: key equivocado (soccer-usa-mls no existe en Cloudbet) -- 0 picks desde siempre, no por falta de temporada. 36 eventos activos confirmados.
     'LMX': 'soccer-mexico-t90c7-liga-mx-apertura',
     'ARG': 'soccer-argentina-superliga',
     'BRA': 'soccer-brazil-brasileiro-serie-a',
