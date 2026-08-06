@@ -3753,8 +3753,13 @@ def place_bets(api, state, picks, parlays, dry_run=False):
         # menor a MIN_STAKE, no un calculo de Kelly quedandose corto.
         _has_own_cap = p.get('_max_stake') and float(p['_max_stake']) < MIN_STAKE
         if 0 < stake < MIN_STAKE and not p.get('_wc_phase_c') and not _has_own_cap:
-            log.info('  [SKIP] PortfolioKelly stake $%.2f below MIN_STAKE $%.2f: %s', stake, MIN_STAKE, p.get('match','')[:35])
-            continue
+            # 2026-08-05: Rock -- a pedido, en vez de descartar la apuesta cuando
+            # Kelly calcula menos del piso, se fuerza el stake al piso ($0.50).
+            # OJO: esto apuesta MAS de lo que Kelly recomienda para el edge real
+            # de estos picks (edges bajos, 5-15%) -- mayor riesgo relativo que
+            # el criterio de Kelly puro, a cambio de no perderse estas senales.
+            log.info('  [KELLY-FLOOR] stake $%.2f -> $%.2f (piso minimo): %s', stake, MIN_STAKE, p.get('match','')[:35])
+            stake = MIN_STAKE
 
         if dry_run:
             log.info('  [DRY] %s | %s @%.3f | $%.2f | edge +%.1f%%',
