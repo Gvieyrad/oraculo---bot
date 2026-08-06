@@ -212,7 +212,7 @@ CB_COMPS = {
     'DED': 'soccer-netherlands-eredivisie',
     'PPL': 'soccer-portugal-primeira-liga',
     'ELC': 'soccer-england-championship',
-    'MLS': 'soccer-usa-mls',
+    'MLS': 'soccer-usa-major-league-soccer',  # 2026-08-05 fix: key equivocado (soccer-usa-mls no existe en Cloudbet) -- mismo fix aplicado en Oraculo/Terra/Chris.
     'LMX': 'soccer-mexico-t90c7-liga-mx-apertura',
     'ARG': 'soccer-argentina-superliga',
     'BRA': 'soccer-brazil-brasileiro-serie-a',
@@ -6508,16 +6508,12 @@ def run_cycle(dry_run=False):
         tennis_picks = [p for p in tennis_picks
                         if p.get('market_type') not in ('tennis_exact_sets',
                                                         'tennis_winner_and_total')  # w+total: 0W/1L, complex market
-                        # sets_under: LIVE 2026-07-05 — cantera grass/hard paso umbral (WR=65% n=31, >=60% en 20+)
-                        # Mismo filtro que el shadow record (surface!=clay, edge>=0.10, prob>=0.55)
-                        # clay sigue BLOQUEADO — WR=9.1% (11 RG picks all LOSS)
-                        # 2026-07-31: Challenger desbloqueado -- TennisExplorer fallback resolvio
-                        # 99 picks historicos (WR=60%, iguala al resto de sets_under). Ver cantera
-                        # 'sets_under Challenger' en cantera_status.py para seguimiento.
-                        and not (p.get('market_type') == 'sets_under'
-                                 and (p.get('surface', 'hard') == 'clay'
-                                      or float(p.get('edge', 0) or 0) < 0.10
-                                      or float(p.get('model_prob', 0) or 0) < 0.55))
+                        # sets_under: REVERTIDO a shadow-only 2026-08-05 -- ROI real -10.0%% sobre
+                        # n=241 resueltos (jun -21.5%%, jul -4.9%%, ago -15.2%%), el n=31/WR=65%% que
+                        # promovio a vivo el 2026-07-05 fue racha favorable en mercado de EV negativo
+                        # de fondo. Grand Slam grass: WR=41.2%% ROI=-40.1%% (n=34). Mismo revert ya
+                        # aplicado en Oraculo/Terra, Rock estaba en rama separada y no lo tenia.
+                        and not (p.get('market_type') == 'sets_under')
                         # tennis_team_win_set: edge>=10% AND odds 1.40-1.90
                         # EXCLUIR 0.15-0.18: valle de la muerte WR=42.9% ROI=-34% n=7 (2026-06-02)
                         # 0.12-0.15 WR=75% y 0.18+ WR=75% son buenos; 0.15-0.18 es anomalia del modelo
